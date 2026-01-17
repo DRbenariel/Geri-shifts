@@ -516,9 +516,13 @@ def run_smart_scheduling(year, month, only_weekends=False):
         fri_worker_pnimia = next((s['employee'] for s in new_schedule if s['date'] == fri_str and s['dept'] == 'פנימית גריאטרית'), None)
         sat_worker_pnimia = next((s['employee'] for s in new_schedule if s['date'] == sat_str and s['dept'] == 'פנימית גריאטרית'), None)
         
-        if fri_worker_pnimia and fri_worker_pnimia != '---':
+        # בדיקה אם כבר יש שיבוץ (למשל ידני)
+        has_pnimia_1 = any(s for s in new_schedule if s['date'] == fri_str and s['dept'] == 'שישי בוקר - פנימית (1)')
+        has_pnimia_2 = any(s for s in new_schedule if s['date'] == fri_str and s['dept'] == 'שישי בוקר - פנימית (2)')
+
+        if not has_pnimia_1 and fri_worker_pnimia and fri_worker_pnimia != '---':
                 new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)', 'employee': fri_worker_pnimia, 'is_manual': False, 'empty_reason': 'נגזר אוטומטית משישי'})
-        if sat_worker_pnimia and sat_worker_pnimia != '---':
+        if not has_pnimia_2 and sat_worker_pnimia and sat_worker_pnimia != '---':
                 new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)', 'employee': sat_worker_pnimia, 'is_manual': False, 'empty_reason': 'נגזר אוטומטית משבת'})
 
         # 2. שיקום (2 עובדים)
@@ -526,6 +530,10 @@ def run_smart_scheduling(year, month, only_weekends=False):
         sat_worker_rehab = next((s['employee'] for s in new_schedule if s['date'] == sat_str and s['dept'] == 'שיקום'), None)
         
         def handle_rehab_morning(worker_name, source_day, slot_num):
+            target_dept = f'שישי בוקר - שיקום ({slot_num})'
+            # בדיקה למניעת כפילות עם שיבוץ ידני
+            if any(s for s in new_schedule if s['date'] == fri_str and s['dept'] == target_dept): return
+
             if not worker_name or worker_name == '---': return
 
             # בדיקת סוג העובד
@@ -535,7 +543,7 @@ def run_smart_scheduling(year, month, only_weekends=False):
             
             if w_type == 'מתמחה':
                 # אם זה מתמחה - הוא עושה את הבוקר
-                new_schedule.append({'date': fri_str, 'dept': f'שישי בוקר - שיקום ({slot_num})', 'employee': worker_name, 'is_manual': False, 'empty_reason': f'נגזר אוטומטית מ{source_day}'})
+                new_schedule.append({'date': fri_str, 'dept': target_dept, 'employee': worker_name, 'is_manual': False, 'empty_reason': f'נגזר אוטומטית מ{source_day}'})
             else:
                 # אם זה תורן חוץ - מחפשים מחליף (מתמחה משיקום)
                 # קריטריונים: מחלקת שיקום, פנוי בשישי, לא עבד ברביעי/חמישי האחרונים
@@ -569,14 +577,20 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 if candidates:
                     candidates.sort(key=lambda x: x[1]) # מהקטן לגדול
                     best_candidate = candidates[0][0]
-                    new_schedule.append({'date': fri_str, 'dept': f'שישי בוקר - שיקום ({slot_num})', 'employee': best_candidate, 'is_manual': False, 'empty_reason': f'השלמה במקום {worker_name}'})
+                    new_schedule.append({'date': fri_str, 'dept': target_dept, 'employee': best_candidate, 'is_manual': False, 'empty_reason': f'השלמה במקום {worker_name}'})
                 else:
-                    new_schedule.append({'date': fri_str, 'dept': f'שישי בוקר - שיקום ({slot_num})', 'employee': '---', 'is_manual': False, 'empty_reason': 'לא נמצא מחליף לבוקר'})
+                    new_schedule.append({'date': fri_str, 'dept': target_dept, 'employee': '---', 'is_manual': False, 'empty_reason': 'לא נמצא מחליף לבוקר'})
 
         handle_rehab_morning(fri_worker_rehab, "שישי", "1")
         handle_rehab_morning(sat_worker_rehab, "שבת", "2")
 
-    st.session_state.schedule = pd.DataFrame(new_schedule)
+    # יצירת DataFrame סופי וניקוי כפילויות (הגנה הרמטית)
+    final_df = pd.DataFrame(new_schedule)
+    if not final_df.empty:
+        # אם יש כפילות של תאריך+מחלקה, משאירים את הראשון (שהוא הידני כי הוא הוסף ראשון)
+        final_df = final_df.drop_duplicates(subset=['date', 'dept'], keep='first')
+
+    st.session_state.schedule = final_df
     save_to_db("schedule", st.session_state.schedule)
 # --- 4. פונקציית ציור הלוח ---
 def draw_calendar_view(year, month, role, user_name=None):
