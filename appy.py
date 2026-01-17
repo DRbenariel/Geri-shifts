@@ -80,18 +80,18 @@ def get_db_data(worksheet_name):
         df = conn.read(worksheet=worksheet_name, ttl=0)
         return df
     except Exception as e:
-        # במקרה שהגיליון לא קיים או שגיאה אחרת (כמו Worksheet not found), נחזיר DataFrame ריק
-        return pd.DataFrame()
+        # במקרה שהגיליון לא קיים או שגיאה אחרת (כמו Worksheet not found), נחזיר DataFrame ריק אך עם העמודות הנדרשות כדי למנוע קריסה
+        return pd.DataFrame(columns=['name', 'password', 'type', 'dept', 'monthly_quota', 'weekend_quota'])
 
 def save_to_db(worksheet_name, df):
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
         # מנסה לעדכן גיליון קיים
         conn.update(worksheet=worksheet_name, data=df)
-    except Exception:
-        # אם נכשל (אולי הגיליון לא קיים), ננסה ליצור אותו ע"י כתיבה (create בדר"כ לא נתמך ישירות ב-update, אבל ברוב המקרים update יוצר אם לא קיים בספריה זו, או שנצטרך להנחות את המשתמש ליצור ידנית)
-        # בספרייה זו, update אמור לעבוד אם הגיליון קיים. אם לא - צריך ליצור אותו ידנית ב-GSheets.
-        pass
+    except Exception as e:
+        # אם נכשל, נציג שגיאה (אולי הגיליון לא קיים או בעיית הרשאות)
+        st.error(f"שגיאה בשמירה ל-Google Sheets: {e}")
+        # במקרה חירום ננסה ליצור? כרגע עדיף לראות את השגיאה.
 
 def init_db():
     # בדיקה האם יש נתונים בטבלת staff, אם לא - נאתחל
@@ -292,8 +292,14 @@ def run_smart_scheduling(year, month, only_weekends=False):
                             continue
                     # אם היום רביעי, בדוק אם שובץ בשבת הבאה
                     if d.weekday() == 2: # רביעי
+                        # בדיקה אם משובץ לשבת הבאה
                         if any(s for s in new_schedule if s['date'] == str(d + timedelta(days=3)) and s['employee'] == name):
                             failure_reasons.append(f"{name}: משובץ בשבת")
+                            continue
+                        # בדיקה אם משובץ לשישי הבא (כולל שישי בוקר) - לוגיקה הפוכה חדשה
+                        fri_check = str(d + timedelta(days=2))
+                        if any(s for s in new_schedule if s['date'] == fri_check and s['employee'] == name):
+                            failure_reasons.append(f"{name}: משובץ בשישי הקרוב")
                             continue
                 
                 # אילוצים
@@ -411,6 +417,78 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 
                 new_schedule.append({'date': d_str, 'dept': dept, 'employee': '---', 'is_manual': False, 'empty_reason': final_msg})
 
+    # --- לוגיקה חדשה: שיבוץ שישי בוקר (4 עובדים) ---
+    # רצים על כל ימי השישי בחודש
+    fridays = [d for d in all_dates if d.weekday() == 4]
+    for fri_date in fridays:
+        fri_str = str(fri_date)
+        sat_date = fri_date + timedelta(days=1)
+        sat_str = str(sat_date)
+        
+        # 1. פנימית גריאטרית (2 עובדים) - מי שעושה שישי ושבת
+        fri_worker_pnimia = next((s['employee'] for s in new_schedule if s['date'] == fri_str and s['dept'] == 'פנימית גריאטרית'), None)
+        sat_worker_pnimia = next((s['employee'] for s in new_schedule if s['date'] == sat_str and s['dept'] == 'פנימית גריאטרית'), None)
+        
+        if fri_worker_pnimia and fri_worker_pnimia != '---':
+                new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית', 'employee': fri_worker_pnimia, 'is_manual': False, 'empty_reason': 'נגזר אוטומטית משישי'})
+        if sat_worker_pnimia and sat_worker_pnimia != '---':
+                new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית', 'employee': sat_worker_pnimia, 'is_manual': False, 'empty_reason': 'נגזר אוטומטית משבת'})
+
+        # 2. שיקום (2 עובדים)
+        fri_worker_rehab = next((s['employee'] for s in new_schedule if s['date'] == fri_str and s['dept'] == 'שיקום'), None)
+        sat_worker_rehab = next((s['employee'] for s in new_schedule if s['date'] == sat_str and s['dept'] == 'שיקום'), None)
+        
+        def handle_rehab_morning(worker_name, source_day):
+            if not worker_name or worker_name == '---': return
+
+            # בדיקת סוג העובד
+            w_type = None
+            if worker_name in staff_df['name'].values:
+                w_type = staff_df[staff_df['name'] == worker_name]['type'].iloc[0]
+            
+            if w_type == 'מתמחה':
+                # אם זה מתמחה - הוא עושה את הבוקר
+                new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - שיקום', 'employee': worker_name, 'is_manual': False, 'empty_reason': f'נגזר אוטומטית מ{source_day}'})
+            else:
+                # אם זה תורן חוץ - מחפשים מחליף (מתמחה משיקום)
+                # קריטריונים: מחלקת שיקום, פנוי בשישי, לא עבד ברביעי/חמישי האחרונים
+                
+                # בדיקת עבודה ברביעי/חמישי
+                wed_date = fri_date - timedelta(days=2)
+                thu_date = fri_date - timedelta(days=1)
+                
+                candidates = []
+                for _, row in staff_df.iterrows():
+                    if row['type'] == 'מתמחה' and row['dept'] == 'שיקום' and row['name'] != worker_name:
+                        emp = row['name']
+                        
+                        # האם פנוי ביום שישי (אילוץ)
+                        is_blocked = not st.session_state.requests[(st.session_state.requests['employee'] == emp) & (st.session_state.requests['date'] == fri_str)].empty
+                        if is_blocked: continue
+                        
+                        # האם עובד ברביעי או חמישי?
+                        worked_wed = any(s['employee'] == emp and s['date'] == wed_date.strftime('%Y-%m-%d') for s in new_schedule)
+                        worked_thu = any(s['employee'] == emp and s['date'] == thu_date.strftime('%Y-%m-%d') for s in new_schedule)
+                        if worked_wed or worked_thu: continue
+                        
+                        # האם כבר משובץ בשישי במקום אחר (למשל תורנות רגילה במחלקת שיקום בצד השני?)
+                        if any(s['employee'] == emp and s['date'] == fri_str for s in new_schedule): continue
+
+                        # חישוב ציון הוגנות: כמה שישי בוקר כבר יש לו?
+                        fri_morning_count = len([s for s in new_schedule if s['employee'] == emp and 'שישי בוקר' in s['dept']])
+                        candidates.append((emp, fri_morning_count))
+                
+                # מיון לפי הכמות הכי קטנה של שישי בוקר (איזון)
+                if candidates:
+                    candidates.sort(key=lambda x: x[1]) # מהקטן לגדול
+                    best_candidate = candidates[0][0]
+                    new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - שיקום', 'employee': best_candidate, 'is_manual': False, 'empty_reason': f'השלמה במקום {worker_name}'})
+                else:
+                    new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - שיקום', 'employee': '---', 'is_manual': False, 'empty_reason': 'לא נמצא מחליף לבוקר'})
+
+        handle_rehab_morning(fri_worker_rehab, "שישי")
+        handle_rehab_morning(sat_worker_rehab, "שבת")
+
     st.session_state.schedule = pd.DataFrame(new_schedule)
     save_to_db("schedule", st.session_state.schedule)
 # --- 4. פונקציית ציור הלוח ---
@@ -431,8 +509,11 @@ def draw_calendar_view(year, month, role, user_name=None):
                 day_sched = st.session_state.schedule[st.session_state.schedule['date'] == date_str]
                 
                 html = f'<div class="calendar-day {is_weekend}"><div class="day-number">{day}</div>'
-                for dept in ["שיקום", "פנימית גריאטרית"]:
+                for dept in ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום", "שישי בוקר - פנימית"]:
                     row = day_sched[day_sched['dept'] == dept]
+                    # אם מדובר בשישי בוקר ואין שורה כזו (כי זה לא יום שישי), דלג
+                    if "שישי בוקר" in dept and row.empty: continue
+                    
                     val = row['employee'].values[0] if not row.empty else "---"
                     
                     # פילטור עבור מתמחים - רואים רק את השיבוצים של עצמם
@@ -441,10 +522,11 @@ def draw_calendar_view(year, month, role, user_name=None):
                         
                     reason = row['empty_reason'].values[0] if (not row.empty and val == "---") else ""
                     
-                    css = "shikum-slot" if dept == "שיקום" else "pnimia-slot"
+                    css = "shikum-slot" if "שיקום" in dept else "pnimia-slot"
                     if val == "---": css = "empty-slot"
                     
                     label = "שיקום" if dept == "שיקום" else "פנימית"
+                    if "שישי בוקר" in dept: label = "🔊 בוקר (" + ("שיקום" if "שיקום" in dept else "פנימית") + ")"
                     html += f'<div class="slot {css}"><span class="dept-label">{label}</span> <span>{val}</span>'
                     if role == "מנהל/ת" and reason:
                         html += f'<span class="error-hint">❓ {reason}</span>'
@@ -606,14 +688,15 @@ if role == "מנהל/ת":
                         st.error("חובה להזין שם עובד.")
         # -----------------------
 
-        st.caption("שינויים בטבלה נשמרים אוטומטית")
+        st.caption("שינויים בטבלה נשמרים רק בלחיצה על כפתור השמירה")
         # שימוש ב-st.session_state ישירות כמקור הנתונים לעריכה
-        staff_editor = st.data_editor(st.session_state.staff, use_container_width=True, num_rows="dynamic")
+        staff_editor = st.data_editor(st.session_state.staff, use_container_width=True, num_rows="dynamic", key="staff_editor_widget")
         
-        # בדיקה האם היו שינויים בנתונים
-        if not staff_editor.equals(st.session_state.staff):
+        # כפתור שמירה ייעודי (Batch Save) למניעת קפיצות
+        if st.button("💾 שמור שינויים בצוות"):
             st.session_state.staff = staff_editor
             save_to_db("staff", st.session_state.staff)
+            st.success("הנתונים נשמרו בהצלחה!")
             st.rerun()
             
         st.divider()
@@ -759,11 +842,13 @@ if role == "מנהל/ת":
                 emp_sched = intern_schedule[intern_schedule['employee'] == name]
                 wed_count = len(emp_sched[emp_sched['weekday'] == 2])
                 thu_count = len(emp_sched[emp_sched['weekday'] == 3])
+                fri_morn_count = len(emp_sched[emp_sched['dept'].str.contains('שישי בוקר')])
                 
                 tracker.append({
                     'שם המתמחה': name,
                     "סה\"כ ימי ד' (מבוקש)": wed_count,
                     "סה\"כ ימי ה' (קשה)": thu_count,
+                    "שישי בוקר": fri_morn_count,
                     'ציון הוגנות (נטו)': wed_count - thu_count # חיובי = קיבל יותר טובים, שלילי = קיבל יותר קשים
                 })
             
