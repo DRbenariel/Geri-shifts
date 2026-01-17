@@ -438,15 +438,15 @@ def run_smart_scheduling(year, month, only_weekends=False):
         sat_worker_pnimia = next((s['employee'] for s in new_schedule if s['date'] == sat_str and s['dept'] == 'פנימית גריאטרית'), None)
         
         if fri_worker_pnimia and fri_worker_pnimia != '---':
-                new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית', 'employee': fri_worker_pnimia, 'is_manual': False, 'empty_reason': 'נגזר אוטומטית משישי'})
+                new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)', 'employee': fri_worker_pnimia, 'is_manual': False, 'empty_reason': 'נגזר אוטומטית משישי'})
         if sat_worker_pnimia and sat_worker_pnimia != '---':
-                new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית', 'employee': sat_worker_pnimia, 'is_manual': False, 'empty_reason': 'נגזר אוטומטית משבת'})
+                new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)', 'employee': sat_worker_pnimia, 'is_manual': False, 'empty_reason': 'נגזר אוטומטית משבת'})
 
         # 2. שיקום (2 עובדים)
         fri_worker_rehab = next((s['employee'] for s in new_schedule if s['date'] == fri_str and s['dept'] == 'שיקום'), None)
         sat_worker_rehab = next((s['employee'] for s in new_schedule if s['date'] == sat_str and s['dept'] == 'שיקום'), None)
         
-        def handle_rehab_morning(worker_name, source_day):
+        def handle_rehab_morning(worker_name, source_day, slot_num):
             if not worker_name or worker_name == '---': return
 
             # בדיקת סוג העובד
@@ -456,7 +456,7 @@ def run_smart_scheduling(year, month, only_weekends=False):
             
             if w_type == 'מתמחה':
                 # אם זה מתמחה - הוא עושה את הבוקר
-                new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - שיקום', 'employee': worker_name, 'is_manual': False, 'empty_reason': f'נגזר אוטומטית מ{source_day}'})
+                new_schedule.append({'date': fri_str, 'dept': f'שישי בוקר - שיקום ({slot_num})', 'employee': worker_name, 'is_manual': False, 'empty_reason': f'נגזר אוטומטית מ{source_day}'})
             else:
                 # אם זה תורן חוץ - מחפשים מחליף (מתמחה משיקום)
                 # קריטריונים: מחלקת שיקום, פנוי בשישי, לא עבד ברביעי/חמישי האחרונים
@@ -490,12 +490,12 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 if candidates:
                     candidates.sort(key=lambda x: x[1]) # מהקטן לגדול
                     best_candidate = candidates[0][0]
-                    new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - שיקום', 'employee': best_candidate, 'is_manual': False, 'empty_reason': f'השלמה במקום {worker_name}'})
+                    new_schedule.append({'date': fri_str, 'dept': f'שישי בוקר - שיקום ({slot_num})', 'employee': best_candidate, 'is_manual': False, 'empty_reason': f'השלמה במקום {worker_name}'})
                 else:
-                    new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - שיקום', 'employee': '---', 'is_manual': False, 'empty_reason': 'לא נמצא מחליף לבוקר'})
+                    new_schedule.append({'date': fri_str, 'dept': f'שישי בוקר - שיקום ({slot_num})', 'employee': '---', 'is_manual': False, 'empty_reason': 'לא נמצא מחליף לבוקר'})
 
-        handle_rehab_morning(fri_worker_rehab, "שישי")
-        handle_rehab_morning(sat_worker_rehab, "שבת")
+        handle_rehab_morning(fri_worker_rehab, "שישי", "1")
+        handle_rehab_morning(sat_worker_rehab, "שבת", "2")
 
     st.session_state.schedule = pd.DataFrame(new_schedule)
     save_to_db("schedule", st.session_state.schedule)
@@ -517,7 +517,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                 day_sched = st.session_state.schedule[st.session_state.schedule['date'] == date_str]
                 
                 html = f'<div class="calendar-day {is_weekend}"><div class="day-number">{day}</div>'
-                for dept in ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום", "שישי בוקר - פנימית"]:
+                for dept in ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום (1)", "שישי בוקר - שיקום (2)", "שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)"]:
                     rows = day_sched[day_sched['dept'] == dept]
                     # אם מדובר בשישי בוקר ואין שורה כזו (כי זה לא יום שישי), דלג
                     if "שישי בוקר" in dept and rows.empty: continue
@@ -602,7 +602,7 @@ if role == "מנהל/ת":
                      st.session_state.manual_date = default_date
 
             d_man = c_date.date_input("תאריך:", key="manual_date")
-            dept_man = c_dept.selectbox("מחלקה:", ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום", "שישי בוקר - פנימית (נגזר)"], key="manual_dept")
+            dept_man = c_dept.selectbox("מחלקה:", ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום (1)", "שישי בוקר - שיקום (2)", "שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)"], key="manual_dept")
             
             # סינון רשימת העובדים - הצגת מי שמשובץ כרגע למעלה או סימון מיוחד? לא קריטי כרגע.
             emp_man = c_emp.selectbox("עובד:", st.session_state.staff['name'].tolist(), key="manual_emp")
