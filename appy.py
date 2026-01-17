@@ -113,12 +113,12 @@ def init_db():
             
             data = []
             for n, d in interns:
-                data.append({'name': n, 'type': 'מתמחה', 'dept': d, 'monthly_quota': 6, 'weekend_quota': 1, 'password': def_pass})
+                data.append({'name': n, 'type': 'מתמחה', 'dept': d, 'monthly_quota': 4, 'weekend_quota': 1, 'password': def_pass})
             
             # תורני חוץ
             externals = ['אחמד אלעמור', 'סגא עסלי', 'הייתם חגיר']
             for n in externals:
-                data.append({'name': n, 'type': 'תורן חוץ', 'dept': 'שיקום', 'monthly_quota': 8, 'weekend_quota': 4, 'password': def_pass})
+                data.append({'name': n, 'type': 'תורן חוץ', 'dept': 'שיקום', 'monthly_quota': 8, 'weekend_quota': 8, 'password': def_pass})
             
             # מנהל
             data.append({'name': 'admin', 'type': 'מנהל/ת', 'dept': 'הנהלה', 'monthly_quota': 0, 'weekend_quota': 0, 'password': def_pass})
