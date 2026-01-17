@@ -567,6 +567,44 @@ if role == "מנהל/ת":
 
         draw_calendar_view(2026, sel_month, "מנהל/ת")
     with t2:
+        st.subheader("ניהול צוות עובדים")
+        
+        # --- טופס הוספת עובד ---
+        with st.expander("➕ הוספת עובד חדש", expanded=False):
+            with st.form("add_emp_form"):
+                col_new1, col_new2 = st.columns(2)
+                with col_new1:
+                    new_name = st.text_input("שם מלא:")
+                    new_type = st.selectbox("תפקיד:", ["מתמחה", "תורן חוץ", "מנהל/ת"])
+                with col_new2:
+                    new_dept = st.selectbox("מחלקה:", ["שיקום", "פנימית גריאטרית", "הנהלה"])
+                    new_quota = st.number_input("מכסה חודשית:", min_value=0, value=6)
+                    new_weekend_quota = st.number_input("מכסת סופ\"ש:", min_value=0, value=1)
+                
+                if st.form_submit_button("הוסף עובד"):
+                    if new_name.strip():
+                        if new_name not in st.session_state.staff['name'].values:
+                            # סיסמת ברירת מחדל מוצפנת
+                            def_pass_hash = hashlib.sha256("1234".encode()).hexdigest()
+                            
+                            new_emp_row = pd.DataFrame([{
+                                'name': new_name,
+                                'type': new_type,
+                                'dept': new_dept,
+                                'monthly_quota': new_quota,
+                                'weekend_quota': new_weekend_quota,
+                                'password': def_pass_hash
+                            }])
+                            
+                            st.session_state.staff = pd.concat([st.session_state.staff, new_emp_row], ignore_index=True)
+                            save_to_db("staff", st.session_state.staff)
+                            st.success(f"העובד/ת {new_name} נוספ/ה בהצלחה! (סיסמה: 1234)")
+                            st.rerun()
+                        else:
+                            st.error("שגיאה: שם העובד כבר קיים במערכת.")
+                    else:
+                        st.error("חובה להזין שם עובד.")
+        # -----------------------
 
         st.caption("שינויים בטבלה נשמרים אוטומטית")
         # שימוש ב-st.session_state ישירות כמקור הנתונים לעריכה
