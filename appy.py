@@ -507,27 +507,29 @@ def draw_calendar_view(year, month, role, user_name=None):
                 
                 html = f'<div class="calendar-day {is_weekend}"><div class="day-number">{day}</div>'
                 for dept in ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום", "שישי בוקר - פנימית"]:
-                    row = day_sched[day_sched['dept'] == dept]
+                    rows = day_sched[day_sched['dept'] == dept]
                     # אם מדובר בשישי בוקר ואין שורה כזו (כי זה לא יום שישי), דלג
-                    if "שישי בוקר" in dept and row.empty: continue
+                    if "שישי בוקר" in dept and rows.empty: continue
                     
-                    val = row['employee'].values[0] if not row.empty else "---"
-                    
-                    # פילטור עבור מתמחים - רואים רק את השיבוצים של עצמם
-                    if role != "מנהל/ת" and val != user_name and val != "---":
-                        continue
+                    # שינוי: ריצה על כל השורות שנמצאו (כדי לתמוך בכפילויות, למשל 2 תורני בוקר)
+                    for _, row in rows.iterrows():
+                        val = row['employee']
+                        reason = row['empty_reason'] if val == "---" else ""
                         
-                    reason = row['empty_reason'].values[0] if (not row.empty and val == "---") else ""
-                    
-                    css = "shikum-slot" if "שיקום" in dept else "pnimia-slot"
-                    if val == "---": css = "empty-slot"
-                    
-                    label = "שיקום" if dept == "שיקום" else "פנימית"
-                    if "שישי בוקר" in dept: label = "🔊 בוקר (" + ("שיקום" if "שיקום" in dept else "פנימית") + ")"
-                    html += f'<div class="slot {css}"><span class="dept-label">{label}</span> <span>{val}</span>'
-                    if role == "מנהל/ת" and reason:
-                        html += f'<span class="error-hint">❓ {reason}</span>'
-                    html += '</div>'
+                        # פילטור עבור מתמחים - רואים רק את השיבוצים של עצמם
+                        if role != "מנהל/ת" and val != user_name and val != "---":
+                            continue
+                            
+                        css = "shikum-slot" if "שיקום" in dept else "pnimia-slot"
+                        if val == "---": css = "empty-slot"
+                        
+                        label = "שיקום" if dept == "שיקום" else "פנימית"
+                        if "שישי בוקר" in dept: label = "🔊 בוקר (" + ("שיקום" if "שיקום" in dept else "פנימית") + ")"
+                        
+                        html += f'<div class="slot {css}"><span class="dept-label">{label}</span> <span>{val}</span>'
+                        if role == "מנהל/ת" and reason:
+                            html += f'<span class="error-hint">❓ {reason}</span>'
+                        html += '</div>'
                 
                 # הצגת אילוצים (למנהל בלבד או לעובד על עצמו)
                 if role == "מנהל/ת":
@@ -686,13 +688,13 @@ if role == "מנהל/ת":
         # -----------------------
 
         st.caption("שינויים בטבלה נשמרים רק בלחיצה על כפתור השמירה")
-        # שימוש ב-st.session_state ישירות כמקור הנתונים לעריכה
-        # שימוש ב-st.session_state ישירות כמקור הנתונים לעריכה
-        # התיקון: הסרת ה-key כדי למנוע יצירה מחדש של הווידג'ט שגורמת לרענון
-        staff_editor = st.data_editor(st.session_state.staff, use_container_width=True, num_rows="dynamic")
         
-        # כפתור שמירה ייעודי (Batch Save) למניעת קפיצות
-        if st.button("💾 שמור שינויים בצוות"):
+        # עטיפה בטופס (Form) כדי למנוע טעינה מחדש בכל שינוי תא
+        with st.form(key="staff_batch_edit_form"):
+            staff_editor = st.data_editor(st.session_state.staff, use_container_width=True, num_rows="dynamic")
+            submit_changes = st.form_submit_button("💾 שמור שינויים בצוות")
+        
+        if submit_changes:
             st.session_state.staff = staff_editor
             save_to_db("staff", st.session_state.staff)
             st.success("הנתונים נשמרו בהצלחה!")
