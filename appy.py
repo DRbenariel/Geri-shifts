@@ -758,48 +758,77 @@ if role == "מנהל/ת":
                                 for i, sugg in enumerate(st.session_state.swap_suggestions[core_key]):
                                     btn_label = f"✨ בצע: {sugg['desc']}"
                                     if st.button(btn_label, key=f"swap_btn_{core_key}_{i}"):
-                                        # ביצוע ההחלפה בפועל!
-                                        sched = st.session_state.schedule
+                                        # --- בדיקת תקינות נוספת לפני ביצוע (פותר באג של הצעות ישנות/לא תקינות) ---
+                                        # וידוא שתורן חוץ לא נכנס לפנימית גריאטרית
+                                        current_schedule = st.session_state.schedule
+                                        current_staff = st.session_state.staff
+                                        
+                                        # פונקציה לבדיקת חוקיות עובד-מחלקה
+                                        def validate_emp_dept(emp_name, dept_name):
+                                            emp_row = current_staff[current_staff['name'] == emp_name]
+                                            if not emp_row.empty:
+                                                e_type = emp_row['type'].iloc[0]
+                                                if e_type == 'תורן חוץ' and 'פנימית' in dept_name:
+                                                    return False, f"שגיאה: לא ניתן לשבץ את {emp_name} (תורן חוץ) לפנימית גריאטרית!"
+                                            return True, ""
+
+                                        # בדיקה לפי סוג ההחלפה
+                                        validation_passed = True
+                                        fail_reason = ""
                                         
                                         if sugg['type'] == 'direct_swap':
-                                            # 1. שיבוץ המחליף (B) במקום הקונפליקט (Other Dept)
-                                            # חיפוש השורה של Other Dept באותו תאריך
-                                            mask_other = (sched['date'] == sugg['target_date']) & (sched['dept'] == sugg['source_dept'])
-                                            st.session_state.schedule.loc[mask_other, 'employee'] = sugg['replacement_emp']
-                                            
-                                            # 2. שיבוץ המועמד המקורי (A) פה
-                                            mask_here = (sched['date'] == sugg['target_date']) & (sched['dept'] == row['dept'])
-                                            st.session_state.schedule.loc[mask_here, 'employee'] = sugg['conflicted_emp']
-                                            st.session_state.schedule.loc[mask_here, 'empty_reason'] = '' # ניקוי שגיאה
+                                            # נכנס ל-row['dept'] -> conflicted_emp (A)
+                                            # נכנס ל-other_dept -> replacement_emp (B)
+                                            ok1, msg1 = validate_emp_dept(sugg['conflicted_emp'], row['dept'])
+                                            if not ok1: validation_passed, fail_reason = False, msg1
+                                            ok2, msg2 = validate_emp_dept(sugg['replacement_emp'], sugg['source_dept'])
+                                            if not ok2: validation_passed, fail_reason = False, msg2
                                             
                                         elif sugg['type'] == 'move_shift':
-                                            # 1. שיבוץ המחליף (B) בתאריך הקונפליקט (עבר/אחר)
-                                            mask_conflict = (sched['date'] == sugg['conflict_date']) & (sched['dept'] == sugg['conflict_dept'])
-                                            st.session_state.schedule.loc[mask_conflict, 'employee'] = sugg['replacement_emp']
+                                            # נכנס ל-row['dept'] -> conflicted_emp (A)
+                                            # נכנס ל-conf_dept -> replacement_emp (B)
+                                            ok1, msg1 = validate_emp_dept(sugg['conflicted_emp'], row['dept'])
+                                            if not ok1: validation_passed, fail_reason = False, msg1
+                                            ok2, msg2 = validate_emp_dept(sugg['replacement_emp'], sugg['conflict_dept'])
+                                            if not ok2: validation_passed, fail_reason = False, msg2
+
+                                        if not validation_passed:
+                                            st.error(f"❌ לא ניתן לבצע את ההחלפה: {fail_reason}")
+                                            st.info("ייתכן שהנתונים השתנו מאז ההרצה האחרונה. מומלץ להריץ שיבוץ אוטומטי מחדש.")
+                                        else:
+                                            # ביצוע ההחלפה בפועל!
+                                            sched = st.session_state.schedule
                                             
-                                            # 2. שיבוץ המועמד המקורי (A) פה
-                                            mask_here = (sched['date'] == row['date']) & (sched['dept'] == row['dept'])
-                                            st.session_state.schedule.loc[mask_here, 'employee'] = sugg['conflicted_emp']
-                                            st.session_state.schedule.loc[mask_here, 'empty_reason'] = ''
-                                            
-                                        elif sugg['type'] == 'triple_swap':
-                                            # שרשור משולש: C -> B -> A -> Here
-                                            # 1. שיבוץ C במקום B (ב-origin B)
-                                            mask_b_origin = (sched['date'] == sugg['target_date']) & (sched['dept'] == sugg['dept_b_origin'])
-                                            st.session_state.schedule.loc[mask_b_origin, 'employee'] = sugg['emp_c']
-                                            
-                                            # 2. שיבוץ B במקום A (ב-origin A)
-                                            mask_a_origin = (sched['date'] == sugg['target_date']) & (sched['dept'] == sugg['dept_a_origin'])
-                                            st.session_state.schedule.loc[mask_a_origin, 'employee'] = sugg['emp_b']
-                                            
-                                            # 3. שיבוץ A פה
-                                            mask_here = (sched['date'] == sugg['target_date']) & (sched['dept'] == row['dept'])
-                                            st.session_state.schedule.loc[mask_here, 'employee'] = sugg['emp_a']
-                                            st.session_state.schedule.loc[mask_here, 'empty_reason'] = ''
-                                            
-                                        save_to_db("schedule", st.session_state.schedule)
-                                        st.success("ההחלפה בוצע בהצלחה! מרענן...")
-                                        st.rerun()
+                                            if sugg['type'] == 'direct_swap':
+                                                mask_other = (sched['date'] == sugg['target_date']) & (sched['dept'] == sugg['source_dept'])
+                                                st.session_state.schedule.loc[mask_other, 'employee'] = sugg['replacement_emp']
+                                                
+                                                mask_here = (sched['date'] == sugg['target_date']) & (sched['dept'] == row['dept'])
+                                                st.session_state.schedule.loc[mask_here, 'employee'] = sugg['conflicted_emp']
+                                                st.session_state.schedule.loc[mask_here, 'empty_reason'] = '' 
+                                                
+                                            elif sugg['type'] == 'move_shift':
+                                                mask_conflict = (sched['date'] == sugg['conflict_date']) & (sched['dept'] == sugg['conflict_dept'])
+                                                st.session_state.schedule.loc[mask_conflict, 'employee'] = sugg['replacement_emp']
+                                                
+                                                mask_here = (sched['date'] == row['date']) & (sched['dept'] == row['dept'])
+                                                st.session_state.schedule.loc[mask_here, 'employee'] = sugg['conflicted_emp']
+                                                st.session_state.schedule.loc[mask_here, 'empty_reason'] = ''
+                                                
+                                            elif sugg['type'] == 'triple_swap':
+                                                mask_b_origin = (sched['date'] == sugg['target_date']) & (sched['dept'] == sugg['dept_b_origin'])
+                                                st.session_state.schedule.loc[mask_b_origin, 'employee'] = sugg['emp_c']
+                                                
+                                                mask_a_origin = (sched['date'] == sugg['target_date']) & (sched['dept'] == sugg['dept_a_origin'])
+                                                st.session_state.schedule.loc[mask_a_origin, 'employee'] = sugg['emp_b']
+                                                
+                                                mask_here = (sched['date'] == sugg['target_date']) & (sched['dept'] == row['dept'])
+                                                st.session_state.schedule.loc[mask_here, 'employee'] = sugg['emp_a']
+                                                st.session_state.schedule.loc[mask_here, 'empty_reason'] = ''
+                                                
+                                            save_to_db("schedule", st.session_state.schedule)
+                                            st.success("ההחלפה בוצע בהצלחה! מרענן...")
+                                            st.rerun()
                         
                         if not actions_found:
                              st.caption("כדי לראות כפתורי החלפה, יש להריץ 'שיבוץ אוטומטי' מחדש.")
@@ -879,61 +908,74 @@ if role == "מנהל/ת":
                             default_dates_mgr.append(d_obj)
                     except: pass
             
-            # לוח שנה (Checkboxes) לניהול
-            # עוטפים את הגריד והכפתור בטופס כדי ללכוד את כל הצ'קבוקסים בלחיצה אחת
+            # לוח שנה (Data Editor) לניהול
+            # יצירת DataFrame לעריכה
+            days_in_month = calendar.monthrange(2026, sel_month)[1]
+            month_dates = [date(2026, sel_month, d) for d in range(1, days_in_month + 1)]
+            
+            # יצירת טבלה זמנית
+            edit_data = []
+            for d_obj in month_dates:
+                is_blocked = d_obj in default_dates_mgr
+                day_name = ["ב'", "ג'", "ד'", "ה'", "ו'", "ש'", "א'"][d_obj.weekday()] # 0=Monday
+                edit_data.append({
+                    "תאריך": d_obj,
+                    "יום": day_name,
+                    "חסום?": is_blocked
+                })
+            
+            df_edit = pd.DataFrame(edit_data)
+            
+            st.caption("סמן V בימים בהם העובד **לא יכול** לעבוד:")
             with st.form(key=f"mgr_form_{selected_emp_mgr}"):
-                cal_mgr = calendar.monthcalendar(2026, sel_month)
-                cols_mgr = st.columns(7)
-                headers_mgr = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
-                for i, h in enumerate(headers_mgr):
-                    cols_mgr[i].markdown(f"<div style='text-align:center; font-weight:bold'>{h}</div>", unsafe_allow_html=True)
+                edited_df = st.data_editor(
+                    df_edit, 
+                    column_config={
+                        "תאריך": st.column_config.DateColumn("תאריך", format="DD/MM/YYYY", disabled=True),
+                        "יום": st.column_config.TextColumn("יום", disabled=True),
+                        "חסום?": st.column_config.CheckboxColumn("חסום?", default=False)
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    height=400
+                )
                 
-                # נשתמש במילון כדי לשמור את ה-keys של הצ'קבוקסים
-                checkbox_keys = []
-                for week in cal_mgr:
-                    wk_cols = st.columns(7)
-                    for i, day_num in enumerate(week):
-                        with wk_cols[i]:
-                            if day_num != 0:
-                                d_obj = date(2026, sel_month, day_num)
-                                is_checked = d_obj in default_dates_mgr
-                                key = f"mgr_date_{selected_emp_mgr}_{sel_month}_{day_num}"
-                                st.checkbox(f"{day_num}", value=is_checked, key=key)
-                                checkbox_keys.append((d_obj, key))
-                
-                submitted = st.form_submit_button("שמור שינויים לעובד")
-                
+                submitted = st.form_submit_button("💾 שמור אילוצים לחודש זה")
+
             if submitted:
-                # איסוף הנתונים שנבחרו מתוך ה-session state ברגע השליחה
-                selected_from_mgr_grid = [d_obj for d_obj, key in checkbox_keys if st.session_state.get(key)]
+                # סינון ימים שנבחרו כחסומים
+                blocked_dates = edited_df[edited_df["חסום?"] == True]["תאריך"].tolist()
                 
-                # הסרת אילוצים ישנים לחודש זה
-                # כדי לא למחוק חודשים אחרים, נסנן
-                # (כרגע הלוגיקה הפשוטה מוחקת הכל למשתמש, נשדרג למחיקה לפי חודש אם צריך, 
-                #  אבל למען הפשטות והעקביות עם הקוד הקיים למשתמש - נניח שהמערכת מציגה חודש נבחר)
+                # המרה למחרוזות לשמירה אחידה
+                blocked_dates_str = [str(d) for d in blocked_dates]
                 
-                # כאן נמחק רק את החודש הנוכחי מה-DB עבור המשתמש? 
-                # הקוד המקורי עשה: st.session_state.requests = st.session_state.requests[st.session_state.requests['employee'] != user_name]
-                # זה מוחק את *כל* ההיסטוריה של המשתמש. נתקן זאת כאן ובקוד המקורי אם נרצה, 
-                # אבל לבקשת המשתמש נתמקד ביכולת העריכה. נשמור על הלוגיקה הקיימת (דריסה) 
-                # אבל נזהר לא לדרוס חודשים אחרים אם המשתמש בנה על זה.
-                # בוא נשדרג למחיקה ממוקדת לחודש זה.
+                # ניקוי אילוצים קיימים לחודש זה עבור העובד
+                # המרה בטוחה למחרוזת לפני הפעולה כדי למנוע את השגיאה AttributeError
+                st.session_state.requests['date'] = st.session_state.requests['date'].astype(str)
                 
-                # סינון החוצה של אילוצי העובד לחודש הנוכחי בלבד
                 current_month_prefix = f"2026-{sel_month:02d}"
                 
-                # מחיקה: נשמור את כל מה ששייך לעובדים אחרים OR (שייך לעובד הזה אבל לא חודש נוכחי)
+                # מחיקת אילוצים ישנים של העובד לחודש זה
+                # משמרים: (לא העובד הנוכחי) או (העובד הנוכחי אבל לא בחודש הזה)
                 mask_keep = ~((st.session_state.requests['employee'] == selected_emp_mgr) & 
                               (st.session_state.requests['date'].str.startswith(current_month_prefix)))
+                
                 st.session_state.requests = st.session_state.requests[mask_keep]
                 
-                # הוספה מחדש
-                if selected_from_mgr_grid:
-                    new_reqs = pd.DataFrame([{'employee': selected_emp_mgr, 'date': str(d), 'status': "אילוץ"} for d in selected_from_mgr_grid])
+                # הוספת האילוצים החדשים
+                if blocked_dates_str:
+                    new_reqs = pd.DataFrame([
+                        {'employee': selected_emp_mgr, 'date': d_str, 'status': "אילוץ"} 
+                        for d_str in blocked_dates_str
+                    ])
                     st.session_state.requests = pd.concat([st.session_state.requests, new_reqs], ignore_index=True)
                 
+                # וידוא שוב שהכל מחרוזות
+                st.session_state.requests['date'] = st.session_state.requests['date'].astype(str)
+                
                 save_to_db("requests", st.session_state.requests)
-                st.success(f"האילוצים של {selected_emp_mgr} עודכנו בהצלחה!")
+                st.success(f"האילוצים של {selected_emp_mgr} לחודש {sel_month}/2026 עודכנו בהצלחה!")
+                st.rerun()
     with t3:
         if not st.session_state.schedule.empty: 
             st.subheader("ספירת משמרות")
