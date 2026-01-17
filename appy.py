@@ -593,7 +593,7 @@ if role == "מנהל/ת":
                      st.session_state.manual_date = default_date
 
             d_man = c_date.date_input("תאריך:", key="manual_date")
-            dept_man = c_dept.selectbox("מחלקה:", ["שיקום", "פנימית גריאטרית"], key="manual_dept")
+            dept_man = c_dept.selectbox("מחלקה:", ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום", "שישי בוקר - פנימית (נגזר)"], key="manual_dept")
             
             # סינון רשימת העובדים - הצגת מי שמשובץ כרגע למעלה או סימון מיוחד? לא קריטי כרגע.
             emp_man = c_emp.selectbox("עובד:", st.session_state.staff['name'].tolist(), key="manual_emp")
@@ -779,7 +779,9 @@ if role == "מנהל/ת":
                 st.success(f"האילוצים של {selected_emp_mgr} עודכנו בהצלחה!")
     with t3:
         if not st.session_state.schedule.empty: 
-            st.bar_chart(st.session_state.schedule['employee'].value_counts())
+            # סינון דוח: הסרת משמרות שישי בוקר מהספירה הגרפית
+            report_df = st.session_state.schedule[~st.session_state.schedule['dept'].str.contains("שישי בוקר", na=False)]
+            st.bar_chart(report_df['employee'].value_counts())
             
             st.divider()
             st.subheader("ייצוא נתונים")
