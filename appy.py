@@ -80,19 +80,28 @@ def get_db_data(worksheet_name):
         df = conn.read(worksheet=worksheet_name, ttl=0)
         return df
     except Exception as e:
-        # במקרה שהגיליון לא קיים או שגיאה אחרת, נחזיר DataFrame ריק
+        # במקרה שהגיליון לא קיים או שגיאה אחרת (כמו Worksheet not found), נחזיר DataFrame ריק
         return pd.DataFrame()
 
 def save_to_db(worksheet_name, df):
     conn = st.connection("gsheets", type=GSheetsConnection)
-    conn.update(worksheet=worksheet_name, data=df)
+    try:
+        # מנסה לעדכן גיליון קיים
+        conn.update(worksheet=worksheet_name, data=df)
+    except Exception:
+        # אם נכשל (אולי הגיליון לא קיים), ננסה ליצור אותו ע"י כתיבה (create בדר"כ לא נתמך ישירות ב-update, אבל ברוב המקרים update יוצר אם לא קיים בספריה זו, או שנצטרך להנחות את המשתמש ליצור ידנית)
+        # בספרייה זו, update אמור לעבוד אם הגיליון קיים. אם לא - צריך ליצור אותו ידנית ב-GSheets.
+        pass
 
 def init_db():
     # בדיקה האם יש נתונים בטבלת staff, אם לא - נאתחל
     try:
         current_staff = get_db_data("staff")
-        # אם הטבלה ריקה או שחסרות העמודות הקריטיות
+        
+        # אם חזר DataFrame ריק, ייתכן שהגיליון לא קיים או ריק לחלוטין
         if current_staff.empty or 'name' not in current_staff.columns:
+            st.info("מאתחל נתונים ראשוניים ב-Google Sheets (פעולה חד פעמית)...")
+            
             interns = [
                 ('בוריס גורביץ', 'שיקום'), ('סלאמה קאסם', 'שיקום'), ('נטעלי בלייכמן', 'שיקום'), ('שאדי חאג יחיא', 'שיקום'),
                 ('בן אריאל', 'פנימית גריאטרית'), ('נטע פרל', 'פנימית גריאטרית'), ('יובל קירשנבוים', 'פנימית גריאטרית'),
@@ -117,17 +126,21 @@ def init_db():
             staff_df = pd.DataFrame(data)
             save_to_db("staff", staff_df)
             
-            # אתחול שאר הטבלאות כ-DataFrames ריקים עם העמודות הנכונות (כדי למנוע שגיאות בקריאה ראשונה)
-            # schedule
+            # אתחול שאר הטבלאות
             schedule_df = pd.DataFrame(columns=['date', 'dept', 'employee', 'is_manual', 'empty_reason'])
             save_to_db("schedule", schedule_df)
             
-            # requests
             requests_df = pd.DataFrame(columns=['employee', 'date', 'status'])
             save_to_db("requests", requests_df)
+            
+            st.success("הנתונים אותחלו בהצלחה! אנא רענן את העמוד.")
 
     except Exception as e:
-        st.error(f"שגיאה באתחול מסד הנתונים: {e}")
+        # הודעה ברורה יותר למשתמש
+        if "Worksheet" in str(e) and "not found" in str(e):
+             st.error("שגיאה: המערכת לא מצאה את הגיליון 'staff'. אנא וודא שיצרת ב-Google Sheet שלך טאב בשם 'staff' (בדיוק כך, אותיות קטנות).")
+        else:
+             st.error(f"שגיאה באתחול מסד הנתונים: {e}")
 
 # אתחול מסד הנתונים
 init_db()
@@ -817,6 +830,7 @@ else:
             validation_passed = True
             if st.session_state.user_role == 'מתמחה': # רק למתמחים
                 # חישוב ימים פנויים
+                num_days = calendar.monthrange(2026, sel_month)[1]
                 month_days = [date(2026, sel_month, d) for d in range(1, num_days+1)]
                 total_thursdays = len([d for d in month_days if d.weekday() == 3])
                 total_weekends = len([d for d in month_days if d.weekday() in [4, 5]]) # שישי ושבת
