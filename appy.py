@@ -633,8 +633,8 @@ if role == "מנהל/ת":
         if c1.button("🪄 שיבוץ אוטומטי מלא"): run_smart_scheduling(2026, sel_month, only_weekends=False); st.rerun()
         if c2.button("☕ שיבוץ סופ\"שים בלבד"): run_smart_scheduling(2026, sel_month, only_weekends=True); st.rerun()
         if c3.button("🗑️ נקה לוח"): 
-            # השארת רק השיבוצים הידניים
-            st.session_state.schedule = st.session_state.schedule[st.session_state.schedule['is_manual'] == True]
+            # איפוס מלא של הלוח - שומר רק על מבנה העמודות
+            st.session_state.schedule = pd.DataFrame(columns=st.session_state.schedule.columns)
             save_to_db("schedule", st.session_state.schedule)
             st.rerun()
         
