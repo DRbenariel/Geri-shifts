@@ -364,64 +364,143 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 if d.weekday() == 3: thu_counts[final_choice] += 1
                 if d.weekday() in [4, 5]: weekends_worked[final_choice].add(week_num)
             else:
-                # --- לוגיקת הצעת החלפות (Swap Logic) ---
+                # --- לוגיקת הצעת החלפות ועזרה (Swap & Suggest) ---
                 suggestions = []
+                # אתחול מילון הצעות מובנה אם לא קיים (נמחק בתחילת הריצה)
+                if 'swap_suggestions' not in st.session_state: st.session_state.swap_suggestions = {}
                 
-                # נרוץ על העובדים שנפסלו וננסה למצוא פתרון יצירתי
-                for _, person in staff_df.iterrows():
-                    p_name = person['name']
+                # כלי עזר לבדיקת תקינות מלאה (כולל מנוחה, רצף, וכו') להחלפה
+                def is_valid_assignment_for_swap(person_name, check_date, target_dept):
+                    # בדיקת מנוחה (יומיים רווח) רק סביב התאריך הנבדק
+                    check_d_obj = datetime.strptime(check_date, '%Y-%m-%d').date()
+                    for offset in [-2, -1, 1, 2]:
+                        if any(s for s in new_schedule if s['date'] == str(check_d_obj + timedelta(days=offset)) and s['employee'] == person_name):
+                             return False
                     
-                    # 1. בדיקת אפשרות: העובד תפוס במחלקה השניה באותו יום?
-                    # אם כן, אולי אפשר להעביר אותו אלינו ולמצוא מחליף לשם?
-                    parallel_shift = next((s for s in new_schedule if s['date'] == d_str and s['employee'] == p_name), None)
+                    # בדיקת כפילות באותו יום
+                    if any(s for s in new_schedule if s['date'] == check_date and s['employee'] == person_name): return False
+                    
+                    # בדיקת רצף חמישי-שישי בוקר (אם רלוונטי) - כאן זה בדיקה גנרית
+                    
+                    # בדיקת אילוצי משתמש
+                    if not st.session_state.requests[(st.session_state.requests['employee'] == person_name) & (st.session_state.requests['date'] == check_date)].empty: return False
+                    
+                    # בדיקת סוג עובד: תורן חוץ לא יכול לבצע משמרת בפנימית
+                    p_row = staff_df[staff_df['name'] == person_name]
+                    if not p_row.empty:
+                        p_type = p_row['type'].iloc[0]
+                        if p_type == 'תורן חוץ' and 'פנימית' in target_dept:
+                            return False
+
+                    return True
+
+                # נרוץ על המתמודדים שנפסלו (Candidate A) וננסה למצוא פתרון שיאפשר לשבץ אותם
+                for _, person_a in staff_df.iterrows():
+                    name_a = person_a['name']
+                    # אם הסיבה לפסילה היא "מכסה", אין טעם להציע החלפה (אלא אם כן מגדילים ראש, אבל נתמקד באילוצי לו"ז)
+                    # אבל אם הוא תפוס במקום אחר, ננסה לשחרר אותו
+                    
+                    # תרחיש 1: החלפה ישירה (Direct Swap)
+                    # A נמצא במקום אחר באותו יום. האם אפשר למצוא מישהו (B) שיחליף את A שם?
+                    parallel_shift = next((s for s in new_schedule if s['date'] == d_str and s['employee'] == name_a), None)
                     if parallel_shift:
                         other_dept = parallel_shift['dept']
-                        # נחפש מישהו אחר שיכול לעשות את המחלקה השנייה היום
-                        # (בדיקה מהירה - לא מלאה)
-                        for _, replacement in staff_df.iterrows():
-                            rep_name = replacement['name']
-                            if rep_name == p_name: continue
+                        # מחפשים מחליף (B) לתפקיד השני
+                        for _, person_b in staff_df.iterrows():
+                            name_b = person_b['name']
+                            if name_b == name_a: continue
                             
-                            # האם המחליף פנוי היום?
-                            if any(s for s in new_schedule if s['date'] == d_str and s['employee'] == rep_name): continue
-                            
-                            # בדיקת אילוצים בסיסית למחליף (מכסה, אילוץ יומי)
-                            if rep_name in work_load and work_load[rep_name] >= replacement['monthly_quota']: continue
-                             # בדיקת אילוץ משתמש
-                            if not st.session_state.requests[(st.session_state.requests['employee'] == rep_name) & (st.session_state.requests['date'] == d_str)].empty: continue
-                            
-                            suggestions.append(f"💡 החלפה: העבר את **{p_name}** מ-{other_dept} לפה ({dept}), ושבץ את **{rep_name}** ב-{other_dept}.")
-                            break 
-                            
-                    # 2. בדיקת אפשרות: העובד בחופש בגלל מרווח מנוחה (עבד אתמול/שלשום)?
-                    # נבדוק אם אפשר להזיז את המשמרת המפריעה שלו למישהו אחר
-                    # (בודקים רק אחורה, כי קדימה עוד לא שובץ)
-                    prev_conflict = next((s for s in new_schedule if s['employee'] == p_name and s['date'] in [str(d - timedelta(days=i)) for i in [1, 2]]), None)
+                            # בדיקה קפדנית: האם B יכול חוקית להיכנס ל-other_dept בתאריך d_str?
+                            if is_valid_assignment_for_swap(name_b, d_str, other_dept):
+                                suggestions.append(f"💡 החלפה: העבר את **{name_a}** מ-{other_dept} לפה, ושבץ את **{name_b}** שם.")
+                                
+                                # שמירת הצעה מובנית לביצוע בלחיצה
+                                core_key = f"{d_str}_{dept}" # מפתח למשבצת הריקה הנוכחית
+                                if core_key not in st.session_state.swap_suggestions: st.session_state.swap_suggestions[core_key] = []
+                                st.session_state.swap_suggestions[core_key].append({
+                                    'type': 'direct_swap',
+                                    'target_date': d_str,
+                                    'conflicted_emp': name_a, # מי שאנחנו רוצים לפה
+                                    'source_dept': other_dept, # מאיפה הוא בא
+                                    'replacement_emp': name_b, # מי יחליף אותו שם
+                                    'desc': f"{name_a} ⬅️ {name_b} ({other_dept})"
+                                })
+                                break 
+
+                    # תרחיש 2: הסטה (Shift/Move)
+                    # A לא יכול לעבוד היום כי עבד אתמול (מנוחה). האם אפשר להזיז את המשמרת של אתמול למישהו אחר (B)?
+                    prev_conflict = next((s for s in new_schedule if s['employee'] == name_a and s['date'] in [str(d - timedelta(days=i)) for i in [1, 2]]), None)
                     if prev_conflict:
                         conf_date = prev_conflict['date']
                         conf_dept = prev_conflict['dept']
                         
-                        # נחפש מי יכול להחליף אותו בתאריך ההוא
-                        for _, replacement in staff_df.iterrows():
-                            rep_name = replacement['name']
-                            if rep_name == p_name: continue
+                        # מחפשים מחליף (B) לתאריך ההוא
+                        for _, person_b in staff_df.iterrows():
+                            name_b = person_b['name']
+                            if name_b == name_a: continue
                             
-                            # האם המחליף היה פנוי בתאריך ההוא?
-                            if any(s for s in new_schedule if s['date'] == conf_date and s['employee'] == rep_name): continue
+                            # בדיקה קפדנית: האם B יכול להיכנס ל-conf_date?
+                            if is_valid_assignment_for_swap(name_b, conf_date, conf_dept):
+                                suggestions.append(f"💡 הסטה: העבר את **{name_a}** מה-{conf_date} לפה, ושבץ שם את **{name_b}**.")
+                                
+                                core_key = f"{d_str}_{dept}"
+                                if core_key not in st.session_state.swap_suggestions: st.session_state.swap_suggestions[core_key] = []
+                                st.session_state.swap_suggestions[core_key].append({
+                                    'type': 'move_shift',
+                                    'conflict_date': conf_date,
+                                    'conflicted_emp': name_a,
+                                    'conflict_dept': conf_dept,
+                                    'replacement_emp': name_b,
+                                    'desc': f"הסטה: {name_a} (מ-{conf_date}) ⬅️ {name_b}"
+                                })
+                                break
+
+                    # תרחיש 3: שרשור משולש (Triple Swap) - בקשת המשתמש
+                    # אם תרחיש 1 נכשל (לא נמצא B פנוי), אולי B תפוס במקום אחר (C) אבל C פנוי?
+                    # כלומר: A בא לפה -> B מחליף את A -> C מחליף את B
+                    if parallel_shift: # A תפוס ב-other_dept
+                         other_dept = parallel_shift['dept']
+                         # רצים שוב על B פוטנציאליים (שאולי לא פנויים)
+                         for _, person_b in staff_df.iterrows():
+                            name_b = person_b['name']
+                            if name_b == name_a: continue
                             
-                            # בדיקת אילוצים בסיסית למחליף לתאריך ההוא
-                            if rep_name in work_load and work_load[rep_name] >= replacement['monthly_quota']: continue
-                             # בדיקת אילוץ משתמש
-                            if not st.session_state.requests[(st.session_state.requests['employee'] == rep_name) & (st.session_state.requests['date'] == conf_date)].empty: continue
-                            
-                            suggestions.append(f"💡 הסטה: העבר את **{p_name}** מה-{conf_date} לפה, ושבץ שם את **{rep_name}**.")
-                            break
-                            
-                error_context = " | ".join(list(set(failure_reasons))[:3])
+                            # אם B תפוס ב-other_dept_2 בתאריך d_str
+                            parallel_shift_b = next((s for s in new_schedule if s['date'] == d_str and s['employee'] == name_b), None)
+                            if parallel_shift_b:
+                                other_dept_b = parallel_shift_b['dept']
+                                # מחפשים C שיחליף את B
+                                for _, person_c in staff_df.iterrows():
+                                    name_c = person_c['name']
+                                    if name_c in [name_a, name_b]: continue
+                                    
+                                    # האם C יכול להחליף את B ב-other_dept_b?
+                                    if is_valid_assignment_for_swap(name_c, d_str, other_dept_b):
+                                        # האם B (אחרי שהשתחרר) יכול להחליף את A ב-other_dept?
+                                        # כאן ההנחה היא ש-B עובר מ-other_dept_b ל-other_dept באותו יום. האם זה חוקי?
+                                        # בדרך כלל כן, כי זה אותו יום.
+                                        
+                                        suggestions.append(f"💡 שרשור: {name_a} לפה, {name_b} ל-{other_dept}, {name_c} ל-{other_dept_b}.")
+                                        
+                                        core_key = f"{d_str}_{dept}"
+                                        if core_key not in st.session_state.swap_suggestions: st.session_state.swap_suggestions[core_key] = []
+                                        st.session_state.swap_suggestions[core_key].append({
+                                            'type': 'triple_swap',
+                                            'target_date': d_str,
+                                            'emp_a': name_a, 'dept_a_origin': other_dept,
+                                            'emp_b': name_b, 'dept_b_origin': other_dept_b,
+                                            'emp_c': name_c,
+                                            'desc': f"שרשור: {name_a} ⬅️ {name_b} ⬅️ {name_c}"
+                                        })
+                                        break
+                                if len(suggestions) > 3: break # הגבלה שלא נתפוצץ
+
+                # סינון כפילויות בהצגה
+                unique_suggestions = list(set([s.split(":")[0] + "..." for s in suggestions])) # תקציר
                 if suggestions:
-                    final_msg = f"{error_context}\n\nהצעות לפתרון:\n" + "\n".join(suggestions[:2])
+                    final_msg = f"{name}: לא נמצא שיבוץ ישיר.\n" + "\n".join(suggestions[:3])
                 else:
-                    final_msg = error_context
+                    final_msg = "לא נמצא פתרון אוטומטי (" + ", ".join(failure_reasons[:2]) + ")"
                 
                 new_schedule.append({'date': d_str, 'dept': dept, 'employee': '---', 'is_manual': False, 'empty_reason': final_msg})
 
@@ -655,6 +734,56 @@ if role == "מנהל/ת":
                 with st.expander("🔻 לחץ כאן לפירוט השגיאות והסיבות", expanded=False):
                     for _, row in failures.iterrows():
                         st.markdown(f"❌ **{row['date']}** ({row['dept']}): {row['empty_reason']}")
+                        
+                        # כפתורי ביצוע החלפה (Swap Actions)
+                        if 'swap_suggestions' in st.session_state:
+                            core_key = f"{row['date']}_{row['dept']}"
+                            if core_key in st.session_state.swap_suggestions:
+                                for i, sugg in enumerate(st.session_state.swap_suggestions[core_key]):
+                                    btn_label = f"✨ בצע: {sugg['desc']}"
+                                    if st.button(btn_label, key=f"swap_btn_{core_key}_{i}"):
+                                        # ביצוע ההחלפה בפועל!
+                                        sched = st.session_state.schedule
+                                        
+                                        if sugg['type'] == 'direct_swap':
+                                            # 1. שיבוץ המחליף (B) במקום הקונפליקט (Other Dept)
+                                            # חיפוש השורה של Other Dept באותו תאריך
+                                            mask_other = (sched['date'] == sugg['target_date']) & (sched['dept'] == sugg['source_dept'])
+                                            st.session_state.schedule.loc[mask_other, 'employee'] = sugg['replacement_emp']
+                                            
+                                            # 2. שיבוץ המועמד המקורי (A) פה
+                                            mask_here = (sched['date'] == sugg['target_date']) & (sched['dept'] == row['dept'])
+                                            st.session_state.schedule.loc[mask_here, 'employee'] = sugg['conflicted_emp']
+                                            st.session_state.schedule.loc[mask_here, 'empty_reason'] = '' # ניקוי שגיאה
+                                            
+                                        elif sugg['type'] == 'move_shift':
+                                            # 1. שיבוץ המחליף (B) בתאריך הקונפליקט (עבר/אחר)
+                                            mask_conflict = (sched['date'] == sugg['conflict_date']) & (sched['dept'] == sugg['conflict_dept'])
+                                            st.session_state.schedule.loc[mask_conflict, 'employee'] = sugg['replacement_emp']
+                                            
+                                            # 2. שיבוץ המועמד המקורי (A) פה
+                                            mask_here = (sched['date'] == row['date']) & (sched['dept'] == row['dept'])
+                                            st.session_state.schedule.loc[mask_here, 'employee'] = sugg['conflicted_emp']
+                                            st.session_state.schedule.loc[mask_here, 'empty_reason'] = ''
+                                            
+                                        elif sugg['type'] == 'triple_swap':
+                                            # שרשור משולש: C -> B -> A -> Here
+                                            # 1. שיבוץ C במקום B (ב-origin B)
+                                            mask_b_origin = (sched['date'] == sugg['target_date']) & (sched['dept'] == sugg['dept_b_origin'])
+                                            st.session_state.schedule.loc[mask_b_origin, 'employee'] = sugg['emp_c']
+                                            
+                                            # 2. שיבוץ B במקום A (ב-origin A)
+                                            mask_a_origin = (sched['date'] == sugg['target_date']) & (sched['dept'] == sugg['dept_a_origin'])
+                                            st.session_state.schedule.loc[mask_a_origin, 'employee'] = sugg['emp_b']
+                                            
+                                            # 3. שיבוץ A פה
+                                            mask_here = (sched['date'] == sugg['target_date']) & (sched['dept'] == row['dept'])
+                                            st.session_state.schedule.loc[mask_here, 'employee'] = sugg['emp_a']
+                                            st.session_state.schedule.loc[mask_here, 'empty_reason'] = ''
+                                            
+                                        save_to_db("schedule", st.session_state.schedule)
+                                        st.success("ההחלפה בוצע בהצלחה! מרענן...")
+                                        st.rerun()
         # ---------------------------------
 
         draw_calendar_view(2026, sel_month, "מנהל/ת")
