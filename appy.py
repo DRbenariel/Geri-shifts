@@ -68,61 +68,66 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-import sqlite3
 import hashlib
+from streamlit_gsheets import GSheetsConnection
 
-# --- 2. ניהול מסד נתונים (SQLite) ---
-DB_NAME = "scheduler_v2.db"
+# --- 2. ניהול מסד נתונים (Google Sheets) ---
+
+def get_db_data(worksheet_name):
+    # קריאה מהירה ללא מטמון כדי לקבל עדכונים בזמן אמת
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    try:
+        df = conn.read(worksheet=worksheet_name, ttl=0)
+        return df
+    except Exception as e:
+        # במקרה שהגיליון לא קיים או שגיאה אחרת, נחזיר DataFrame ריק
+        return pd.DataFrame()
+
+def save_to_db(worksheet_name, df):
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    conn.update(worksheet=worksheet_name, data=df)
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    # טבלת צוות
-    c.execute('''CREATE TABLE IF NOT EXISTS staff 
-                 (name TEXT PRIMARY KEY, type TEXT, dept TEXT, monthly_quota INT, weekend_quota INT, password TEXT)''')
-    # טבלת סידור עבודה
-    c.execute('''CREATE TABLE IF NOT EXISTS schedule 
-                 (date TEXT, dept TEXT, employee TEXT, is_manual INT, empty_reason TEXT)''')
-    # טבלת בקשות/אילוצים
-    c.execute('''CREATE TABLE IF NOT EXISTS requests 
-                 (employee TEXT, date TEXT, status TEXT)''')
-    
-    # בדיקה אם יש נתונים ראשוניים
-    c.execute("SELECT COUNT(*) FROM staff")
-    if c.fetchone()[0] == 0:
-        interns = [
-            ('בוריס גורביץ', 'שיקום'), ('סלאמה קאסם', 'שיקום'), ('נטעלי בלייכמן', 'שיקום'), ('שאדי חאג יחיא', 'שיקום'),
-            ('בן אריאל', 'פנימית גריאטרית'), ('נטע פרל', 'פנימית גריאטרית'), ('יובל קירשנבוים', 'פנימית גריאטרית'),
-            ('שירה בנימיני', 'פנימית גריאטרית'), ('רוני מינר', 'פנימית גריאטרית'), ('בלודאן אבו גבאל', 'פנימית גריאטרית'),
-            ('חוסיין אבו דיה', 'פנימית גריאטרית'), ('סאגד מסארווה', 'פנימית גריאטרית'), ('אופיר קופל', 'פנימית גריאטרית')
-        ]
-        # סיסמת ברירת מחדל: 1234
-        def_pass = hashlib.sha256("1234".encode()).hexdigest()
-        for n, d in interns:
-            c.execute("INSERT INTO staff VALUES (?, 'מתמחה', ?, 6, 1, ?)", (n, d, def_pass))
-        
-        # תורני חוץ
-        externals = ['אחמד אלעמור', 'סגא עסלי', 'הייתם חגיר']
-        for n in externals:
-            c.execute("INSERT INTO staff VALUES (?, 'תורן חוץ', 'שיקום', 8, 4, ?)", (n, def_pass))
-        
-        # מנהל
-        c.execute("INSERT INTO staff VALUES (?, 'מנהל/ת', 'הנהלה', 0, 0, ?)", ('admin', def_pass))
-        
-    conn.commit()
-    conn.close()
+    # בדיקה האם יש נתונים בטבלת staff, אם לא - נאתחל
+    try:
+        current_staff = get_db_data("staff")
+        # אם הטבלה ריקה או שחסרות העמודות הקריטיות
+        if current_staff.empty or 'name' not in current_staff.columns:
+            interns = [
+                ('בוריס גורביץ', 'שיקום'), ('סלאמה קאסם', 'שיקום'), ('נטעלי בלייכמן', 'שיקום'), ('שאדי חאג יחיא', 'שיקום'),
+                ('בן אריאל', 'פנימית גריאטרית'), ('נטע פרל', 'פנימית גריאטרית'), ('יובל קירשנבוים', 'פנימית גריאטרית'),
+                ('שירה בנימיני', 'פנימית גריאטרית'), ('רוני מינר', 'פנימית גריאטרית'), ('בלודאן אבו גבאל', 'פנימית גריאטרית'),
+                ('חוסיין אבו דיה', 'פנימית גריאטרית'), ('סאגד מסארווה', 'פנימית גריאטרית'), ('אופיר קופל', 'פנימית גריאטרית')
+            ]
+            # סיסמת ברירת מחדל: 1234
+            def_pass = hashlib.sha256("1234".encode()).hexdigest()
+            
+            data = []
+            for n, d in interns:
+                data.append({'name': n, 'type': 'מתמחה', 'dept': d, 'monthly_quota': 6, 'weekend_quota': 1, 'password': def_pass})
+            
+            # תורני חוץ
+            externals = ['אחמד אלעמור', 'סגא עסלי', 'הייתם חגיר']
+            for n in externals:
+                data.append({'name': n, 'type': 'תורן חוץ', 'dept': 'שיקום', 'monthly_quota': 8, 'weekend_quota': 4, 'password': def_pass})
+            
+            # מנהל
+            data.append({'name': 'admin', 'type': 'מנהל/ת', 'dept': 'הנהלה', 'monthly_quota': 0, 'weekend_quota': 0, 'password': def_pass})
+            
+            staff_df = pd.DataFrame(data)
+            save_to_db("staff", staff_df)
+            
+            # אתחול שאר הטבלאות כ-DataFrames ריקים עם העמודות הנכונות (כדי למנוע שגיאות בקריאה ראשונה)
+            # schedule
+            schedule_df = pd.DataFrame(columns=['date', 'dept', 'employee', 'is_manual', 'empty_reason'])
+            save_to_db("schedule", schedule_df)
+            
+            # requests
+            requests_df = pd.DataFrame(columns=['employee', 'date', 'status'])
+            save_to_db("requests", requests_df)
 
-def get_db_data(table):
-    conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
-    conn.close()
-    return df
-
-def save_to_db(table, df):
-    conn = sqlite3.connect(DB_NAME)
-    df.to_sql(table, conn, if_exists='replace', index=False)
-    conn.commit()
-    conn.close()
+    except Exception as e:
+        st.error(f"שגיאה באתחול מסד הנתונים: {e}")
 
 # אתחול מסד הנתונים
 init_db()
@@ -759,6 +764,17 @@ else:
         st.divider()
         st.divider()
         st.write("סמן את הימים שבהם **אינך** יכול/ה לבצע תורנות (לחץ לרענון לאחר שינוי):")
+
+        # חישוב תאריכים שכבר נבחרו (לצורך אתחול)
+        default_dates = []
+        if not existing.empty:
+            for d_str in existing['date']:
+                try:
+                    d_obj = datetime.strptime(d_str, '%Y-%m-%d').date()
+                    # יש להוסיף רק תאריכים שרלוונטיים לחודש הנבחר
+                    if d_obj.month == sel_month and d_obj.year == 2026:
+                        default_dates.append(d_obj)
+                except: pass
         
         # --- יצירת לוח שנה עם Checkboxes ---
         # פונקציה עזר לציור
