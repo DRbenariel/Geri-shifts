@@ -344,6 +344,15 @@ def run_smart_scheduling(year, month, only_weekends=False):
                         if d.weekday() == 3:
                             score -= thu_counts[name] * 200
                             
+                    # פקטור מחלקה - העדפה למחלקת האם!
+                    # אם המועמד שייך למחלקה הנוכחית או ל'כללי' - מקבל בונוס
+                    # אם המועמד ממחלקה אחרת - נמצא רק בעדיפות אחרונה (ענישה)
+                    cand_dept = cand['dept']
+                    if cand_dept == dept or cand_dept == 'כללי':
+                        score += 500
+                    else:
+                        score -= 500  # קנס משמעותי לשיבוץ במחלקה לא תואמת
+
                     return score
 
                 final_choice = max(candidates, key=calculate_score)['name']
@@ -660,7 +669,7 @@ if role == "מנהל/ת":
                     new_name = st.text_input("שם מלא:")
                     new_type = st.selectbox("תפקיד:", ["מתמחה", "תורן חוץ", "מנהל/ת"])
                 with col_new2:
-                    new_dept = st.selectbox("מחלקה:", ["שיקום", "פנימית גריאטרית", "הנהלה"])
+                    new_dept = st.selectbox("מחלקה:", ["שיקום", "פנימית גריאטרית", "כללי", "הנהלה"])
                     new_quota = st.number_input("מכסה חודשית:", min_value=0, value=6)
                     new_weekend_quota = st.number_input("מכסת סופ\"ש:", min_value=0, value=1)
                 
