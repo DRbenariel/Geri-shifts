@@ -736,9 +736,11 @@ if role == "מנהל/ת":
                         st.markdown(f"❌ **{row['date']}** ({row['dept']}): {row['empty_reason']}")
                         
                         # כפתורי ביצוע החלפה (Swap Actions)
+                        actions_found = False
                         if 'swap_suggestions' in st.session_state:
                             core_key = f"{row['date']}_{row['dept']}"
                             if core_key in st.session_state.swap_suggestions:
+                                actions_found = True
                                 for i, sugg in enumerate(st.session_state.swap_suggestions[core_key]):
                                     btn_label = f"✨ בצע: {sugg['desc']}"
                                     if st.button(btn_label, key=f"swap_btn_{core_key}_{i}"):
@@ -784,6 +786,9 @@ if role == "מנהל/ת":
                                         save_to_db("schedule", st.session_state.schedule)
                                         st.success("ההחלפה בוצע בהצלחה! מרענן...")
                                         st.rerun()
+                        
+                        if not actions_found:
+                             st.caption("כדי לראות כפתורי החלפה, יש להריץ 'שיבוץ אוטומטי' מחדש.")
         # ---------------------------------
 
         draw_calendar_view(2026, sel_month, "מנהל/ת")
@@ -917,9 +922,22 @@ if role == "מנהל/ת":
                 st.success(f"האילוצים של {selected_emp_mgr} עודכנו בהצלחה!")
     with t3:
         if not st.session_state.schedule.empty: 
-            # סינון דוח: הסרת משמרות שישי בוקר מהספירה הגרפית
-            report_df = st.session_state.schedule[~st.session_state.schedule['dept'].str.contains("שישי בוקר", na=False)]
-            st.bar_chart(report_df['employee'].value_counts())
+            st.subheader("ספירת משמרות")
+            
+            # הכנת נתונים לגרף משולב
+            sched = st.session_state.schedule
+            
+            # ספירה רגילה (ללא שישי בוקר)
+            reg_counts = sched[~sched['dept'].str.contains("שישי בוקר", na=False)]['employee'].value_counts()
+            
+            # ספירת שישי בוקר בלבד
+            morn_counts = sched[sched['dept'].str.contains("שישי בוקר", na=False)]['employee'].value_counts()
+            
+            # איחוד לטבלה אחת
+            combined_df = pd.DataFrame({'תורנויות רגילות': reg_counts, 'שישי בוקר': morn_counts}).fillna(0)
+            
+            st.bar_chart(combined_df)
+            st.caption("הגרף מציג בחלוקה לצבעים: תורנויות רגילות לעומת שישי בוקר")
             
             st.divider()
             st.subheader("ייצוא נתונים")
