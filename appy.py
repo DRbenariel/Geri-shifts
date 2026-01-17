@@ -113,12 +113,12 @@ def init_db():
             
             data = []
             for n, d in interns:
-                data.append({'name': n, 'type': 'מתמחה', 'dept': d, 'monthly_quota': 4, 'weekend_quota': 1, 'password': def_pass})
+                data.append({'name': n, 'type': 'מתמחה', 'dept': d, 'monthly_quota': 6, 'weekend_quota': 1, 'password': def_pass})
             
             # תורני חוץ
             externals = ['אחמד אלעמור', 'סגא עסלי', 'הייתם חגיר']
             for n in externals:
-                data.append({'name': n, 'type': 'תורן חוץ', 'dept': 'שיקום', 'monthly_quota': 8, 'weekend_quota': 8, 'password': def_pass})
+                data.append({'name': n, 'type': 'תורן חוץ', 'dept': 'שיקום', 'monthly_quota': 8, 'weekend_quota': 4, 'password': def_pass})
             
             # מנהל
             data.append({'name': 'admin', 'type': 'מנהל/ת', 'dept': 'הנהלה', 'monthly_quota': 0, 'weekend_quota': 0, 'password': def_pass})
@@ -136,11 +136,13 @@ def init_db():
             st.success("הנתונים אותחלו בהצלחה! אנא רענן את העמוד.")
 
     except Exception as e:
-        # הודעה ברורה יותר למשתמש
+        # הודעה מרוכזת אחת למשתמש
         if "Worksheet" in str(e) and "not found" in str(e):
-             st.error("שגיאה: המערכת לא מצאה את הגיליון 'staff'. אנא וודא שיצרת ב-Google Sheet שלך טאב בשם 'staff' (בדיוק כך, אותיות קטנות).")
+             st.warning("שים לב: המערכת לא מצאה את הגיליונות הנדרשים (staff/schedule). אנא וודא שהם קיימים ב-Google Sheet שלך.")
+        elif "Public Spreadsheet" in str(e) or "403" in str(e):
+             st.error("שגיאת הרשאות: לא ניתן לכתוב לגיליון (Public Spreadsheet). \nאם אתה מריץ מקומית: וודא שקובץ הסודות קיים. \nאם בענן: וודא שהגדרת Secrets בהגדרות האפליקציה.")
         else:
-             st.error(f"שגיאה באתחול מסד הנתונים: {e}")
+             st.error(f"שגיאה באתחול: {e}")
 
 # אתחול מסד הנתונים
 init_db()
