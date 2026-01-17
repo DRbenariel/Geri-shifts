@@ -85,13 +85,8 @@ def get_db_data(worksheet_name):
 
 def save_to_db(worksheet_name, df):
     conn = st.connection("gsheets", type=GSheetsConnection)
-    try:
-        # מנסה לעדכן גיליון קיים
-        conn.update(worksheet=worksheet_name, data=df)
-    except Exception as e:
-        # אם נכשל, נציג שגיאה (אולי הגיליון לא קיים או בעיית הרשאות)
-        st.error(f"שגיאה בשמירה ל-Google Sheets: {e}")
-        # במקרה חירום ננסה ליצור? כרגע עדיף לראות את השגיאה.
+    # שינוי: זריקת שגיאה למעלה כדי ש-init_db יטפל בה בצורה מרוכזת
+    conn.update(worksheet=worksheet_name, data=df)
 
 def init_db():
     # בדיקה האם יש נתונים בטבלת staff, אם לא - נאתחל
@@ -692,7 +687,9 @@ if role == "מנהל/ת":
 
         st.caption("שינויים בטבלה נשמרים רק בלחיצה על כפתור השמירה")
         # שימוש ב-st.session_state ישירות כמקור הנתונים לעריכה
-        staff_editor = st.data_editor(st.session_state.staff, use_container_width=True, num_rows="dynamic", key="staff_editor_widget")
+        # שימוש ב-st.session_state ישירות כמקור הנתונים לעריכה
+        # התיקון: הסרת ה-key כדי למנוע יצירה מחדש של הווידג'ט שגורמת לרענון
+        staff_editor = st.data_editor(st.session_state.staff, use_container_width=True, num_rows="dynamic")
         
         # כפתור שמירה ייעודי (Batch Save) למניעת קפיצות
         if st.button("💾 שמור שינויים בצוות"):
@@ -722,24 +719,33 @@ if role == "מנהל/ת":
                     except: pass
             
             # לוח שנה (Checkboxes) לניהול
-            cal_mgr = calendar.monthcalendar(2026, sel_month)
-            cols_mgr = st.columns(7)
-            headers_mgr = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
-            for i, h in enumerate(headers_mgr):
-                cols_mgr[i].markdown(f"<div style='text-align:center; font-weight:bold'>{h}</div>", unsafe_allow_html=True)
-            
-            selected_from_mgr_grid = []
-            for week in cal_mgr:
-                wk_cols = st.columns(7)
-                for i, day_num in enumerate(week):
-                    with wk_cols[i]:
-                        if day_num != 0:
-                            d_obj = date(2026, sel_month, day_num)
-                            is_checked = d_obj in default_dates_mgr
-                            if st.checkbox(f"{day_num}", value=is_checked, key=f"mgr_date_{selected_emp_mgr}_{sel_month}_{day_num}"):
-                                selected_from_mgr_grid.append(d_obj)
-            
-            if st.button("שמור שינויים לעובד", key="save_mgr_req"):
+            # עוטפים את הגריד והכפתור בטופס כדי ללכוד את כל הצ'קבוקסים בלחיצה אחת
+            with st.form(key=f"mgr_form_{selected_emp_mgr}"):
+                cal_mgr = calendar.monthcalendar(2026, sel_month)
+                cols_mgr = st.columns(7)
+                headers_mgr = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
+                for i, h in enumerate(headers_mgr):
+                    cols_mgr[i].markdown(f"<div style='text-align:center; font-weight:bold'>{h}</div>", unsafe_allow_html=True)
+                
+                # נשתמש במילון כדי לשמור את ה-keys של הצ'קבוקסים
+                checkbox_keys = []
+                for week in cal_mgr:
+                    wk_cols = st.columns(7)
+                    for i, day_num in enumerate(week):
+                        with wk_cols[i]:
+                            if day_num != 0:
+                                d_obj = date(2026, sel_month, day_num)
+                                is_checked = d_obj in default_dates_mgr
+                                key = f"mgr_date_{selected_emp_mgr}_{sel_month}_{day_num}"
+                                st.checkbox(f"{day_num}", value=is_checked, key=key)
+                                checkbox_keys.append((d_obj, key))
+                
+                submitted = st.form_submit_button("שמור שינויים לעובד")
+                
+            if submitted:
+                # איסוף הנתונים שנבחרו מתוך ה-session state ברגע השליחה
+                selected_from_mgr_grid = [d_obj for d_obj, key in checkbox_keys if st.session_state.get(key)]
+                
                 # הסרת אילוצים ישנים לחודש זה
                 # כדי לא למחוק חודשים אחרים, נסנן
                 # (כרגע הלוגיקה הפשוטה מוחקת הכל למשתמש, נשדרג למחיקה לפי חודש אם צריך, 
@@ -818,7 +824,7 @@ if role == "מנהל/ת":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
     with t4:
-        st.subheader("מעקב הוגנות - ימי רביעי וחמישי (מתמחים בלבד)")
+        st.subheader("מעקב הוגנות - ימי רביעי, חמישי ושישי (מתמחים בלבד)")
         
         # טעינת כל הנתונים
         full_schedule = st.session_state.schedule.copy()
