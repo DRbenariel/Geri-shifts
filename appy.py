@@ -219,7 +219,9 @@ def run_smart_scheduling(year, month, only_weekends=False):
             last_assignment[s['employee']] = dt.toordinal()
             if dt.weekday() == 2: wed_counts[s['employee']] += 1
             if dt.weekday() == 3: thu_counts[s['employee']] += 1
-            if dt.weekday() in [4, 5]: weekends_worked[s['employee']].add(dt.isocalendar()[1])
+            # תיקון: החרגת שישי בוקר ממכסת הסופ"ש
+            if dt.weekday() in [4, 5] and "שישי בוקר" not in s.get('dept', ''): 
+                weekends_worked[s['employee']].add(dt.isocalendar()[1])
 
     all_dates = [date(year, month, d) for d in range(1, num_days + 1)]
     
