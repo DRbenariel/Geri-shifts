@@ -21,6 +21,12 @@ st.markdown("""
         color: #1e293b !important; /* Force dark text color */
     }
     
+    /* Aggressive Text Color Fix for all Streamlit elements */
+    h1, h2, h3, h4, h5, h6, p, li, span, label, div, input, textarea, [data-testid="stMarkdownContainer"] p {
+        color: #1e293b !important;
+    }
+
+    
     /* Ensure sidebar handles RTL naturally without squashing */
     [data-testid="stSidebar"] {
         direction: rtl;
@@ -102,19 +108,6 @@ st.markdown("""
         .day-number { font-size: 1em !important; }
         .slot { padding: 3px 5px !important; font-size: 10px !important; }
         h1, h2, h3 { font-size: 1.2rem !important; }
-        
-        /* Force 7-column selection grids to stay horizontal */
-        div[data-testid="stHorizontalBlock"] {
-            display: flex !important;
-            flex-direction: row !important;
-            flex-wrap: nowrap !important;
-            overflow-x: auto !important;
-        }
-        div[data-testid="column"] {
-            min-width: 45px !important;
-            flex: 1 0 14% !important;
-            padding: 0 1px !important;
-        }
         
         /* Adjust login card */
         div[style*="max-width: 400px"] {
@@ -203,16 +196,23 @@ init_db()
 # --- 3. ניהול התחברות (Login) ---
 def login_screen():
     st.markdown("""
-        <div style='max-width: 400px; margin: 100px auto; padding: 2rem; background: white; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);'>
-            <h1 style='text-align: center; color: #1e293b; margin-bottom: 2rem;'>🔐 כניסה למערכת</h1>
-        </div>
         <style>
+            .login-container {
+                max-width: 400px;
+                margin: 50px auto;
+                padding: 2rem;
+                background: white;
+                border-radius: 20px;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+                text-align: center;
+            }
             div[data-testid="stTextInput"] input {
                 border: 2px solid #e2e8f0 !important;
                 background-color: #f8fafc;
                 border-radius: 8px;
                 padding: 10px;
                 transition: all 0.3s;
+                color: #1e293b !important; /* Ensure input text is dark */
             }
             div[data-testid="stTextInput"] input:focus {
                 border-color: #3b82f6 !important;
@@ -221,14 +221,23 @@ def login_screen():
             }
         </style>
     """, unsafe_allow_html=True)
+
+    # יצירת קונטיינר מרכזי נקי ללא עמודות דוחפות
+    c1, c2, c3 = st.columns([1, 2, 1])
     
-    with st.container():
-        cols = st.columns([1, 2, 1])
-        with cols[1]:
-            username = st.text_input("שם משתמש (לדוגמה: שם מלא או admin):").strip()
-            password = st.text_input("סיסמה:", type="password")
-            
-            if st.button("כניסה", use_container_width=True):
+    # במובייל העמודות קורסות, ולכן נשתמש בלוגיקה שתיראה טוב גם שם
+    # אבל כדי למנוע "בריחה לצדדים", נשתמש ב-Container פנימי עם רווחים
+    
+    with c2:
+        st.markdown("<div class='login-container'>", unsafe_allow_html=True)
+        st.title("🔐 כניסה למערכת")
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        # הטופס עצמו
+        username = st.text_input("שם משתמש (לדוגמה: שם מלא או admin):").strip()
+        password = st.text_input("סיסמה:", type="password")
+        
+        if st.button("כניסה", use_container_width=True):
                 staff_df = get_db_data("staff")
                 hashed_pass = hashlib.sha256(password.encode()).hexdigest()
                 
