@@ -1020,7 +1020,7 @@ if role == "מנהל/ת":
                 # מחיקת אילוצים ישנים של העובד לחודש זה
                 # משמרים: (לא העובד הנוכחי) או (העובד הנוכחי אבל לא בחודש הזה)
                 mask_keep = ~((st.session_state.requests['employee'] == selected_emp_mgr) & 
-                              (st.session_state.requests['date'].str.startswith(current_month_prefix)))
+                              (st.session_state.requests['date'].astype(str).str.startswith(current_month_prefix)))
                 
                 st.session_state.requests = st.session_state.requests[mask_keep]
                 
@@ -1347,7 +1347,7 @@ else:
                     # הסרת כל האילוצים והבקשות הקודמים של המשתמש לחודש זה
                     current_month_prefix = f"2026-{sel_month:02d}"
                     mask_keep = ~((st.session_state.requests['employee'] == user_name) & 
-                                  (st.session_state.requests['date'].str.startswith(current_month_prefix)))
+                                  (st.session_state.requests['date'].astype(str).str.startswith(current_month_prefix)))
                     st.session_state.requests = st.session_state.requests[mask_keep]
                     
                     # הוספת הרשימה החדשה והמעודכנת
