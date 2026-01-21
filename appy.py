@@ -77,6 +77,32 @@ st.markdown("""
     div[data-testid="stCheckbox"] div[role="checkbox"] {
         transform: scale(1.3);
     }
+
+    /* Mobile Responsive Adjustments */
+    @media (max-width: 768px) {
+        [data-testid="stSidebar"] { width: 100% !important; }
+        .calendar-day { 
+            min-height: 150px !important; 
+            padding: 8px !important; 
+            margin-bottom: 10px !important;
+        }
+        .day-number { font-size: 1.1em !important; }
+        .slot { padding: 4px 6px !important; font-size: 11px !important; }
+        h1 { font-size: 1.5rem !important; }
+        
+        /* Force grid columns to be more compact */
+        div[data-testid="column"] {
+            min-width: 0 !important;
+            padding: 0 2px !important;
+        }
+        
+        /* Adjust login card */
+        div[style*="max-width: 400px"] {
+            max-width: 90% !important;
+            margin: 20px auto !important;
+            padding: 1rem !important;
+        }
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -1209,7 +1235,7 @@ else:
                         d_obj = date(2026, sel_month, day_num)
                         is_checked = d_obj in default_dates
                         # מפתח ייחודי לכל צ'קבוקס
-                        chk = st.checkbox(f"{day_num}", value=is_checked, key=f"date_chk_{sel_month}_{day_num}")
+                        chk = st.checkbox(f"❌ {day_num}", value=is_checked, key=f"date_chk_{sel_month}_{day_num}")
                         if chk:
                             selected_from_grid.append(d_obj)
         
