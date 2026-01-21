@@ -13,12 +13,18 @@ st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;700&display=swap');
     
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], .main { 
+    html, body, [data-testid="stAppViewContainer"], .main { 
         direction: rtl; 
         text-align: right; 
         font-family: 'Rubik', sans-serif;
         background-color: #f0f2f6; 
     }
+    
+    /* Ensure sidebar handles RTL naturally without squashing */
+    [data-testid="stSidebar"] {
+        direction: rtl;
+    }
+    
     .stTabs [data-baseweb="tab-list"] { direction: rtl; justify-content: flex-start; flex-direction: row-reverse; }
     
     /* Calendar Card Styling */
@@ -80,27 +86,39 @@ st.markdown("""
 
     /* Mobile Responsive Adjustments */
     @media (max-width: 768px) {
-        [data-testid="stSidebar"] { width: 100% !important; }
-        .calendar-day { 
-            min-height: 150px !important; 
-            padding: 8px !important; 
-            margin-bottom: 10px !important;
+        /* Prevent sidebar title squashing */
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+            white-space: nowrap !important;
         }
-        .day-number { font-size: 1.1em !important; }
-        .slot { padding: 4px 6px !important; font-size: 11px !important; }
-        h1 { font-size: 1.5rem !important; }
         
-        /* Force grid columns to be more compact */
+        /* Ensure calendar days don't get too small */
+        .calendar-day { 
+            min-height: 120px !important; 
+            padding: 6px !important; 
+            margin-bottom: 8px !important;
+        }
+        .day-number { font-size: 1em !important; }
+        .slot { padding: 3px 5px !important; font-size: 10px !important; }
+        h1, h2, h3 { font-size: 1.2rem !important; }
+        
+        /* Force 7-column selection grids to stay horizontal */
+        div[data-testid="stHorizontalBlock"] {
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+        }
         div[data-testid="column"] {
-            min-width: 0 !important;
-            padding: 0 2px !important;
+            min-width: 45px !important;
+            flex: 1 0 14% !important;
+            padding: 0 1px !important;
         }
         
         /* Adjust login card */
         div[style*="max-width: 400px"] {
-            max-width: 90% !important;
-            margin: 20px auto !important;
-            padding: 1rem !important;
+            max-width: 95% !important;
+            margin: 10px auto !important;
+            padding: 0.8rem !important;
         }
     }
     </style>
