@@ -65,6 +65,18 @@ st.markdown("""
     
     .dept-label { font-weight: 600; font-size: 0.9em; opacity: 0.8; }
     .error-hint { font-size: 11px; color: #ef4444; margin-top: 4px; display: block; background: #fef2f2; padding: 2px 4px; border-radius: 4px;}
+    
+    /* Enlarged Date Input & Checkboxes */
+    div[data-testid="stDateInput"] input {
+        font-size: 1.2rem;
+        padding: 10px;
+    }
+    div[data-testid="stCheckbox"] label {
+        font-size: 1.2rem !important;
+    }
+    div[data-testid="stCheckbox"] div[role="checkbox"] {
+        transform: scale(1.3);
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -148,6 +160,20 @@ def login_screen():
         <div style='max-width: 400px; margin: 100px auto; padding: 2rem; background: white; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);'>
             <h1 style='text-align: center; color: #1e293b; margin-bottom: 2rem;'>🔐 כניסה למערכת</h1>
         </div>
+        <style>
+            div[data-testid="stTextInput"] input {
+                border: 2px solid #e2e8f0 !important;
+                background-color: #f8fafc;
+                border-radius: 8px;
+                padding: 10px;
+                transition: all 0.3s;
+            }
+            div[data-testid="stTextInput"] input:focus {
+                border-color: #3b82f6 !important;
+                background-color: #ffffff;
+                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+            }
+        </style>
     """, unsafe_allow_html=True)
     
     with st.container():
@@ -301,14 +327,23 @@ def run_smart_scheduling(year, month, only_weekends=False):
                             failure_reasons.append(f"{name}: משובץ בשישי הקרוב")
                             continue
                 
-                # אילוצים
-                if not st.session_state.requests[(st.session_state.requests['employee'] == name) & (st.session_state.requests['date'] == d_str)].empty:
+                # אילוצים (חסמים)
+                if not st.session_state.requests[(st.session_state.requests['employee'] == name) & (st.session_state.requests['date'] == d_str) & (st.session_state.requests['status'] == "אילוץ")].empty:
                     failure_reasons.append(f"{name}: אילוץ")
                     continue
 
                 candidates.append(person)
 
             if candidates:
+                # --- לוגיקה חדשה: תעדוף בקשות (Wishes - Option 3) ---
+                # נבדוק אם יש מועמדים שביקשו במיוחד את המשמרת הזו (וברור שהם עומדים בכל שאר הכללים כי הם עברו את הסינון למעלה)
+                requesters = st.session_state.requests[(st.session_state.requests['date'] == d_str) & (st.session_state.requests['status'] == "בקשה")]['employee'].tolist()
+                
+                wish_candidates = [c for c in candidates if c['name'] in requesters]
+                
+                # אם יש כאלו שביקשו, נצמצם את הרשימה רק אליהם
+                final_pool = wish_candidates if wish_candidates else candidates
+                
                 # לוגיקת תיעדוף משופרת:
                 # שימוש בשיטת ניקוד כדי:
                 # 1. לפזר את התורנויות (מי שמילא אחוז נמוך יותר מהמכסה מקבל עדיפות)
@@ -355,7 +390,7 @@ def run_smart_scheduling(year, month, only_weekends=False):
 
                     return score
 
-                final_choice = max(candidates, key=calculate_score)['name']
+                final_choice = max(final_pool, key=calculate_score)['name']
                 
                 new_schedule.append({'date': d_str, 'dept': dept, 'employee': final_choice, 'is_manual': False, 'empty_reason': ''})
                 work_load[final_choice] += 1
@@ -382,8 +417,8 @@ def run_smart_scheduling(year, month, only_weekends=False):
                     
                     # בדיקת רצף חמישי-שישי בוקר (אם רלוונטי) - כאן זה בדיקה גנרית
                     
-                    # בדיקת אילוצי משתמש
-                    if not st.session_state.requests[(st.session_state.requests['employee'] == person_name) & (st.session_state.requests['date'] == check_date)].empty: return False
+                    # בדיקת אילוצי משתמש (רק חסמים קשיחים)
+                    if not st.session_state.requests[(st.session_state.requests['employee'] == person_name) & (st.session_state.requests['date'] == check_date) & (st.session_state.requests['status'] == "אילוץ")].empty: return False
                     
                     # בדיקת סוג עובד: תורן חוץ לא יכול לבצע משמרת בפנימית
                     p_row = staff_df[staff_df['name'] == person_name]
@@ -557,8 +592,8 @@ def run_smart_scheduling(year, month, only_weekends=False):
                     if row['type'] == 'מתמחה' and row['dept'] == 'שיקום' and row['name'] != worker_name:
                         emp = row['name']
                         
-                        # האם פנוי ביום שישי (אילוץ)
-                        is_blocked = not st.session_state.requests[(st.session_state.requests['employee'] == emp) & (st.session_state.requests['date'] == fri_str)].empty
+                        # האם פנוי ביום שישי (אילוץ - חסם)
+                        is_blocked = not st.session_state.requests[(st.session_state.requests['employee'] == emp) & (st.session_state.requests['date'] == fri_str) & (st.session_state.requests['status'] == "אילוץ")].empty
                         if is_blocked: continue
                         
                         # האם עובד ברביעי או חמישי?
@@ -635,11 +670,12 @@ def draw_calendar_view(year, month, role, user_name=None):
                             html += f'<span class="error-hint">❓ {reason}</span>'
                         html += '</div>'
                 
-                # הצגת אילוצים (למנהל בלבד או לעובד על עצמו)
+                # הצגת אילוצים ובקשות (למנהל בלבד או לעובד על עצמו)
                 if role == "מנהל/ת":
                     reqs = st.session_state.requests[st.session_state.requests['date'] == date_str]
                     for _, r in reqs.iterrows():
-                        html += f'<div style="font-size:10px; color:#991b1b;">❌ {r["employee"]}</div>'
+                        icon = "❌" if r['status'] == "אילוץ" else "⭐"
+                        html += f'<div style="font-size:10px; color:{"#991b1b" if r["status"] == "אילוץ" else "#eab308"};">{icon} {r["employee"]}</div>'
                 
                 st.markdown(html + "</div>", unsafe_allow_html=True)
 
@@ -1124,8 +1160,8 @@ else:
         # ----------------------------
 
         st.divider()
-        st.divider()
-        st.write("סמן את הימים שבהם **אינך** יכול/ה לבצע תורנות (לחץ לרענון לאחר שינוי):")
+        st.write("### שלב 1: סימון ימים בהם **אינך** יכול/ה לעבוד")
+        st.caption("חובה להשאיר לפחות 2 ימי חמישי ו-4 ימי סופ\"ש פנויים.")
 
         # חישוב תאריכים שכבר נבחרו (לצורך אתחול)
         default_dates = []
@@ -1171,12 +1207,51 @@ else:
                         if chk:
                             selected_from_grid.append(d_obj)
         
+        st.divider()
+        st.write("### שלב 2: בקשות למשמרות (Wishes) - אופציונלי")
+        st.caption("ניתן לבחור עד **2 תאריכים** בחודש בהם היית רוצה לעבוד. המערכת תשתדל להתחשב, אך לא מבטיחה שיבוץ.")
+        
+        # בחירת בקשות חיוביות
+        existing_wishes = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "בקשה")]
+        default_wishes = []
+        if not existing_wishes.empty:
+            for d_str in existing_wishes['date']:
+                try:
+                    d_obj = datetime.strptime(d_str, '%Y-%m-%d').date()
+                    if d_obj.month == sel_month and d_obj.year == 2026:
+                        default_wishes.append(d_obj)
+                except: pass
+
+        selected_wishes = []
+        wish_cols = st.columns(7)
+        for week in cal:
+            w_wk_cols = st.columns(7)
+            for i, day_num in enumerate(week):
+                with w_wk_cols[i]:
+                    if day_num != 0:
+                        d_obj = date(2026, sel_month, day_num)
+                        is_wished = d_obj in default_wishes
+                        # במקום Chkbox, נשתמש ב-Toggle או משהו שונה ויזואלית
+                        win_chk = st.checkbox(f"⭐ {day_num}", value=is_wished, key=f"wish_chk_{sel_month}_{day_num}")
+                        if win_chk:
+                            selected_wishes.append(d_obj)
+
         # -----------------------------------
         st.divider()
         
-        if st.button("עדכן אילוצים"):
+        if st.button("עדכן אילוצים ובקשות"):
             # --- ולידציה (חוקים) ---
             validation_passed = True
+            errors = []
+            
+            if len(selected_wishes) > 2:
+                errors.append("שגיאה: ניתן לבחור עד 2 בקשות חיוביות (⭐) בלבד.")
+            
+            # בדיקה שלא בחר באותו יום גם אילוץ וגם בקשה
+            overlap = set(selected_from_grid).intersection(set(selected_wishes))
+            if overlap:
+                errors.append(f"שגיאה: בחרת באותו יום ({list(overlap)[0].strftime('%d/%m')}) גם אילוץ וגם בקשה. נא בחר רק אחד.")
+
             if st.session_state.user_role == 'מתמחה': # רק למתמחים
                 # חישוב ימים פנויים
                 num_days = calendar.monthrange(2026, sel_month)[1]
@@ -1202,17 +1277,26 @@ else:
             
             if validation_passed or st.session_state.user_role == 'מנהל/ת':           
                 st.session_state['selected_dates_for_update'] = selected_from_grid
+                st.session_state['selected_wishes_for_update'] = selected_wishes
                 st.session_state['confirm_request_save'] = True
 
         if st.session_state.get('confirm_request_save', False):
             selected = st.session_state.get('selected_dates_for_update', [])
-             # חישוב אילו ימים נוספו ואילו הוסרו
+            wishes = st.session_state.get('selected_wishes_for_update', [])
+            
+             # חישוב אילו ימים נוספו ואילו הוסרו (אילוצים)
             added = set(selected) - set(default_dates)
             removed = set(default_dates) - set(selected)
+            
+            # חישוב שינויים בבקשות
+            added_wishes = set(wishes) - set(default_wishes)
+            removed_wishes = set(default_wishes) - set(wishes)
             
             changes_msg = ""
             if added: changes_msg += f"➕ **נוספו לחסימה:** {', '.join([d.strftime('%d/%m/%Y') for d in added])}\n\n"
             if removed: changes_msg += f"➖ **הוסרו מחסימה:** {', '.join([d.strftime('%d/%m/%Y') for d in removed])}\n\n"
+            if added_wishes: changes_msg += f"⭐ **נוספו לבקשה:** {', '.join([d.strftime('%d/%m/%Y') for d in added_wishes])}\n\n"
+            if removed_wishes: changes_msg += f"⭐❌ **הוסרו מבקשה:** {', '.join([d.strftime('%d/%m/%Y') for d in removed_wishes])}\n\n"
             
             if not changes_msg and not (not default_dates and not selected):
                  st.info("לא ביצעת שינויים.")
@@ -1228,12 +1312,19 @@ else:
 
                 c_yes, c_no = st.columns(2)
                 if c_yes.button("✅ כן, עדכן"):
-                    # הסרת כל האילוצים הקודמים של המשתמש
-                    st.session_state.requests = st.session_state.requests[st.session_state.requests['employee'] != user_name]
+                    # הסרת כל האילוצים והבקשות הקודמים של המשתמש לחודש זה
+                    current_month_prefix = f"2026-{sel_month:02d}"
+                    mask_keep = ~((st.session_state.requests['employee'] == user_name) & 
+                                  (st.session_state.requests['date'].str.startswith(current_month_prefix)))
+                    st.session_state.requests = st.session_state.requests[mask_keep]
+                    
                     # הוספת הרשימה החדשה והמעודכנת
                     if selected:
-                        new = pd.DataFrame([{'employee': user_name, 'date': str(d), 'status': "אילוץ"} for d in selected])
-                        st.session_state.requests = pd.concat([st.session_state.requests, new], ignore_index=True)
+                        new_reqs = pd.DataFrame([{'employee': user_name, 'date': str(d), 'status': "אילוץ"} for d in selected])
+                        st.session_state.requests = pd.concat([st.session_state.requests, new_reqs], ignore_index=True)
+                    if wishes:
+                        new_wishes = pd.DataFrame([{'employee': user_name, 'date': str(d), 'status': "בקשה"} for d in wishes])
+                        st.session_state.requests = pd.concat([st.session_state.requests, new_wishes], ignore_index=True)
                     
                     save_to_db("requests", st.session_state.requests)
                     st.success("האילוצים עודכנו בהצלחה!")
