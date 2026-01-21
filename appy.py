@@ -18,6 +18,7 @@ st.markdown("""
         text-align: right; 
         font-family: 'Rubik', sans-serif;
         background-color: #f0f2f6; 
+        color: #1e293b !important; /* Force dark text color */
     }
     
     /* Ensure sidebar handles RTL naturally without squashing */
@@ -87,8 +88,9 @@ st.markdown("""
     /* Mobile Responsive Adjustments */
     @media (max-width: 768px) {
         /* Prevent sidebar title squashing */
+        /* Prevent sidebar title squashing but allow wrapping */
         [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
-            white-space: nowrap !important;
+            word-wrap: break-word !important;
         }
         
         /* Ensure calendar days don't get too small */
