@@ -1151,25 +1151,31 @@ else:
     with tab1:
         st.subheader(f"הגשת אילוצים עבור: {user_name}")
         
-        # --- הצגת אילוצים קיימים ---
-        existing = st.session_state.requests[st.session_state.requests['employee'] == user_name]
-        if not existing.empty:
-            st.info(f"📅 **תאריכים שכבר חסמת ({len(existing)}):**\n" + ", ".join([r['date'] for _, r in existing.iterrows()]))
+        # --- הצגת אילוצים ובקשות קיימים ---
+        existing_constraints = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "אילוץ")]
+        existing_wishes_all = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "בקשה")]
+        
+        if not existing_constraints.empty or not existing_wishes_all.empty:
+            msg = ""
+            if not existing_constraints.empty:
+                msg += f"📅 **חסימות ({len(existing_constraints)}):** " + ", ".join([r['date'] for _, r in existing_constraints.iterrows()]) + "\n\n"
+            if not existing_wishes_all.empty:
+                msg += f"⭐ **בקשות ({len(existing_wishes_all)}):** " + ", ".join([r['date'] for _, r in existing_wishes_all.iterrows()])
+            st.info(msg)
         else:
-            st.info("עדיין לא הגשת אילוצים לחודש זה.")
+            st.info("עדיין לא הגשת אילוצים או בקשות לחודש זה.")
         # ----------------------------
 
         st.divider()
         st.write("### שלב 1: סימון ימים בהם **אינך** יכול/ה לעבוד")
         st.caption("חובה להשאיר לפחות 2 ימי חמישי ו-4 ימי סופ\"ש פנויים.")
 
-        # חישוב תאריכים שכבר נבחרו (לצורך אתחול)
+        # חישוב תאריכים שכבר נבחרו (לצורך אתחול - חסימות בלבד)
         default_dates = []
-        if not existing.empty:
-            for d_str in existing['date']:
+        if not existing_constraints.empty:
+            for d_str in existing_constraints['date']:
                 try:
                     d_obj = datetime.strptime(d_str, '%Y-%m-%d').date()
-                    # יש להוסיף רק תאריכים שרלוונטיים לחודש הנבחר
                     if d_obj.month == sel_month and d_obj.year == 2026:
                         default_dates.append(d_obj)
                 except: pass
