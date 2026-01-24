@@ -299,9 +299,9 @@ else:
                 margin-top: -2px !important;
                 justify-content: center !important;
             } 
-            div[data-testid="stCheckbox"] label {
-                display: none !important;
-            }
+            /* Label hiding is removed as it hides the checkbox itself in some structures. 
+               We rely on label_visibility="collapsed" in Python. */
+            
             div[data-testid="stCheckbox"] div[role="checkbox"] {
                 transform: scale(0.75) !important;
             }
@@ -1311,7 +1311,8 @@ else:
                         d_obj = date(2026, sel_month, day_num)
                         is_checked = d_obj in default_dates
                         # מפתח ייחודי לכל צ'קבוקס
-                        chk = st.checkbox(f"❌ {day_num}", value=is_checked, key=f"date_chk_{sel_month}_{day_num}")
+                        st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:small; margin-bottom: -10px;'>{day_num}</div>", unsafe_allow_html=True)
+                        chk = st.checkbox(f"select_{day_num}_const", value=is_checked, key=f"date_chk_{sel_month}_{day_num}", label_visibility="collapsed")
                         if chk:
                             selected_from_grid.append(d_obj)
         
@@ -1330,18 +1331,20 @@ else:
                         default_wishes.append(d_obj)
                 except: pass
 
-        selected_wishes = []
+        selected_wishes = [] # Initialize selected_wishes for the grid
         wish_cols = st.columns(7)
         for week in cal:
             w_wk_cols = st.columns(7)
             for i, day_num in enumerate(week):
                 with w_wk_cols[i]:
-                    if day_num != 0:
+                    if day_num == 0:
+                        st.write("")
+                    else:
                         d_obj = date(2026, sel_month, day_num)
-                        is_wished = d_obj in default_wishes
-                        # במקום Chkbox, נשתמש ב-Toggle או משהו שונה ויזואלית
-                        win_chk = st.checkbox(f"⭐ {day_num}", value=is_wished, key=f"wish_chk_{sel_month}_{day_num}")
-                        if win_chk:
+                        is_checked = d_obj in default_wishes
+                        st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:small; margin-bottom: -10px;'>{day_num}</div>", unsafe_allow_html=True)
+                        chk = st.checkbox(f"w_select_{day_num}", value=is_checked, key=f"wish_chk_{sel_month}_{day_num}", label_visibility="collapsed")
+                        if chk:
                             selected_wishes.append(d_obj)
 
         # -----------------------------------
