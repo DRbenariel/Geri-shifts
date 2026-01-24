@@ -99,51 +99,66 @@ st.markdown("""
             word-wrap: break-word !important;
         }
 
-        /* 1. Hide collapsed sidebar button properly if needed, but mainly ensure no ghost text */
-        section[data-testid="stSidebar"][aria-expanded="false"] {
-            display: none !important;
+        /* 1. Aggressive Sidebar Hiding on Mobile */
+        /* Hide the sidebar container completely when collapsed or small */
+        @media (max-width: 768px) {
+            section[data-testid="stSidebar"][aria-expanded="false"], 
+            section[data-testid="stSidebar"][aria-hidden="true"] {
+                display: none !important;
+                width: 0 !important;
+                flex: 0 !important;
+            }
+            /* Hide the small "collapsed" control button text if it appears */
+            div[data-testid="stSidebarCollapsedControl"] {
+                display: none !important;
+            }
         }
-        
+
         /* 2. Mini-Calendar Grid for Mobile */
-        /* Force horizontal block to be a grid of 7 columns */
+        /* Force horizontal block to be a 7-column grid */
+        /* Selector targeting the horizontal block specifically */
         div[data-testid="stHorizontalBlock"] {
             display: grid !important;
             grid-template-columns: repeat(7, 1fr) !important;
-            gap: 2px !important;
+            gap: 1px !important; /* Tighter gap */
             padding: 0 !important;
-            align-items: center !important;
             width: 100% !important;
-            overflow-x: hidden !important; /* Prevent side scroll */
         }
-        
-        /* Adjust column styling inside the grid */
+
+        /* Force columns to abandon their inline width % */
         div[data-testid="column"] {
-            min-width: 0 !important;
             width: auto !important;
-            flex: 1 !important;
-            padding: 0 !important;
-            margin: 0 !important;
+            min-width: 0 !important;
+            flex: 1 1 0 !important;
+            padding: 1px !important; /* Minimal padding */
         }
         
-        /* Shrink checkboxes and DATE headers for the mini grid */
+        /* Inner text alignment */
+        div[data-testid="column"] > div {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Shrink headers */
         div[data-testid="column"] div[data-testid="stMarkdownContainer"] p {
-            font-size: 0.8rem !important; /* Small date text */
-            text-align: center !important;
-            font-weight: bold !important;
+             font-size: 11px !important;
+             text-align: center !important;
+             margin: 0 !important;
+             line-height: 1.2 !important;
         }
-        
-        /* Shrink Checkboxes */
-        div[data-testid="stCheckbox"] label {
-            font-size: 0.7rem !important; /* Tiny label if exists */
-            display: none !important; /* Hide label text 'X' if space is tight? User asked for grid. */
-        }
+
+        /* Checkbox tweaks */
         div[data-testid="stCheckbox"] {
-            display: flex !important;
+            margin-top: -2px !important;
             justify-content: center !important;
-            margin-top: -5px !important;
+        } 
+        div[data-testid="stCheckbox"] label {
+            display: none !important;
         }
         div[data-testid="stCheckbox"] div[role="checkbox"] {
-            transform: scale(0.8) !important; /* Smaller checkbox */
+            transform: scale(0.75) !important;
         }
         
         /* Ensure calendar days don't get too small */
