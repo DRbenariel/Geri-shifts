@@ -98,6 +98,53 @@ st.markdown("""
         [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
             word-wrap: break-word !important;
         }
+
+        /* 1. Hide collapsed sidebar button properly if needed, but mainly ensure no ghost text */
+        section[data-testid="stSidebar"][aria-expanded="false"] {
+            display: none !important;
+        }
+        
+        /* 2. Mini-Calendar Grid for Mobile */
+        /* Force horizontal block to be a grid of 7 columns */
+        div[data-testid="stHorizontalBlock"] {
+            display: grid !important;
+            grid-template-columns: repeat(7, 1fr) !important;
+            gap: 2px !important;
+            padding: 0 !important;
+            align-items: center !important;
+            width: 100% !important;
+            overflow-x: hidden !important; /* Prevent side scroll */
+        }
+        
+        /* Adjust column styling inside the grid */
+        div[data-testid="column"] {
+            min-width: 0 !important;
+            width: auto !important;
+            flex: 1 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+        
+        /* Shrink checkboxes and DATE headers for the mini grid */
+        div[data-testid="column"] div[data-testid="stMarkdownContainer"] p {
+            font-size: 0.8rem !important; /* Small date text */
+            text-align: center !important;
+            font-weight: bold !important;
+        }
+        
+        /* Shrink Checkboxes */
+        div[data-testid="stCheckbox"] label {
+            font-size: 0.7rem !important; /* Tiny label if exists */
+            display: none !important; /* Hide label text 'X' if space is tight? User asked for grid. */
+        }
+        div[data-testid="stCheckbox"] {
+            display: flex !important;
+            justify-content: center !important;
+            margin-top: -5px !important;
+        }
+        div[data-testid="stCheckbox"] div[role="checkbox"] {
+            transform: scale(0.8) !important; /* Smaller checkbox */
+        }
         
         /* Ensure calendar days don't get too small */
         .calendar-day { 
