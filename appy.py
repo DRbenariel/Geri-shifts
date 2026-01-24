@@ -99,78 +99,6 @@ st.markdown("""
             word-wrap: break-word !important;
         }
 
-        /* 1. Aggressive Sidebar Hiding on Mobile */
-        /* Hide the sidebar container completely when collapsed or small */
-        @media (max-width: 768px) {
-            section[data-testid="stSidebar"][aria-expanded="false"], 
-            section[data-testid="stSidebar"][aria-hidden="true"] {
-                display: none !important;
-                width: 0 !important;
-                flex: 0 !important;
-            }
-            /* Hide the small "collapsed" control button text if it appears */
-            div[data-testid="stSidebarCollapsedControl"] {
-                display: none !important;
-            }
-        }
-
-        /* 2. Mini-Calendar Grid for Mobile */
-        /* Force horizontal block to be a 7-column grid */
-        /* Selector targeting the horizontal block specifically */
-        div[data-testid="stHorizontalBlock"] {
-            display: grid !important;
-            grid-template-columns: repeat(7, 1fr) !important;
-            gap: 1px !important; /* Tighter gap */
-            padding: 0 !important;
-            width: 100% !important;
-        }
-
-        /* Force columns to abandon their inline width % */
-        div[data-testid="column"] {
-            width: auto !important;
-            min-width: 0 !important;
-            flex: 1 1 0 !important;
-            padding: 1px !important; /* Minimal padding */
-        }
-        
-        /* Inner text alignment */
-        div[data-testid="column"] > div {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }
-
-        /* Shrink headers */
-        div[data-testid="column"] div[data-testid="stMarkdownContainer"] p {
-             font-size: 11px !important;
-             text-align: center !important;
-             margin: 0 !important;
-             line-height: 1.2 !important;
-        }
-
-        /* Checkbox tweaks */
-        div[data-testid="stCheckbox"] {
-            margin-top: -2px !important;
-            justify-content: center !important;
-        } 
-        div[data-testid="stCheckbox"] label {
-            display: none !important;
-        }
-        div[data-testid="stCheckbox"] div[role="checkbox"] {
-            transform: scale(0.75) !important;
-        }
-        
-        /* Ensure calendar days don't get too small */
-        .calendar-day { 
-            min-height: 120px !important; 
-            padding: 6px !important; 
-            margin-bottom: 8px !important;
-        }
-        .day-number { font-size: 1em !important; }
-        .slot { padding: 3px 5px !important; font-size: 10px !important; }
-        h1, h2, h3 { font-size: 1.2rem !important; }
-        
         /* Adjust login card */
         div[style*="max-width: 400px"] {
             max-width: 95% !important;
@@ -324,6 +252,63 @@ if 'logged_in' not in st.session_state:
 if not st.session_state.logged_in:
     login_screen()
     st.stop()
+else:
+    # --- הזרקת CSS ייעודי למובייל (רק למשתמש מחובר) ---
+    # מונע את עיוות מסך הכניסה
+    st.markdown("""
+        <style>
+        /* 1. Aggressive Sidebar Hiding on Mobile */
+        @media (max-width: 768px) {
+            section[data-testid="stSidebar"][aria-expanded="false"], 
+            section[data-testid="stSidebar"][aria-hidden="true"] {
+                display: none !important;
+                width: 0 !important;
+                flex: 0 !important;
+            }
+            div[data-testid="stSidebarCollapsedControl"] {
+                display: none !important;
+            }
+            
+            /* 2. Mini-Calendar Grid for Mobile */
+            div[data-testid="stHorizontalBlock"] {
+                display: grid !important;
+                grid-template-columns: repeat(7, 1fr) !important;
+                gap: 1px !important;
+                padding: 0 !important;
+                width: 100% !important;
+            }
+            div[data-testid="column"] {
+                width: auto !important;
+                min-width: 0 !important;
+                flex: 1 1 0 !important;
+                padding: 1px !important;
+            }
+            div[data-testid="column"] > div {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+            }
+            div[data-testid="column"] div[data-testid="stMarkdownContainer"] p {
+                 font-size: 11px !important;
+                 text-align: center !important;
+                 margin: 0 !important;
+                 line-height: 1.2 !important;
+            }
+            div[data-testid="stCheckbox"] {
+                margin-top: -2px !important;
+                justify-content: center !important;
+            } 
+            div[data-testid="stCheckbox"] label {
+                display: none !important;
+            }
+            div[data-testid="stCheckbox"] div[role="checkbox"] {
+                transform: scale(0.75) !important;
+            }
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
 
 # טעינת נתונים ממסד הנתונים ל-Session State
 if 'staff' not in st.session_state:
