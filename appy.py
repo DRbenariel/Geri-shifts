@@ -305,6 +305,19 @@ else:
             div[data-testid="stCheckbox"] div[role="checkbox"] {
                 transform: scale(0.75) !important;
             }
+            /* Fix for Confirmation Buttons - Force Horizontal */
+            div:has(#confirm-buttons-hook) + div[data-testid="stHorizontalBlock"],
+            div:has(#confirm-buttons-hook) ~ div[data-testid="stHorizontalBlock"] {
+                display: flex !important;
+                flex-direction: row !important;
+                gap: 10px !important;
+                grid-template-columns: none !important; /* Override the grid rule */
+            }
+            
+            div:has(#confirm-buttons-hook) ~ div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+                width: 50% !important;
+                flex: 1 !important;
+            }
         }
         </style>
     """, unsafe_allow_html=True)
@@ -1421,6 +1434,8 @@ else:
                      # מקרה קצה של שמירה ראשונית ריקה או ללא שינוי
                      pass
 
+                # Hook for CSS targeting
+                st.markdown('<div id="confirm-buttons-hook"></div>', unsafe_allow_html=True)
                 c_yes, c_no = st.columns(2)
                 if c_yes.button("✅ כן, עדכן"):
                     # הסרת כל האילוצים והבקשות הקודמים של המשתמש לחודש זה
