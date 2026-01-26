@@ -306,17 +306,17 @@ else:
                 transform: scale(0.75) !important;
             }
             /* Fix for Confirmation Buttons - Force Horizontal */
-            div:has(#confirm-buttons-hook) + div[data-testid="stHorizontalBlock"],
-            div:has(#confirm-buttons-hook) ~ div[data-testid="stHorizontalBlock"] {
+            div[data-testid="stHorizontalBlock"]:has(#confirm-buttons-hook-inner) {
                 display: flex !important;
                 flex-direction: row !important;
                 gap: 10px !important;
-                grid-template-columns: none !important; /* Override the grid rule */
+                grid-template-columns: 1fr 1fr !important; /* Force Grid 1:1 */
             }
             
-            div:has(#confirm-buttons-hook) ~ div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            div[data-testid="stHorizontalBlock"]:has(#confirm-buttons-hook-inner) > div[data-testid="column"] {
                 width: 50% !important;
-                flex: 1 !important;
+                flex: 1 1 50% !important;
+                min-width: 0 !important;
             }
         }
         </style>
@@ -1437,6 +1437,8 @@ else:
                 # Hook for CSS targeting
                 st.markdown('<div id="confirm-buttons-hook"></div>', unsafe_allow_html=True)
                 c_yes, c_no = st.columns(2)
+                # Inject hook inside the first column to target the parent row
+                c_yes.markdown('<span id="confirm-buttons-hook-inner" style="display:none;"></span>', unsafe_allow_html=True)
                 if c_yes.button("✅ כן, עדכן"):
                     # הסרת כל האילוצים והבקשות הקודמים של המשתמש לחודש זה
                     current_month_prefix = f"2026-{sel_month:02d}"
