@@ -1116,6 +1116,63 @@ if role == "מנהל/ת":
                 st.success(f"האילוצים של {selected_emp_mgr} לחודש {sel_month}/2026 עודכנו בהצלחה!")
                 st.rerun()
     with t3:
+        st.header("דוח סטטוס ומסכמים")
+        
+        # --- חלק חדש: טבלת סטטוס הגשת אילוצים ---
+        st.subheader("📊 סטטוס הגשת אילוצים לחודש זה")
+        
+        if not st.session_state.staff.empty:
+            # סינון רק למתמחים ותורני חוץ (אפשר לשנות אם רוצים גם מנהלים)
+            relevant_staff = st.session_state.staff[st.session_state.staff['type'].isin(['מתמחה', 'תורן חוץ'])]
+            
+            status_data = []
+            # המרה סטנדרטית של Request Date למחרוזת לצורך סינון
+            current_month_prefix = f"2026-{sel_month:02d}"
+            
+            # וידוא שהעמודה מסוג מחרוזת
+            st.session_state.requests['date'] = st.session_state.requests['date'].astype(str)
+
+            for _, emp in relevant_staff.iterrows():
+                name = emp['name']
+                
+                # סינון בקשות של העובד לחודש הנוכחי
+                user_reqs = st.session_state.requests[
+                    (st.session_state.requests['employee'] == name) & 
+                    (st.session_state.requests['date'].str.startswith(current_month_prefix))
+                ]
+                
+                n_constraints = len(user_reqs[user_reqs['status'] == 'אילוץ'])
+                n_wishes = len(user_reqs[user_reqs['status'] == 'בקשה'])
+                
+                # קביעת סטטוס
+                has_submitted = (n_constraints + n_wishes) > 0
+                status_icon = "✅ הגיש" if has_submitted  else "❌ טרם הגיש"
+                
+                status_data.append({
+                    "שם העובד": name,
+                    "תפקיד": emp['type'],
+                    "סטטוס": status_icon,
+                    "חסימות (🔒)": n_constraints,
+                    "בקשות (⭐)": n_wishes
+                })
+            
+            df_status = pd.DataFrame(status_data)
+            
+            # צביעת הטבלה (אופציונלי: ירוק למי שהגיש)
+            def highlight_status(val):
+                color = '#d1fae5' if '✅' in str(val) else '#fee2e2'
+                return f'background-color: {color}'
+            
+            st.dataframe(
+                df_status.style.applymap(highlight_status, subset=['סטטוס']),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("אין עובדים במערכת.")
+            
+        st.divider()
+
         if not st.session_state.schedule.empty: 
             st.subheader("ספירת משמרות")
             
