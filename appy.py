@@ -1122,52 +1122,74 @@ if role == "מנהל/ת":
         st.subheader("📊 סטטוס הגשת אילוצים לחודש זה")
         
         if not st.session_state.staff.empty:
-            # סינון רק למתמחים ותורני חוץ (אפשר לשנות אם רוצים גם מנהלים)
+            # סינון רק למתמחים ותורני חוץ
             relevant_staff = st.session_state.staff[st.session_state.staff['type'].isin(['מתמחה', 'תורן חוץ'])]
             
-            status_data = []
-            # המרה סטנדרטית של Request Date למחרוזת לצורך סינון
-            current_month_prefix = f"2026-{sel_month:02d}"
-            
-            # וידוא שהעמודה מסוג מחרוזת
-            st.session_state.requests['date'] = st.session_state.requests['date'].astype(str)
+            if relevant_staff.empty:
+                st.info("לא נמצאו עובדים (מתמחים/תורני חוץ) להצגה.")
+            else:
+                status_data = []
+                current_month_prefix = f"2026-{sel_month:02d}"
+                
+                # וידוא שהעמודה מסוג מחרוזת (העתק מקומי כדי לא לשנות לכולם באופן קבוע אם לא רצוי)
+                reqs_df = st.session_state.requests.copy()
+                if not reqs_df.empty:
+                    reqs_df['date'] = reqs_df['date'].astype(str)
+                
+                for _, emp in relevant_staff.iterrows():
+                    name = emp['name']
+                    
+                    if not reqs_df.empty:
+                        # סינון בקשות של העובד לחודש הנוכחי
+                        user_reqs = reqs_df[
+                            (reqs_df['employee'] == name) & 
+                            (reqs_df['date'].str.startswith(current_month_prefix))
+                        ]
+                        
+                        n_constraints = len(user_reqs[user_reqs['status'] == 'אילוץ'])
+                        n_wishes = len(user_reqs[user_reqs['status'] == 'בקשה'])
+                    else:
+                        n_constraints = 0
+                        n_wishes = 0
+                    
+                    # קביעת סטטוס
+                    has_submitted = (n_constraints + n_wishes) > 0
+                    status_icon = "✅ הגיש" if has_submitted  else "❌ טרם הגיש"
+                    
+                    status_data.append({
+                        "שם העובד": name,
+                        "תפקיד": emp['type'],
+                        "סטטוס": status_icon,
+                        "חסימות (🔒)": n_constraints,
+                        "בקשות (⭐)": n_wishes
+                    })
+                
+                df_status = pd.DataFrame(status_data)
+                
+                # אם הדאטה פריים ריק (לא אמור לקרות אם relevant_staff לא ריק), דואגים לעמודות
+                if df_status.empty:
+                     df_status = pd.DataFrame(columns=["שם העובד", "תפקיד", "סטטוס", "חסימות (🔒)", "בקשות (⭐)"])
 
-            for _, emp in relevant_staff.iterrows():
-                name = emp['name']
-                
-                # סינון בקשות של העובד לחודש הנוכחי
-                user_reqs = st.session_state.requests[
-                    (st.session_state.requests['employee'] == name) & 
-                    (st.session_state.requests['date'].str.startswith(current_month_prefix))
-                ]
-                
-                n_constraints = len(user_reqs[user_reqs['status'] == 'אילוץ'])
-                n_wishes = len(user_reqs[user_reqs['status'] == 'בקשה'])
-                
-                # קביעת סטטוס
-                has_submitted = (n_constraints + n_wishes) > 0
-                status_icon = "✅ הגיש" if has_submitted  else "❌ טרם הגיש"
-                
-                status_data.append({
-                    "שם העובד": name,
-                    "תפקיד": emp['type'],
-                    "סטטוס": status_icon,
-                    "חסימות (🔒)": n_constraints,
-                    "בקשות (⭐)": n_wishes
-                })
-            
-            df_status = pd.DataFrame(status_data)
-            
-            # צביעת הטבלה (אופציונלי: ירוק למי שהגיש)
-            def highlight_status(val):
-                color = '#d1fae5' if '✅' in str(val) else '#fee2e2'
-                return f'background-color: {color}'
-            
-            st.dataframe(
-                df_status.style.applymap(highlight_status, subset=['סטטוס']),
-                use_container_width=True,
-                hide_index=True
-            )
+                # צביעת הטבלה
+                try:
+                    def highlight_status(val):
+                        try:
+                            color = '#d1fae5' if '✅' in str(val) else '#fee2e2'
+                            return f'background-color: {color}'
+                        except:
+                            return ''
+                    
+                    # שימוש ב-applymap שקיים בגרסאות ישנות וחדשות (עד שיוסר לחלוטין), או map בחדשות.
+                    # ננסה applymap ונתפוס שגיאה אם יש
+                    st.dataframe(
+                        df_status.style.applymap(highlight_status, subset=['סטטוס']),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                except Exception as e:
+                    # Fallback ללא עיצוב במקרה של שגיאה
+                    st.dataframe(df_status, use_container_width=True, hide_index=True)
+
         else:
             st.info("אין עובדים במערכת.")
             
