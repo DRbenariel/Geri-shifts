@@ -281,6 +281,22 @@ def setup_style():
         color: #64748b !important;
     }
 
+    /* Optimized Single-Component Calendar Grid */
+    .calendar-chip-grid .st-key-chip_wrapper {
+        display: grid !important;
+        grid-template-columns: repeat(7, 1fr) !important;
+        gap: 8px !important;
+        width: 100% !important;
+    }
+    .calendar-chip-grid .st-key-chip_wrapper > div {
+        width: 100% !important;
+        margin: 0 !important;
+    }
+    .calendar-chip-grid span {
+        width: 100% !important;
+        justify-content: center !important;
+    }
+
     /* Global Right Alignment for specific containers */
     .element-container, .stMarkdown {
         direction: rtl;

@@ -165,8 +165,10 @@ def init_db():
         else:
              st.error(f"שגיאה באתחול: {e}")
 
-# אתחול מסד הנתונים
-init_db()
+# אתחול מסד הנתונים (רק פעם אחת)
+if 'db_initialized' not in st.session_state:
+    init_db()
+    st.session_state.db_initialized = True
 
 # --- 3. ניהול התחברות (Login) ---
 def login_screen():
@@ -1043,7 +1045,20 @@ if role == "מנהל/ת":
                 save_to_db("staff", st.session_state.staff)
                 st.success("הנתונים נשמרו בהצלחה!")
                 st.rerun()
-            
+        
+        st.markdown("---")
+        col_sync, col_warn = st.columns([1, 3])
+        with col_sync:
+            if st.button("🔄 סנכרן נתונים מהענן"):
+                 # Force reload of all data
+                 st.cache_data.clear()
+                 for key in ['staff', 'schedule', 'requests']:
+                     if key in st.session_state:
+                         del st.session_state[key]
+                 st.rerun()
+        with col_warn:
+             st.warning("⚠️ שים לב: עריכה בטבלה זו דורסת שינויים שנעשו ישירות ב-Google Sheets. אם ערכת שם, לחץ קודם על 'סנכרן נתונים'.")
+
         st.divider()
         st.subheader("ניהול אילוצים ומשמרות")
         
@@ -1452,16 +1467,27 @@ else:
         default_day_nums = get_day_nums(st.session_state.requests, "אילוץ")
         default_wish_nums = get_day_nums(st.session_state.requests, "בקשה")
         
+        # Unique key for this month's load status
+        month_load_key = f"chips_loaded_{sel_month}"
+        
         # Initialize session state for all potential chips
+        # We FORCE initialization if this month hasn't been loaded yet in this session
+        should_force_init = month_load_key not in st.session_state
+        
         for week in cal:
             for day_num in week:
                 if day_num != 0:
                     const_key = f"const_{sel_month}_{day_num}"
                     wish_key = f"wish_{sel_month}_{day_num}"
-                    if const_key not in st.session_state:
+                    
+                    if should_force_init or const_key not in st.session_state:
                          st.session_state[const_key] = [0] if day_num in default_day_nums else []
-                    if wish_key not in st.session_state:
+                    
+                    if should_force_init or wish_key not in st.session_state:
                          st.session_state[wish_key] = [0] if day_num in default_wish_nums else []
+        
+        # Mark as loaded so we don't overwrite user interactions on next rerun
+        st.session_state[month_load_key] = True
 
         # --- הצגת אילוצים ובקשות קיימים ---
         existing_constraints = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "אילוץ")]
@@ -1507,31 +1533,64 @@ else:
         
         selected_from_grid = []
         
-        # Render calendar grid with chips
-        for week in cal:
-            wk_cols = st.columns(7)
-            for i, day_num in enumerate(week):
-                with wk_cols[i]:
-                    if day_num == 0:
-                        st.write("")
-                    else:
-                        d_obj = date(2026, sel_month, day_num)
-                        chip_key = f"const_{sel_month}_{day_num}"
-                        
-                        # Use chip for each day - No 'index' prop to prevent sticky jumps
-                        sac.chip(
-                            items=[sac.ChipItem(label=str(day_num))],
-                            align='center',
-                            radius='sm',
-                            multiple=True,
-                            return_index=True,
-                            key=chip_key,
-                            color='indigo',
-                            size='sm'
-                        )
-                        
-                        if st.session_state.get(chip_key):
-                            selected_from_grid.append(d_obj)
+        # Prepare items for single-component grid
+        chip_items = []
+        
+        # Add empty padding days for start of month
+        first_weekday = cal[0].index(1) if 1 in cal[0] else 0 # 0=Mon, but user wants Sun=0? calendar.setfirstweekday(calendar.SUNDAY) is set
+        # Python calendar.monthcalendar with setfirstweekday(SUNDAY) returns 0 for empty days.
+        
+        # Determine strict grid items including 0 padding
+        flat_days = [d for week in cal for d in week]
+        
+        chip_items = []
+        for d in flat_days:
+            if d == 0:
+                # Invisible spacer
+                chip_items.append(sac.ChipItem(label=' ', disabled=True, color='grey'))
+            else:
+                chip_items.append(sac.ChipItem(label=str(d)))
+        
+        # Render Single Component Calendar (Constraints)
+        st.markdown('<div class="calendar-chip-grid">', unsafe_allow_html=True)
+        
+        # Sync Key Logic
+        const_combined_key = f"const_batch_{sel_month}"
+        
+        # Pre-select known days
+        # We need to map day numbers to the component's index (which includes 0s)
+        # BUT sac.chip uses labels for selection if index is not passed? 
+        # Actually, using 'index' list of *integer indices* of the items list is safest.
+        
+        selected_indices = []
+        for idx, d in enumerate(flat_days):
+            if d != 0 and d in default_day_nums:
+                selected_indices.append(idx)
+        
+        # We use a session state check to initialize ONLY ONCE per month load
+        if const_combined_key not in st.session_state:
+             st.session_state[const_combined_key] = selected_indices
+        
+        selected_indices_grid = sac.chip(
+            items=chip_items,
+            index=st.session_state[const_combined_key],
+            align='center',
+            radius='sm',
+            multiple=True,
+            return_index=True,
+            key=const_combined_key,
+            color='indigo',
+            size='sm'
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Process Selection
+        # Convert selected indices back to real dates
+        for idx in selected_indices_grid:
+            day_num = flat_days[idx]
+            if day_num != 0:
+                selected_from_grid.append(date(2026, sel_month, day_num))
+
         
         st.divider()
         st.write("### שלב 2: בקשות למשמרות - אופציונלי")
@@ -1554,31 +1613,47 @@ else:
         
         selected_wishes = []
         
-        # Render calendar grid with chips
-        for week in cal:
-            w_wk_cols = st.columns(7)
-            for i, day_num in enumerate(week):
-                with w_wk_cols[i]:
-                    if day_num == 0:
-                        st.write("")
-                    else:
-                        d_obj = date(2026, sel_month, day_num)
-                        wish_key = f"wish_{sel_month}_{day_num}"
-                        
-                        # Use chip for each day - No 'index' prop to prevent sticky jumps
-                        sac.chip(
-                            items=[sac.ChipItem(label=str(day_num))],
-                            align='center',
-                            radius='sm',
-                            multiple=True,
-                            return_index=True,
-                            key=wish_key,
-                            color='indigo',
-                            size='sm'
-                        )
-                        
-                        if st.session_state.get(wish_key):
-                            selected_wishes.append(d_obj)
+        # Prepare items for single-component grid (Wishes)
+        wish_items = []
+        for d in flat_days:
+            if d == 0:
+                wish_items.append(sac.ChipItem(label=' ', disabled=True, color='grey'))
+            else:
+                wish_items.append(sac.ChipItem(label=str(d)))
+        
+        st.markdown('<div class="calendar-chip-grid">', unsafe_allow_html=True)
+        
+        # Sync Key Logic for Wishes
+        wish_combined_key = f"wish_batch_{sel_month}"
+        
+        # Pre-select known days
+        selected_indices_wish = []
+        for idx, d in enumerate(flat_days):
+            if d != 0 and d in default_wish_nums:
+                selected_indices_wish.append(idx)
+        
+        # We use a session state check to initialize ONLY ONCE per month load
+        if wish_combined_key not in st.session_state:
+             st.session_state[wish_combined_key] = selected_indices_wish
+        
+        selected_indices_wish_grid = sac.chip(
+            items=wish_items,
+            index=st.session_state[wish_combined_key],
+            align='center',
+            radius='sm',
+            multiple=True,
+            return_index=True,
+            key=wish_combined_key,
+            color='indigo',
+            size='sm'
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Process Selection
+        for idx in selected_indices_wish_grid:
+            day_num = flat_days[idx]
+            if day_num != 0:
+                selected_wishes.append(date(2026, sel_month, day_num))
         
         # -----------------------------------
         st.divider()
