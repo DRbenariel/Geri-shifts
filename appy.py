@@ -4,110 +4,20 @@ from datetime import datetime, date, timedelta
 import calendar
 import random
 import io
+import streamlit_shadcn_ui as ui
+import streamlit_antd_components as sac  # Added for Chips/Menu
+import hashlib
+import gspread
+from streamlit_gsheets import GSheetsConnection
+import time
 
 calendar.setfirstweekday(calendar.SUNDAY)
 
+import ui_components # Modular UI components
+
 # --- 1. עיצוב ו-CSS ---
 st.set_page_config(page_title="מערכת שיבוץ - כולל אבחון שגיאות", layout="wide")
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;700&display=swap');
-    
-    html, body, [data-testid="stAppViewContainer"], .main { 
-        direction: rtl; 
-        text-align: right; 
-        font-family: 'Rubik', sans-serif;
-        background-color: #f0f2f6; 
-        color: #1e293b !important; /* Force dark text color */
-    }
-    
-    /* Aggressive Text Color Fix for all Streamlit elements */
-    h1, h2, h3, h4, h5, h6, p, li, span, label, div, input, textarea, [data-testid="stMarkdownContainer"] p {
-        color: #1e293b !important;
-    }
-
-    
-    /* Ensure sidebar handles RTL naturally without squashing */
-    [data-testid="stSidebar"] {
-        direction: rtl;
-    }
-    
-    .stTabs [data-baseweb="tab-list"] { direction: rtl; justify-content: flex-start; flex-direction: row-reverse; }
-    
-    /* Calendar Card Styling */
-    .calendar-day { 
-        border: none; 
-        border-radius: 16px; 
-        padding: 12px; 
-        min-height: 220px; 
-        background: #ffffff; 
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        transition: transform 0.2s;
-        margin-bottom: 16px;
-    }
-    .calendar-day:hover { transform: translateY(-3px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
-    
-    .weekend-day { background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); border: 1px solid #e2e8f0; }
-    
-    .day-number { 
-        font-weight: 700; 
-        font-size: 1.4em; 
-        color: #334155; 
-        border-bottom: 2px solid #f1f5f9; 
-        margin-bottom: 12px; 
-        padding-bottom: 4px;
-        display: flex;
-        justify-content: space-between;
-    }
-    
-    /* Slot Styling */
-    .slot { 
-        padding: 8px 10px; 
-        border-radius: 8px; 
-        font-size: 13px; 
-        font-weight: 500; 
-        margin-top: 6px; 
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    }
-    .shikum-slot { background-color: #e0f2fe; border-right: 4px solid #0ea5e9; color: #0284c7; }
-    .pnimia-slot { background-color: #ffedd5; border-right: 4px solid #f97316; color: #c2410c; }
-    .empty-slot { background-color: #fee2e2; border: 1px dashed #ef4444; color: #991b1b; justify-content: center;}
-    
-    .dept-label { font-weight: 600; font-size: 0.9em; opacity: 0.8; }
-    .error-hint { font-size: 11px; color: #ef4444; margin-top: 4px; display: block; background: #fef2f2; padding: 2px 4px; border-radius: 4px;}
-    
-    /* Enlarged Date Input & Checkboxes */
-    div[data-testid="stDateInput"] input {
-        font-size: 1.2rem;
-        padding: 10px;
-    }
-    div[data-testid="stCheckbox"] label {
-        font-size: 1.2rem !important;
-    }
-    div[data-testid="stCheckbox"] div[role="checkbox"] {
-        transform: scale(1.3);
-    }
-
-    /* Mobile Responsive Adjustments */
-    @media (max-width: 768px) {
-        /* Prevent sidebar title squashing */
-        /* Prevent sidebar title squashing but allow wrapping */
-        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
-            word-wrap: break-word !important;
-        }
-
-        /* Adjust login card */
-        div[style*="max-width: 400px"] {
-            max-width: 95% !important;
-            margin: 10px auto !important;
-            padding: 0.8rem !important;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
+ui_components.setup_style()
 
 import hashlib
 from streamlit_gsheets import GSheetsConnection
@@ -118,16 +28,85 @@ def get_db_data(worksheet_name):
     # קריאה מהירה ללא מטמון כדי לקבל עדכונים בזמן אמת
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
-        df = conn.read(worksheet=worksheet_name, ttl=0)
+        # Use show_spinner=False to suppress the "Running..." toast/message
+        df = conn.read(worksheet=worksheet_name, ttl=0, show_spinner=False)
         return df
     except Exception as e:
-        # במקרה שהגיליון לא קיים או שגיאה אחרת (כמו Worksheet not found), נחזיר DataFrame ריק אך עם העמודות הנדרשות כדי למנוע קריסה
-        return pd.DataFrame(columns=['name', 'password', 'type', 'dept', 'monthly_quota', 'weekend_quota'])
+        # טיפול חכם בשגיאות: רק אם הגיליון באמת לא קיים, נחזיר DataFrame ריק
+        # אחרת (בעיות חיבור, Timeout, מכסה) נזרוק את השגיאה הלאה כדי לא לאפס בטעות
+        err_msg = str(e).lower()
+        if "worksheet" in err_msg and "not found" in err_msg:
+             return pd.DataFrame()
+        # אם זו שגיאה אחרת - קריטי להרים אותה כדי ש-init_db לא ירוץ
+        raise e
 
-def save_to_db(worksheet_name, df):
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    # שינוי: זריקת שגיאה למעלה כדי ש-init_db יטפל בה בצורה מרוכזת
-    conn.update(worksheet=worksheet_name, data=df)
+
+def get_gspread_client():
+    # יצירת קליינט gspread מתוך ה-secrets הקיימים
+    # נניח שהם במבנה סטנדרטי תחת connections.gsheets
+    creds = st.secrets["connections"]["gsheets"]
+    
+    # gspread מצפה למילון או קובץ, st.secrets מחזיר מילון-כמו-אובייקט, נמיר למילון רגיל
+    creds_dict = dict(creds)
+    
+    # במידה ויש צורך ב-scopes ספציפיים, gspread מטפל בזה לרוב אוטומטית עם service_account_from_dict
+    gc = gspread.service_account_from_dict(creds_dict)
+    return gc
+
+def save_to_db(worksheet_name, df, is_rtl=False):
+    # שימוש ב-gspread ישירות כדי למנוע בעיות עם st-gsheets-connection
+    try:
+        gc = get_gspread_client()
+        url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+        sh = gc.open_by_url(url)
+        
+        try:
+            ws = sh.worksheet(worksheet_name)
+        except:
+            # הגיליון לא קיים - נוסיף אותו
+            ws = sh.add_worksheet(title=worksheet_name, rows=100, cols=20)
+            
+        # עדכון הנתונים
+        # gspread update expects list of lists including header
+        # המרה של ה-DF לרשימה ועדכון
+        # הערה: update של gspread דורס תאים קיימים, זה מה שאנחנו רוצים.
+        
+        # המרה בטוחה של נתונים כך שיהיו serializable (למשל תאריכים ל-str)
+        df_str = df.astype(str)
+        # החלפת nan ב-String ריק
+        df_str = df_str.replace('nan', '', regex=True).replace('None', '', regex=True)
+        
+        data = [df_str.columns.tolist()] + df_str.values.tolist()
+        
+        # ניקוי הגיליון לפני כתיבה כדי למנוע שאריות במידה והטבלה החדשה קצרה יותר
+        ws.clear()
+        
+        ws.update(range_name='A1', values=data)
+        
+        # טיפול ביישור מימין לשמאל (RTL) במידת הצורך
+        if is_rtl:
+            try:
+                # שליחת בקשת batch_update לשינוי הגדרות הגיליון
+                requests = [{
+                    "updateSheetProperties": {
+                        "properties": {
+                            "sheetId": ws.id,
+                            "rightToLeft": True,
+                            "gridProperties": {"columnCount": 8}
+                        },
+                        "fields": "rightToLeft,gridProperties.columnCount"
+                    }
+                }]
+                sh.batch_update({"requests": requests})
+                
+                # עיצוב בסיסי
+                ws.format('A1:H1', {'textFormat': {'bold': True}, 'horizontalAlignment': 'CENTER'})
+                ws.format('A2:H100', {'horizontalAlignment': 'CENTER', 'verticalAlignment': 'MIDDLE'})
+            except Exception as e:
+                print(f"RTL/Format warning: {e}")
+                
+    except Exception as e:
+         st.error(f"שגיאה קריטית בשמירה לגיליון '{worksheet_name}': {e}")
 
 def init_db():
     # בדיקה האם יש נתונים בטבלת staff, אם לא - נאתחל
@@ -169,6 +148,11 @@ def init_db():
             requests_df = pd.DataFrame(columns=['employee', 'date', 'status'])
             save_to_db("requests", requests_df)
             
+            # טבלת הגדרות (Settings) - חודש פעיל
+            next_month_init = (date.today().replace(day=1) + timedelta(days=32)).month
+            settings_df = pd.DataFrame([{'key': 'active_month', 'value': str(next_month_init)}])
+            save_to_db("settings", settings_df)
+            
             st.success("הנתונים אותחלו בהצלחה! אנא רענן את העמוד.")
 
     except Exception as e:
@@ -189,7 +173,7 @@ def login_screen():
         <style>
             .login-container {
                 max-width: 400px;
-                margin: 50px auto;
+                margin: 20px auto; /* Reduced margin */
                 padding: 2rem;
                 background: white;
                 border-radius: 20px;
@@ -213,21 +197,23 @@ def login_screen():
     """, unsafe_allow_html=True)
 
     # יצירת קונטיינר מרכזי נקי ללא עמודות דוחפות
-    c1, c2, c3 = st.columns([1, 2, 1])
+    # יצירת קונטיינר מרכזי נקי
+    st.markdown("<div class='login-container'>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #1e293b;'>מערכת שיבוץ תורנויות המערך הגריאטרי</h1>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
     
-    # במובייל העמודות קורסות, ולכן נשתמש בלוגיקה שתיראה טוב גם שם
-    # אבל כדי למנוע "בריחה לצדדים", נשתמש ב-Container פנימי עם רווחים
+    # שימוש ב-columns רק כדי למרכז את הטופס מעט אם צריך, אבל הפעם נלך פשוט
+    c_login = st.empty() 
     
-    with c2:
-        st.markdown("<div class='login-container'>", unsafe_allow_html=True)
-        st.title("🔐 כניסה למערכת")
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        # הטופס עצמו
-        username = st.text_input("שם משתמש (לדוגמה: שם מלא או admin):").strip()
-        password = st.text_input("סיסמה:", type="password")
-        
-        if st.button("כניסה", use_container_width=True):
+    with c_login.container():
+        # שימוש ברוחב מוגבל דרך CSS כבר טופל ב-.login-container, אבל ה-Inputים הם סטרימליט
+        # נייצר עמודות דמה למרכוז האלמנטים של סטרימליט
+        lc1, lc2, lc3 = st.columns([1, 1, 1])
+        with lc2:
+            username = st.text_input("שם משתמש:").strip()
+            password = st.text_input("סיסמה:", type="password")
+            
+            if st.button("כניסה", use_container_width=True):
                 staff_df = get_db_data("staff")
                 hashed_pass = hashlib.sha256(password.encode()).hexdigest()
                 
@@ -783,47 +769,72 @@ def draw_calendar_view(year, month, role, user_name=None):
                 st.markdown(html + "</div>", unsafe_allow_html=True)
 
 # --- 5. ממשק המנהל והעובד ---
-with st.sidebar:
-    st.title("🏥 מערכת תורנויות")
-    st.write(f"👋 שלום, **{st.session_state.user_name}**")
-    role = st.session_state.user_role
-    sel_month = st.selectbox("חודש", range(1, 13), index=date.today().month - 1)
-    
-    if st.button("🚪 התנתק"):
+# --- 5. ממשק המנהל והעובד ---
+# Header Area
+col_h1, col_h2 = st.columns([3, 1])
+with col_h1:
+    st.title("מערכת תורנויות")
+with col_h2:
+    if st.button("התנתק", key="logout_top"):
         st.session_state.logged_in = False
         st.rerun()
-    
-    st.divider()
-    with st.expander("🔑 שינוי סיסמה"):
-        old_p = st.text_input("סיסמה נוכחית:", type="password")
-        new_p = st.text_input("סיסמה חדשה:", type="password")
-        conf_p = st.text_input("אימות סיסמה חדשה:", type="password")
-        
-        if st.button("עדכן סיסמה"):
-            staff_df = st.session_state.staff
-            current_user = st.session_state.user_name
-            actual_pass = staff_df[staff_df['name'] == current_user].iloc[0]['password']
-            
-            if hashlib.sha256(old_p.encode()).hexdigest() != actual_pass:
-                st.error("הסיסמה הנוכחית שגויה")
-            elif new_p != conf_p:
-                st.error("הסיסמה החדשה והאימות אינם תואמים")
-            elif len(new_p) < 4:
-                st.error("הסיסמה חייבת להכיל לפחות 4 תווים")
-            else:
-                new_hashed = hashlib.sha256(new_p.encode()).hexdigest()
-                # עדכון ב-DataFrame
-                st.session_state.staff.loc[st.session_state.staff['name'] == current_user, 'password'] = new_hashed
-                # שמירה למסד הנתונים
-                save_to_db("staff", st.session_state.staff)
-                st.success("הסיסמה עודכנה בהצלחה!")
+
+role = st.session_state.user_role
+
+# שליפת החודש הפעיל (Logic preserevd)
+if 'settings' not in st.session_state:
+    try:
+        st.session_state.settings = get_db_data("settings")
+    except:
+        st.session_state.settings = pd.DataFrame([{'key': 'active_month', 'value': str(date.today().month + 1)}])
+
+if 'key' not in st.session_state.settings.columns:
+     st.session_state.settings = pd.DataFrame([{'key': 'active_month', 'value': str(date.today().month + 1)}])
+     save_to_db("settings", st.session_state.settings)
+
+try:
+    active_month_setting = st.session_state.settings[st.session_state.settings['key'] == 'active_month']['value'].iloc[0]
+    active_month_int = int(active_month_setting)
+except:
+    active_month_int = date.today().month
+
+# Render Navigation Bar
+selected_nav = ui_components.render_navbar(role)
+
+# Month Selection Logic - MOVED TO SCHEDULE TAB ONLY (as requested)
+# sel_month defaults to active month, but admins can override it LOCALLY in the schedule tab
+sel_month = active_month_int 
+
+# Admin Global control (Hidden here, moved logic down)
+# We keep the "active_month_setter" logic but it needs to be where the selector is.
+# So we skip the global expander here.
+
 
 if role == "מנהל/ת":
-    t1, t2, t3, t4 = st.tabs(["📅 לוח שיבוץ", "👥 ניהול צוות", "📊 דוח", "⚖️ טבלת צדק"])
-    with t1:
+    if selected_nav == 'לוח שיבוץ':
+        
+        # --- Month Selector for Schedule Tab (Admin Only) ---
+        with st.expander("הגדרות תצוגה", expanded=False):
+            c_m1, c_m2 = st.columns(2)
+            # Use a specialized key to avoid conflicts if previously used
+            sel_month = c_m1.selectbox("חודש לצפייה/עריכה", range(1, 13), index=active_month_int - 1, key="sched_month_select")
+            
+            # Admin Global Control
+            new_active_month = c_m2.selectbox(
+                "חודש פתוח להגשת אילוצים:", 
+                range(1, 13), 
+                index=active_month_int - 1,
+                key="admin_active_month_setter_sched"
+            )
+            if new_active_month != active_month_int:
+                st.session_state.settings.loc[st.session_state.settings['key'] == 'active_month', 'value'] = str(new_active_month)
+                save_to_db("settings", st.session_state.settings)
+                st.success(f"החודש הפעיל עודכן ל-{new_active_month}")
+                st.rerun()
+        # ----------------------------------------------------
+
         # --- הוספת כלי שיבוץ ידני ---
-        # --- הוספת כלי שיבוץ ידני ---
-        with st.expander("🛠️ כלי שיבוץ ידני (דריסה)", expanded=True):
+        with st.expander("כלי שיבוץ ידני (דריסה)", expanded=True):
             c_date, c_dept, c_emp, c_btn_add, c_btn_del = st.columns([1, 1, 1, 0.7, 0.7])
             
             # עדכון ערך ברירת מחדל לתאריך רק אם החודש השתנה בסרגל הצד
@@ -974,7 +985,7 @@ if role == "מנהל/ת":
         # ---------------------------------
 
         draw_calendar_view(2026, sel_month, "מנהל/ת")
-    with t2:
+    elif selected_nav == 'צוות':
         st.subheader("ניהול צוות עובדים")
         
         # --- טופס הוספת עובד ---
@@ -1018,14 +1029,19 @@ if role == "מנהל/ת":
         
         # עטיפה בטופס (Form) כדי למנוע טעינה מחדש בכל שינוי תא
         with st.form(key="staff_batch_edit_form"):
-            staff_editor = st.data_editor(st.session_state.staff, use_container_width=True, num_rows="dynamic")
+            # היפוך עמודות לתצוגה RTL
+            reversed_staff_view = st.session_state.staff[st.session_state.staff.columns[::-1]]
+            staff_editor = st.data_editor(reversed_staff_view, use_container_width=True, num_rows="dynamic")
             submit_changes = st.form_submit_button("💾 שמור שינויים בצוות")
         
         if submit_changes:
-            st.session_state.staff = staff_editor
-            save_to_db("staff", st.session_state.staff)
-            st.success("הנתונים נשמרו בהצלחה!")
-            st.rerun()
+            # שחזור סדר העמודות המקורי (Name בהתחלה) לפני שמירה
+            if not staff_editor.empty:
+                original_order_df = staff_editor[staff_editor.columns[::-1]]
+                st.session_state.staff = original_order_df
+                save_to_db("staff", st.session_state.staff)
+                st.success("הנתונים נשמרו בהצלחה!")
+                st.rerun()
             
         st.divider()
         st.subheader("ניהול אילוצים ומשמרות")
@@ -1036,43 +1052,52 @@ if role == "מנהל/ת":
         if selected_emp_mgr:
             st.write(f"עריכת אילוצים עבור: **{selected_emp_mgr}**")
             
-            # טעינת אילוצים קיימים
+            # טעינת אילוצים ובקשות קיימים
             existing_mgr = st.session_state.requests[st.session_state.requests['employee'] == selected_emp_mgr]
-            default_dates_mgr = []
+            
+            # יצירת מילון לגישה מהירה לפי תאריך -> סטטוס
+            date_status_map = {}
             if not existing_mgr.empty:
-                for d_str in existing_mgr['date']:
-                    try:
-                        d_obj = datetime.strptime(d_str, '%Y-%m-%d').date()
-                        if d_obj.month == sel_month and d_obj.year == 2026:
-                            default_dates_mgr.append(d_obj)
-                    except: pass
+                for _, row in existing_mgr.iterrows():
+                     date_status_map[str(row['date'])] = row['status']
             
             # לוח שנה (Data Editor) לניהול
-            # יצירת DataFrame לעריכה
             days_in_month = calendar.monthrange(2026, sel_month)[1]
             month_dates = [date(2026, sel_month, d) for d in range(1, days_in_month + 1)]
             
             # יצירת טבלה זמנית
             edit_data = []
             for d_obj in month_dates:
-                is_blocked = d_obj in default_dates_mgr
+                d_str = str(d_obj)
+                current_status = date_status_map.get(d_str, "פנוי") # ברירת מחדל: פנוי
+                
                 day_name = ["ב'", "ג'", "ד'", "ה'", "ו'", "ש'", "א'"][d_obj.weekday()] # 0=Monday
                 edit_data.append({
                     "תאריך": d_obj,
                     "יום": day_name,
-                    "חסום?": is_blocked
+                    "משאב": current_status
                 })
             
             df_edit = pd.DataFrame(edit_data)
             
-            st.caption("סמן V בימים בהם העובד **לא יכול** לעבוד:")
+            st.caption("הגדר סטטוס לכל יום (אילוץ / בקשה / פנוי):")
+            # הפיכת עמודות לתצוגה RTL (טכנית כאן זה פחות קריטי כי יש מעט, אבל נשמור על אחידות)
+            # סדר רצוי מימין לשמאל: משאב, יום, תאריך. במקור: תאריך, יום, משאב.
+            # נהפוך: משאב, יום, תאריך
+            df_edit_reversed = df_edit[df_edit.columns[::-1]]
+
             with st.form(key=f"mgr_form_{selected_emp_mgr}"):
                 edited_df = st.data_editor(
-                    df_edit, 
+                    df_edit_reversed, 
                     column_config={
                         "תאריך": st.column_config.DateColumn("תאריך", format="DD/MM/YYYY", disabled=True),
                         "יום": st.column_config.TextColumn("יום", disabled=True),
-                        "חסום?": st.column_config.CheckboxColumn("חסום?", default=False)
+                        "משאב": st.column_config.SelectboxColumn(
+                            "משאב",
+                            options=["פנוי", "אילוץ", "בקשה"],
+                            required=True,
+                            width="medium"
+                        )
                     },
                     hide_index=True,
                     use_container_width=True,
@@ -1082,44 +1107,49 @@ if role == "מנהל/ת":
                 submitted = st.form_submit_button("💾 שמור אילוצים לחודש זה")
 
             if submitted:
-                # סינון ימים שנבחרו כחסומים
-                blocked_dates = edited_df[edited_df["חסום?"] == True]["תאריך"].tolist()
+                # קודם כל, נהפוך בחזרה כדי לקבל גישה נוחה לשמות העמודות המקוריים
+                original_df = edited_df[edited_df.columns[::-1]]
                 
-                # המרה למחרוזות לשמירה אחידה
-                blocked_dates_str = [str(d) for d in blocked_dates]
+                # סינון ימים שיש להם סטטוס שאינו פנוי
+                # אנו רוצים לשמור רק "אילוץ" או "בקשה"
+                to_save = original_df[original_df["משאב"] != "פנוי"]
                 
                 # ניקוי אילוצים קיימים לחודש זה עבור העובד
-                # המרה בטוחה למחרוזת לפני הפעולה כדי למנוע את השגיאה AttributeError
+                # המרה בטוחה למחרוזת
                 st.session_state.requests['date'] = st.session_state.requests['date'].astype(str)
-                
                 current_month_prefix = f"2026-{sel_month:02d}"
                 
-                # מחיקת אילוצים ישנים של העובד לחודש זה
-                # משמרים: (לא העובד הנוכחי) או (העובד הנוכחי אבל לא בחודש הזה)
+                # מחיקת רשומות קודמות לחודש זה
                 mask_keep = ~((st.session_state.requests['employee'] == selected_emp_mgr) & 
                               (st.session_state.requests['date'].astype(str).str.startswith(current_month_prefix)))
                 
                 st.session_state.requests = st.session_state.requests[mask_keep]
                 
-                # הוספת האילוצים החדשים
-                if blocked_dates_str:
-                    new_reqs = pd.DataFrame([
-                        {'employee': selected_emp_mgr, 'date': d_str, 'status': "אילוץ"} 
-                        for d_str in blocked_dates_str
-                    ])
-                    st.session_state.requests = pd.concat([st.session_state.requests, new_reqs], ignore_index=True)
+                # הוספת הרשומות החדשות
+                new_records = []
+                if not to_save.empty:
+                    for _, row in to_save.iterrows():
+                        new_records.append({
+                            'employee': selected_emp_mgr,
+                            'date': str(row['תאריך']),
+                            'status': row['משאב']
+                        })
+                    
+                    if new_records:
+                        st.session_state.requests = pd.concat([st.session_state.requests, pd.DataFrame(new_records)], ignore_index=True)
                 
                 # וידוא שוב שהכל מחרוזות
                 st.session_state.requests['date'] = st.session_state.requests['date'].astype(str)
                 
                 save_to_db("requests", st.session_state.requests)
-                st.success(f"האילוצים של {selected_emp_mgr} לחודש {sel_month}/2026 עודכנו בהצלחה!")
+                st.success(f"הנתונים של {selected_emp_mgr} לחודש {sel_month}/2026 עודכנו בהצלחה!")
                 st.rerun()
-    with t3:
-        st.header("דוח סטטוס ומסכמים")
+    elif selected_nav == 'דוחות וניהול':
+        # st.header("דוח סטטוס ומסכמים") - Removed by user request
         
         # --- חלק חדש: טבלת סטטוס הגשת אילוצים ---
-        st.subheader("📊 סטטוס הגשת אילוצים לחודש זה")
+        # --- חלק חדש: טבלת סטטוס הגשת אילוצים ---
+        st.subheader("סטטוס הגשת אילוצים לחודש זה")
         
         if not st.session_state.staff.empty:
             # סינון רק למתמחים ותורני חוץ
@@ -1131,40 +1161,60 @@ if role == "מנהל/ת":
                 status_data = []
                 current_month_prefix = f"2026-{sel_month:02d}"
                 
-                # וידוא שהעמודה מסוג מחרוזת (העתק מקומי כדי לא לשנות לכולם באופן קבוע אם לא רצוי)
+                # וידוא שהעמודה מסוג מחרוזת (העתק מקומי)
                 reqs_df = st.session_state.requests.copy()
                 if not reqs_df.empty:
                     reqs_df['date'] = reqs_df['date'].astype(str)
                 
+                # --- חישוב מקדים ל-KPIs (Shadcn UI) ---
+                n_total = len(relevant_staff)
+                submitted_count = 0
+                
+                # לולאה לצבירת נתונים
+                temp_status_list = []
                 for _, emp in relevant_staff.iterrows():
                     name = emp['name']
+                    n_c, n_w = 0, 0
                     
                     if not reqs_df.empty:
-                        # סינון בקשות של העובד לחודש הנוכחי
                         user_reqs = reqs_df[
                             (reqs_df['employee'] == name) & 
                             (reqs_df['date'].str.startswith(current_month_prefix))
                         ]
+                        n_c = len(user_reqs[user_reqs['status'] == 'אילוץ'])
+                        n_w = len(user_reqs[user_reqs['status'] == 'בקשה'])
+                    
+                    has_submitted = (n_c + n_w) > 0
+                    if has_submitted:
+                        submitted_count += 1
                         
-                        n_constraints = len(user_reqs[user_reqs['status'] == 'אילוץ'])
-                        n_wishes = len(user_reqs[user_reqs['status'] == 'בקשה'])
-                    else:
-                        n_constraints = 0
-                        n_wishes = 0
+                    status_icon = "✅ הגיש" if has_submitted else "❌ טרם הגיש"
                     
-                    # קביעת סטטוס
-                    has_submitted = (n_constraints + n_wishes) > 0
-                    status_icon = "✅ הגיש" if has_submitted  else "❌ טרם הגיש"
-                    
-                    status_data.append({
+                    # נשמור לרשימה כדי להשתמש בטבלה אח"כ
+                    temp_status_list.append({
                         "שם העובד": name,
                         "תפקיד": emp['type'],
                         "סטטוס": status_icon,
-                        "חסימות (🔒)": n_constraints,
-                        "בקשות (⭐)": n_wishes
+                        "חסימות (🔒)": n_c,
+                        "בקשות (⭐)": n_w
                     })
+
+                # --- הצגת כרטיסי מדדים (Metric Cards) ---
+                st.markdown("##### סיכום נתונים בזמן אמת")
+                m_cols = st.columns(3)
+                with m_cols[0]:
+                    ui.metric_card(title="סה״כ מתמחים", content=f"{n_total}", description="רשומים במערכת", key="card_total")
+                with m_cols[1]:
+                    ui.metric_card(title="הגישו אילוצים", content=f"{submitted_count}", description="לחודש הנוכחי", key="card_sub")
+                with m_cols[2]:
+                    pending = n_total - submitted_count
+                    ui.metric_card(title="טרם הגישו", content=f"{pending}", description="נדרש תזכורת", key="card_pend")
                 
-                df_status = pd.DataFrame(status_data)
+                st.divider()
+
+                # --- הצגת הטבלה (שימוש בנתונים שחישבנו) ---
+                df_status = pd.DataFrame(temp_status_list)
+
                 
                 # אם הדאטה פריים ריק (לא אמור לקרות אם relevant_staff לא ריק), דואגים לעמודות
                 if df_status.empty:
@@ -1181,8 +1231,13 @@ if role == "מנהל/ת":
                     
                     # שימוש ב-applymap שקיים בגרסאות ישנות וחדשות (עד שיוסר לחלוטין), או map בחדשות.
                     # ננסה applymap ונתפוס שגיאה אם יש
+                    # הפיכת סדר העמודות (RTL ידני) והצגת הטבלה
+                    reversed_df = df_status[df_status.columns[::-1]]
+                    
                     st.dataframe(
-                        df_status.style.applymap(highlight_status, subset=['סטטוס']),
+                        reversed_df.style
+                        .applymap(highlight_status, subset=['סטטוס'])
+                        .set_properties(**{'text-align': 'right', 'direction': 'rtl'}),
                         use_container_width=True,
                         hide_index=True
                     )
@@ -1195,71 +1250,103 @@ if role == "מנהל/ת":
             
         st.divider()
 
-        if not st.session_state.schedule.empty: 
-            st.subheader("ספירת משמרות")
-            
-            # הכנת נתונים לגרף משולב
-            sched = st.session_state.schedule
-            
-            # ספירה רגילה (ללא שישי בוקר)
-            reg_counts = sched[~sched['dept'].str.contains("שישי בוקר", na=False)]['employee'].value_counts()
-            
-            # ספירת שישי בוקר בלבד
-            morn_counts = sched[sched['dept'].str.contains("שישי בוקר", na=False)]['employee'].value_counts()
-            
-            # איחוד לטבלה אחת
-            combined_df = pd.DataFrame({'תורנויות רגילות': reg_counts, 'שישי בוקר': morn_counts}).fillna(0)
-            
-            st.bar_chart(combined_df)
-            st.caption("הגרף מציג בחלוקה לצבעים: תורנויות רגילות לעומת שישי בוקר")
-            
-            st.divider()
-            st.subheader("ייצוא נתונים")
-            
-            # הכנת קובץ אקסל בזיכרון
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                # עיבוד הנתונים לפורמט הרצוי: תאריך | תורן פנימית | תורן שיקום
-                if not st.session_state.schedule.empty:
-                    export_df = st.session_state.schedule.copy()
-                    # הסרת כפילויות אם יש
-                    export_df = export_df.drop_duplicates(subset=['date', 'dept'])
-                    
-                    # Pivot Table
-                    pivot_df = export_df.pivot(index='date', columns='dept', values='employee')
-                    
-                    # השלמת עמודות חסרות
-                    if 'פנימית גריאטרית' not in pivot_df.columns: pivot_df['פנימית גריאטרית'] = ""
-                    if 'שיקום' not in pivot_df.columns: pivot_df['שיקום'] = ""
-                    
-                    # בחירת עמודות וסידורן
-                    final_df = pivot_df[['פנימית גריאטרית', 'שיקום']].reset_index()
-                    final_df.columns = ['תאריך', 'תורן פנימית גריאטרית', 'תורן שיקום']
-                    
-                    final_df.to_excel(writer, index=False, sheet_name='Schedule')
-                    
-                    # כיוון מימין לשמאל
-                    writer.sheets['Schedule'].sheet_view.rightToLeft = True
-                    
-                    # התאמת רוחב עמודות (אופציונלי)
-                    ws = writer.sheets['Schedule']
-                    ws.column_dimensions['A'].width = 15
-                    ws.column_dimensions['B'].width = 20
-                    ws.column_dimensions['C'].width = 20
-                    
-                # גליון צוות
-                st.session_state.staff.to_excel(writer, index=False, sheet_name='Staff')
-                writer.sheets['Staff'].sheet_view.rightToLeft = True
+        # --- ייצוא נתונים ---
+        st.markdown("### ייצוא נתונים")
+        st.caption("לחיצה על הכפתור תשמור את הנתונים בגיליון בשם 'Schedule_Export' בקובץ המרכזי.")
+        
+        if st.button("עדכן את הגיליון 'Schedule_Export' (פורמט רחב)", key="export_google_top"):
+            try:
+                # 1. יצירת טווח תאריכים מלא לחודש הנבחר
+                days_in_month = calendar.monthrange(2026, sel_month)[1]
+                dates_list = [date(2026, sel_month, d) for d in range(1, days_in_month + 1)]
                 
-            download_data = buffer.getvalue()
-            
-            st.download_button(
-                label="📥 הורד סידור עבודה (Excel)",
-                data=download_data,
-                file_name=f"schedule_{sel_month}_2026.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-    with t4:
+                export_rows = []
+                schedule_data = st.session_state.schedule
+                
+                for d_obj in dates_list:
+                    d_str = str(d_obj)
+                    day_name = ["ב'", "ג'", "ד'", "ה'", "ו'", "ש'", "א'"][d_obj.weekday()]
+                    
+                    # ברירת מחדל לשורת התאריך
+                    row_data = {
+                        'תאריך': d_str,
+                        'יום': day_name,
+                        'פנימית גריאטרית': '',
+                        'שיקום': '',
+                        'שישי בוקר - פנימית (1)': '',
+                        'שישי בוקר - פנימית (2)': '',
+                        'שישי בוקר - שיקום (1)': '',
+                        'שישי בוקר - שיקום (2)': ''
+                    }
+                    
+                    # שליפת משמרות לאותו יום
+                    daily_shifts = schedule_data[schedule_data['date'] == d_str]
+                    
+                    if not daily_shifts.empty:
+                        for _, shift in daily_shifts.iterrows():
+                            dept = shift['dept']
+                            emp = shift['employee']
+                            if emp == '---': continue # דילוג על ריקים
+                            
+                            # מיפוי מחלקות לעמודות
+                            if dept == 'פנימית גריאטרית':
+                                row_data['פנימית גריאטרית'] = emp
+                            elif dept == 'שיקום':
+                                row_data['שיקום'] = emp
+                            elif dept == 'שישי בוקר - פנימית (1)':
+                                row_data['שישי בוקר - פנימית (1)'] = emp
+                            elif dept == 'שישי בוקר - פנימית (2)':
+                                row_data['שישי בוקר - פנימית (2)'] = emp
+                            elif dept == 'שישי בוקר - שיקום (1)':
+                                row_data['שישי בוקר - שיקום (1)'] = emp
+                            elif dept == 'שישי בוקר - שיקום (2)':
+                                row_data['שישי בוקר - שיקום (2)'] = emp
+                    
+                    export_rows.append(row_data)
+                
+                # יצירת DataFrame סופי
+                df_export = pd.DataFrame(export_rows)
+                
+                # סדר עמודות A-H
+                col_order = [
+                    'תאריך', 'יום', 
+                    'פנימית גריאטרית', 'שיקום', 
+                    'שישי בוקר - פנימית (1)', 'שישי בוקר - פנימית (2)', 
+                    'שישי בוקר - שיקום (1)', 'שישי בוקר - שיקום (2)'
+                ]
+                
+                # השלמת עמודות חסרות
+                for col in col_order:
+                    if col not in df_export.columns:
+                        df_export[col] = ''
+                        
+                df_export = df_export[col_order]
+                
+                # שמירה לגיליון חדש (עם פורמט RTL)
+                save_to_db("Schedule_Export", df_export, is_rtl=True)
+                st.success("הנתונים ייוצאו בהצלחה לגיליון 'Schedule_Export'!")
+                
+            except Exception as e:
+                st.error(f"שגיאה בייצוא הנתונים: {e}")
+
+        st.divider()
+        st.subheader("ספירת משמרות")
+        
+        # הכנת נתונים לגרף משולב
+        sched = st.session_state.schedule
+        
+        # ספירה רגילה (ללא שישי בוקר)
+        reg_counts = sched[~sched['dept'].astype(str).str.contains("שישי בוקר", na=False)]['employee'].value_counts()
+        
+        # ספירת שישי בוקר בלבד
+        morn_counts = sched[sched['dept'].astype(str).str.contains("שישי בוקר", na=False)]['employee'].value_counts()
+        
+        # איחוד לטבלה אחת
+        combined_df = pd.DataFrame({'תורנויות רגילות': reg_counts, 'שישי בוקר': morn_counts}).fillna(0)
+        
+        st.bar_chart(combined_df)
+        st.caption("הגרף מציג בחלוקה לצבעים: תורנויות רגילות לעומת שישי בוקר")
+    if selected_nav == 'דוחות וניהול': # Fairness merged into Reports
         st.subheader("מעקב הוגנות - ימי רביעי, חמישי ושישי (מתמחים בלבד)")
         
         # טעינת כל הנתונים
@@ -1300,7 +1387,7 @@ if role == "מנהל/ת":
             
             # עיצוב הטבלה
             st.dataframe(
-                df_fairness.style.background_gradient(subset=['ציון הוגנות (נטו)'], cmap="RdYlGn"),
+                df_fairness[df_fairness.columns[::-1]].style.background_gradient(subset=['ציון הוגנות (נטו)'], cmap="RdYlGn"),
                 use_container_width=True
             )
             
@@ -1326,12 +1413,15 @@ if role == "מנהל/ת":
                 st.info("אין נתונים להצגה בחיתוך חודשי")
         else:
             st.info("הלוח עדיין ריק.")
+        
+
+
 else:
     user_name = st.session_state.user_name
-    tab1, tab2 = st.tabs(["✍️ הגשת אילוצים", "📅 סידור עבודה"])
-
-    with tab1:
-        st.subheader(f"הגשת אילוצים עבור: {user_name}")
+    
+    if selected_nav == 'הגשת אילוצים':
+        # st.subheader removed as requested
+        # st.subheader(f"הגשת אילוצים עבור: {user_name}")
         
         # --- הצגת אילוצים ובקשות קיימים ---
         existing_constraints = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "אילוץ")]
@@ -1362,25 +1452,22 @@ else:
                         default_dates.append(d_obj)
                 except: pass
         
-        # --- יצירת לוח שנה עם Checkboxes ---
-        # פונקציה עזר לציור
-        if 'temp_selected_dates' not in st.session_state:
-            st.session_state.temp_selected_dates = set(default_dates)
-            
-        # עדכון ה-session state במקרה של שינוי חודש או טעינה מחדש
-        # אבל נרצה לשמר בחירות זמניות שטרם נשמרו? 
-        # לצורך הפשטות, תמיד נאתחל עם הקיים ב-DB בתוספת מה שהמשתמש שיחק איתו כרגע, 
-        # אבל ה-State של ה-Checkbox הוא טריקי. 
-        # נשתמש ב-Callback או פשוט נקרא את הערכים מהממשק.
-        
+        # --- Calendar Grid with Chips (Optimized) ---
         cal = calendar.monthcalendar(2026, sel_month)
+        days_in_month = calendar.monthrange(2026, sel_month)[1]
+        
+        # Day headers
         days_cols = st.columns(7)
         headers = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
         for i, h in enumerate(headers):
-            days_cols[i].markdown(f"<div style='text-align:center; font-weight:bold'>{h}</div>", unsafe_allow_html=True)
+            days_cols[i].markdown(f"<div style='text-align:center; font-weight:bold; margin-bottom:8px;'>{h}</div>", unsafe_allow_html=True)
+        
+        # Prepare default selected day numbers
+        default_day_nums = [d.day for d in default_dates]
         
         selected_from_grid = []
         
+        # Render calendar grid with chips
         for week in cal:
             wk_cols = st.columns(7)
             for i, day_num in enumerate(week):
@@ -1389,15 +1476,26 @@ else:
                         st.write("")
                     else:
                         d_obj = date(2026, sel_month, day_num)
-                        is_checked = d_obj in default_dates
-                        # מפתח ייחודי לכל צ'קבוקס
-                        st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:small; margin-bottom: -10px;'>{day_num}</div>", unsafe_allow_html=True)
-                        chk = st.checkbox(f"select_{day_num}_const", value=is_checked, key=f"date_chk_{sel_month}_{day_num}", label_visibility="collapsed")
-                        if chk:
+                        is_selected = day_num in default_day_nums
+                        
+                        # Use chip for each day
+                        result = sac.chip(
+                            items=[sac.ChipItem(label=str(day_num))],
+                            index=[0] if is_selected else [],
+                            align='center',
+                            radius='sm',
+                            multiple=True,
+                            return_index=False,
+                            key=f"const_{sel_month}_{day_num}",
+                            color='indigo',
+                            size='sm'
+                        )
+                        
+                        if result and str(day_num) in result:
                             selected_from_grid.append(d_obj)
         
         st.divider()
-        st.write("### שלב 2: בקשות למשמרות (Wishes) - אופציונלי")
+        st.write("### שלב 2: בקשות למשמרות - אופציונלי")
         st.caption("ניתן לבחור עד **2 תאריכים** בחודש בהם היית רוצה לעבוד. המערכת תשתדל להתחשב, אך לא מבטיחה שיבוץ.")
         
         # בחירת בקשות חיוביות
@@ -1411,8 +1509,13 @@ else:
                         default_wishes.append(d_obj)
                 except: pass
 
-        selected_wishes = [] # Initialize selected_wishes for the grid
-        wish_cols = st.columns(7)
+        # --- Calendar Grid with Chips for Wishes (Optimized) ---
+        # Prepare default selected day numbers
+        default_wish_nums = [d.day for d in default_wishes]
+        
+        selected_wishes = []
+        
+        # Render calendar grid with chips
         for week in cal:
             w_wk_cols = st.columns(7)
             for i, day_num in enumerate(week):
@@ -1421,12 +1524,24 @@ else:
                         st.write("")
                     else:
                         d_obj = date(2026, sel_month, day_num)
-                        is_checked = d_obj in default_wishes
-                        st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:small; margin-bottom: -10px;'>{day_num}</div>", unsafe_allow_html=True)
-                        chk = st.checkbox(f"w_select_{day_num}", value=is_checked, key=f"wish_chk_{sel_month}_{day_num}", label_visibility="collapsed")
-                        if chk:
+                        is_selected = day_num in default_wish_nums
+                        
+                        # Use chip for each day
+                        result = sac.chip(
+                            items=[sac.ChipItem(label=str(day_num))],
+                            index=[0] if is_selected else [],
+                            align='center',
+                            radius='sm',
+                            multiple=True,
+                            return_index=False,
+                            key=f"wish_{sel_month}_{day_num}",
+                            color='indigo',
+                            size='sm'
+                        )
+                        
+                        if result and str(day_num) in result:
                             selected_wishes.append(d_obj)
-
+        
         # -----------------------------------
         st.divider()
         
@@ -1456,7 +1571,7 @@ else:
                 avail_thursdays = total_thursdays - blocked_thursdays
                 avail_weekends = total_weekends - blocked_weekends
                 
-                errors = []
+                # Removed bug: errors = [] was here wiping previous validation errors
                 if avail_thursdays < 2:
                     errors.append(f"נותר רק יום חמישי אחד פנוי (או פחות). חובה להשאיר לפחות 2 ימי חמישי פנויים.")
                 if avail_weekends < 4:
@@ -1525,5 +1640,5 @@ else:
                 if st.button("❌ בטל", use_container_width=True):
                     st.session_state['confirm_request_save'] = False
                     st.rerun()
-    with tab2:
+    elif selected_nav == 'לוח שיבוץ':
         draw_calendar_view(2026, sel_month, "עובד/ת", user_name)
