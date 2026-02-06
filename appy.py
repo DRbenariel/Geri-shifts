@@ -770,15 +770,15 @@ def draw_calendar_view(year, month, role, user_name=None):
                 st.markdown(html + "</div>", unsafe_allow_html=True)
 
 # --- 5. ממשק המנהל והעובד ---
-# --- 5. ממשק המנהל והעובד ---
 # Header Area
-col_h1, col_h2 = st.columns([3, 1])
-with col_h1:
-    st.title("מערכת תורנויות")
-with col_h2:
-    if st.button("התנתק", key="logout_top"):
-        st.session_state.logged_in = False
-        st.rerun()
+st.markdown('<div class="main-header">', unsafe_allow_html=True)
+st.title("מערכת תורנויות")
+
+# Logout button centered under title for mobile robustness
+if st.button("התנתק", key="logout_top", use_container_width=False):
+    st.session_state.logged_in = False
+    st.rerun()
+st.markdown('</div>', unsafe_allow_html=True)
 
 role = st.session_state.user_role
 
@@ -1421,13 +1421,30 @@ else:
     user_name = st.session_state.user_name
     
     if selected_nav == 'הגשת אילוצים':
-        # st.subheader removed as requested
-        # st.subheader(f"הגשת אילוצים עבור: {user_name}")
+        # Display the active month name clearly
+        hebrew_months = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"]
+        month_name = hebrew_months[sel_month - 1]
+        st.subheader(f"הגשת אילוצים לחודש: {month_name}")
         
         # --- הצגת אילוצים ובקשות קיימים ---
         existing_constraints = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "אילוץ")]
         existing_wishes_all = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "בקשה")]
         
+        # --- Pre-initialize Chip States for the entire month ---
+        cal = calendar.monthcalendar(2026, sel_month)
+        default_day_nums = [datetime.strptime(d_str, '%Y-%m-%d').day for d_str in existing_constraints['date'] if datetime.strptime(d_str, '%Y-%m-%d').month == sel_month]
+        default_wish_nums = [datetime.strptime(d_str, '%Y-%m-%d').day for d_str in existing_wishes_all['date'] if datetime.strptime(d_str, '%Y-%m-%d').month == sel_month]
+        
+        for week in cal:
+            for day_num in week:
+                if day_num != 0:
+                    const_key = f"const_{sel_month}_{day_num}"
+                    wish_key = f"wish_{sel_month}_{day_num}"
+                    if const_key not in st.session_state:
+                         st.session_state[const_key] = [0] if day_num in default_day_nums else []
+                    if wish_key not in st.session_state:
+                         st.session_state[wish_key] = [0] if day_num in default_wish_nums else []
+
         if not existing_constraints.empty or not existing_wishes_all.empty:
             msg = ""
             if not existing_constraints.empty:
@@ -1477,22 +1494,21 @@ else:
                         st.write("")
                     else:
                         d_obj = date(2026, sel_month, day_num)
-                        is_selected = day_num in default_day_nums
+                        chip_key = f"const_{sel_month}_{day_num}"
                         
-                        # Use chip for each day
-                        result = sac.chip(
+                        # Use chip for each day - No 'index' prop to prevent sticky jumps
+                        sac.chip(
                             items=[sac.ChipItem(label=str(day_num))],
-                            index=[0] if is_selected else [],
                             align='center',
                             radius='sm',
                             multiple=True,
-                            return_index=False,
-                            key=f"const_{sel_month}_{day_num}",
+                            return_index=True,
+                            key=chip_key,
                             color='indigo',
                             size='sm'
                         )
                         
-                        if result and str(day_num) in result:
+                        if st.session_state.get(chip_key):
                             selected_from_grid.append(d_obj)
         
         st.divider()
@@ -1525,22 +1541,21 @@ else:
                         st.write("")
                     else:
                         d_obj = date(2026, sel_month, day_num)
-                        is_selected = day_num in default_wish_nums
+                        wish_key = f"wish_{sel_month}_{day_num}"
                         
-                        # Use chip for each day
-                        result = sac.chip(
+                        # Use chip for each day - No 'index' prop to prevent sticky jumps
+                        sac.chip(
                             items=[sac.ChipItem(label=str(day_num))],
-                            index=[0] if is_selected else [],
                             align='center',
                             radius='sm',
                             multiple=True,
-                            return_index=False,
-                            key=f"wish_{sel_month}_{day_num}",
+                            return_index=True,
+                            key=wish_key,
                             color='indigo',
                             size='sm'
                         )
                         
-                        if result and str(day_num) in result:
+                        if st.session_state.get(wish_key):
                             selected_wishes.append(d_obj)
         
         # -----------------------------------

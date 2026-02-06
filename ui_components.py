@@ -21,6 +21,27 @@ def setup_style():
     h1, h2, h3, h4, h5, h6 { color: #0f172a !important; font-weight: 700; }
     p, label { color: #334155 !important; }
     
+    /* --- Main Header Layout --- */
+    .main-header {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        margin-bottom: 2rem;
+        gap: 0.5rem;
+        width: 100%;
+    }
+    .main-header h1 {
+        margin: 0 !important;
+        font-size: 2rem !important;
+    }
+    .header-actions {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+    }
+    
     /* Buttons (Modern Indigo) */
     div.stButton > button {
         background-color: #4f46e5; /* Indigo 600 */
