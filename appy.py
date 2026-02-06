@@ -1577,16 +1577,26 @@ else:
                         st.write("")
                     else:
                         d_obj = date(2026, sel_month, day_num)
-                        # Native Checkbox - Constraints
-                        chk_key = f"const_chk_{sel_month}_{day_num}"
+                        # SAC Switch - Supports Native Color
+                        switch_key = f"const_switch_{sel_month}_{day_num}"
                         
-                        # Initialize default value based on loaded data (only if key not in session state)
-                        if chk_key not in st.session_state:
-                            st.session_state[chk_key] = day_num in default_day_nums
-                        
-                        # Render Checkbox
-                        # We use a simple label. The layout is handled by st.columns(7).
-                        is_checked = st.checkbox(f"{day_num}", key=chk_key)
+                        # Initialize default value based on loaded data
+                        # Note: SAC components typically handle their own state via 'value' param on render
+                        # but to be 'sticky' robust, we manually manage the default.
+                        default_val = False
+                        if switch_key not in st.session_state:
+                             default_val = day_num in default_day_nums
+                        else:
+                             default_val = st.session_state[switch_key]
+
+                        # Render Switch (Default Ant Blue)
+                        is_checked = sac.switch(
+                            label=str(day_num), 
+                            value=default_val, 
+                            # color='indigo', # Not supported
+                            size='xs',
+                            key=switch_key
+                        )
                         
                         if is_checked:
                             selected_from_grid.append(d_obj)
@@ -1625,13 +1635,22 @@ else:
                     if day_num == 0:
                         st.write("")
                     else:
-                        # Native Checkbox - Wishes
-                        wish_chk_key = f"wish_chk_{sel_month}_{day_num}"
+                        # SAC Switch - Wishes
+                        wish_switch_key = f"wish_switch_{sel_month}_{day_num}"
                         
-                        if wish_chk_key not in st.session_state:
-                            st.session_state[wish_chk_key] = day_num in default_wish_nums
+                        wish_default_val = False
+                        if wish_switch_key not in st.session_state:
+                            wish_default_val = day_num in default_wish_nums
+                        else:
+                            wish_default_val = st.session_state[wish_switch_key]
                         
-                        is_wish_checked = st.checkbox(f"{day_num}", key=wish_chk_key)
+                        is_wish_checked = sac.switch(
+                            label=str(day_num), 
+                            value=wish_default_val, 
+                            # color='indigo', # Not supported
+                            size='xs',
+                            key=wish_switch_key
+                        )
                         
                         if is_wish_checked:
                             selected_wishes.append(d_obj)
