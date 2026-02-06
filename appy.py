@@ -1432,18 +1432,22 @@ else:
         # Function to safely parse day from various date formats
         def get_day_nums(df, status_type):
             if df.empty: return []
-            user_rehab = df[(df['employee'] == user_name) & (df['status'] == status_type)]
-            days = []
-            for d in user_rehab['date']:
-                try:
-                    if isinstance(d, str):
-                        dt = datetime.strptime(d, '%Y-%m-%d').date()
-                    else:
-                        dt = d # Already a date object
-                    if dt.month == sel_month and dt.year == 2026:
-                        days.append(dt.day)
-                except: continue
-            return days
+            # Create a copy to avoid SettingWithCopy warnings
+            user_rehab = df[(df['employee'] == user_name) & (df['status'] == status_type)].copy()
+            
+            if user_rehab.empty: return []
+            
+            # Robust conversion to datetime
+            user_rehab['date_dt'] = pd.to_datetime(user_rehab['date'], errors='coerce')
+            
+            # Filter for valid dates in the selected month/year
+            # sel_month is integer (e.g., 2)
+            valid_dates = user_rehab[
+                (user_rehab['date_dt'].dt.month == sel_month) & 
+                (user_rehab['date_dt'].dt.year == 2026)
+            ]
+            
+            return valid_dates['date_dt'].dt.day.tolist()
 
         default_day_nums = get_day_nums(st.session_state.requests, "אילוץ")
         default_wish_nums = get_day_nums(st.session_state.requests, "בקשה")
