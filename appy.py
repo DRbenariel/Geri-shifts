@@ -1554,6 +1554,7 @@ else:
                     if day_num == 0:
                         st.write("")
                     else:
+                        d_obj = date(2026, sel_month, day_num)
                         # Native Checkbox - Constraints
                         chk_key = f"const_chk_{sel_month}_{day_num}"
                         
