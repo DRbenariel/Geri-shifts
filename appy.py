@@ -1533,37 +1533,56 @@ else:
         
         selected_from_grid = []
         
-        # Render calendar grid with chips (Reverted to stable multi-column layout)
-        for week in cal:
-            wk_cols = st.columns(7)
-            for i, day_num in enumerate(week):
-                with wk_cols[i]:
-                    if day_num == 0:
-                        st.write("")
-                    else:
-                        d_obj = date(2026, sel_month, day_num)
-                        chip_key = f"const_{sel_month}_{day_num}"
-                        
-                        # Initialize key if missing (Robustness)
-                        if chip_key not in st.session_state:
-                             st.session_state[chip_key] = [0] if day_num in default_day_nums else []
-                        
-                        # Use chip for each day
-                        sac.chip(
-                            items=[sac.ChipItem(label=str(day_num))],
-                            index=st.session_state[chip_key],
-                            align='center',
-                            radius='sm',
-                            multiple=True,
-                            return_index=True,
-                            key=chip_key,
-                            color='indigo',
-                            size='sm'
-                        )
-                        
-                        # Track selection
-                        if st.session_state[chip_key]:
-                            selected_from_grid.append(d_obj)
+        # Function to safely parse day from various date formats
+        # (Assuming get_day_nums is defined above)
+
+        # Prepare items for single-component grid
+        # Use simple ChipItems to avoid TypeErrors
+        chip_items = []
+        
+        # Determine strict grid items including 0 padding
+        flat_days = [d for week in cal for d in week]
+        
+        for d in flat_days:
+            if d == 0:
+                chip_items.append(sac.ChipItem(label=' ')) # Clean padding
+            else:
+                chip_items.append(sac.ChipItem(label=str(d)))
+        
+        # Render Single Component Calendar (Constraints)
+        st.markdown('<div class="calendar-chip-grid">', unsafe_allow_html=True)
+        
+        # Sync Key Logic
+        const_combined_key = f"const_batch_{sel_month}"
+        
+        # Initialize session state if missing (Persistence Logic)
+        if const_combined_key not in st.session_state:
+            selected_indices = []
+            for idx, d in enumerate(flat_days):
+                if d != 0 and d in default_day_nums:
+                    selected_indices.append(idx)
+            st.session_state[const_combined_key] = selected_indices
+        
+        # Use chip for the whole month
+        # NOTE: We DO NOT pass 'index' prop here. We rely on st.session_state[key] being set above.
+        selected_indices_grid = sac.chip(
+            items=chip_items,
+            align='center',
+            radius='sm',
+            multiple=True,
+            return_index=True,
+            key=const_combined_key,
+            color='indigo',
+            size='sm'
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Process Selection
+        # Convert selected indices back to real dates
+        for idx in selected_indices_grid:
+            day_num = flat_days[idx]
+            if day_num != 0:
+                selected_from_grid.append(date(2026, sel_month, day_num))
 
         
         st.divider()
@@ -1587,36 +1606,45 @@ else:
         
         selected_wishes = []
         
-        # Render calendar grid with chips (Reverted to stable multi-column layout)
-        for week in cal:
-            w_wk_cols = st.columns(7)
-            for i, day_num in enumerate(week):
-                with w_wk_cols[i]:
-                    if day_num == 0:
-                        st.write("")
-                    else:
-                        d_obj = date(2026, sel_month, day_num)
-                        wish_key = f"wish_{sel_month}_{day_num}"
-                        
-                        # Initialize key if missing
-                        if wish_key not in st.session_state:
-                             st.session_state[wish_key] = [0] if day_num in default_wish_nums else []
-
-                        # Use chip for each day
-                        sac.chip(
-                            items=[sac.ChipItem(label=str(day_num))],
-                            index=st.session_state[wish_key],
-                            align='center',
-                            radius='sm',
-                            multiple=True,
-                            return_index=True,
-                            key=wish_key,
-                            color='indigo',
-                            size='sm'
-                        )
-                        
-                        if st.session_state[wish_key]:
-                            selected_wishes.append(d_obj)
+        # Prepare items for single-component grid (Wishes)
+        wish_items = []
+        for d in flat_days:
+            if d == 0:
+                wish_items.append(sac.ChipItem(label=' '))
+            else:
+                wish_items.append(sac.ChipItem(label=str(d)))
+        
+        st.markdown('<div class="calendar-chip-grid">', unsafe_allow_html=True)
+        
+        # Sync Key Logic for Wishes
+        wish_combined_key = f"wish_batch_{sel_month}"
+        
+        # Initialize session state if missing
+        if wish_combined_key not in st.session_state:
+            selected_indices_wish = []
+            for idx, d in enumerate(flat_days):
+                if d != 0 and d in default_wish_nums:
+                    selected_indices_wish.append(idx)
+            st.session_state[wish_combined_key] = selected_indices_wish
+        
+        # Render Chip
+        selected_indices_wish_grid = sac.chip(
+            items=wish_items,
+            align='center',
+            radius='sm',
+            multiple=True,
+            return_index=True,
+            key=wish_combined_key,
+            color='indigo',
+            size='sm'
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Process Selection
+        for idx in selected_indices_wish_grid:
+            day_num = flat_days[idx]
+            if day_num != 0:
+                selected_wishes.append(date(2026, sel_month, day_num))
         
         # -----------------------------------
         st.divider()
