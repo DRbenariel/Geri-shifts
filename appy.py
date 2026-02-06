@@ -784,6 +784,21 @@ def draw_calendar_view(year, month, role, user_name=None):
 # --- 5. ממשק המנהל והעובד ---
 # Header Area
 st.markdown('<div class="main-header">', unsafe_allow_html=True)
+
+# FORCE INDIGO CHECKBOX CSS (Hardcoded Fix for Streamlit Cloud)
+st.markdown("""
+<style>
+    /* Force Indigo Checkbox Color */
+    div[data-testid="stCheckbox"] label[data-baseweb="checkbox"] > div:first-child[aria-checked="true"],
+    div[data-testid="stCheckbox"] label[data-baseweb="checkbox"] > div:first-child[aria-checked="mixed"] {
+        background-color: #6366f1 !important;
+        border-color: #6366f1 !important;
+    }
+    div[data-testid="stCheckbox"] label[data-baseweb="checkbox"] > div:first-child[aria-checked="true"] svg {
+        fill: white !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 st.title("מערכת תורנויות")
 
 # Logout button centered under title for mobile robustness
