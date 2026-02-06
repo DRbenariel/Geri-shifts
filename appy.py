@@ -1547,7 +1547,7 @@ else:
         for d in flat_days:
             if d == 0:
                 # Invisible spacer
-                chip_items.append(sac.ChipItem(label=' ', disabled=True, color='grey'))
+                chip_items.append(sac.ChipItem(label=' '))
             else:
                 chip_items.append(sac.ChipItem(label=str(d)))
         
@@ -1571,9 +1571,10 @@ else:
         if const_combined_key not in st.session_state:
              st.session_state[const_combined_key] = selected_indices
         
+        # FIX: Remove 'index' prop to avoid sticky behavior. 
+        # The widget will use the value from st.session_state[key] automatically.
         selected_indices_grid = sac.chip(
             items=chip_items,
-            index=st.session_state[const_combined_key],
             align='center',
             radius='sm',
             multiple=True,
@@ -1617,7 +1618,7 @@ else:
         wish_items = []
         for d in flat_days:
             if d == 0:
-                wish_items.append(sac.ChipItem(label=' ', disabled=True, color='grey'))
+                wish_items.append(sac.ChipItem(label=' '))
             else:
                 wish_items.append(sac.ChipItem(label=str(d)))
         
@@ -1636,9 +1637,9 @@ else:
         if wish_combined_key not in st.session_state:
              st.session_state[wish_combined_key] = selected_indices_wish
         
+        # FIX: Remove 'index' prop to avoid sticky behavior.
         selected_indices_wish_grid = sac.chip(
             items=wish_items,
-            index=st.session_state[wish_combined_key],
             align='center',
             radius='sm',
             multiple=True,
