@@ -317,6 +317,12 @@ if 'manual_emp' not in st.session_state:
     st.session_state.manual_emp = st.session_state.staff['name'].iloc[0] if not st.session_state.staff.empty else ""
 
 # --- 3. לוגיקת שיבוץ עם אבחון ---
+def toggle_state(key):
+    """Callback to toggle boolean state for calendar buttons"""
+    if key in st.session_state:
+        st.session_state[key] = not st.session_state[key]
+        # st.toast(f"עודכן: {st.session_state[key]}") # Optional Debug
+
 def run_smart_scheduling(year, month, only_weekends=False):
     num_days = calendar.monthrange(year, month)[1]
     staff_df = st.session_state.staff.copy()
@@ -375,6 +381,10 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 name = person['name']
                 if person['type'] == 'תורן חוץ' and dept == 'פנימית גריאטרית': continue
                 
+                # BUG FIX: Ensure employee is not already assigned to another department on the same day
+                if any(s for s in new_schedule if s['date'] == d_str and s['employee'] == name):
+                    continue
+
                 # בדיקת מכסה קשיחה (חודשית)
                 monthly_quota = safe_int(person['monthly_quota'], 0)
                 if work_load[name] >= monthly_quota:
@@ -1533,56 +1543,32 @@ else:
         
         selected_from_grid = []
         
-        # Function to safely parse day from various date formats
-        # (Assuming get_day_nums is defined above)
-
-        # Prepare items for single-component grid
-        # Use simple ChipItems to avoid TypeErrors
-        chip_items = []
+        # Render calendar grid with Native Buttons (Robust Toggle)
+        # Using a container class for styling
+        st.markdown('<div class="calendar-grid-container">', unsafe_allow_html=True)
         
-        # Determine strict grid items including 0 padding
-        flat_days = [d for week in cal for d in week]
+        for week in cal:
+            wk_cols = st.columns(7)
+            for i, day_num in enumerate(week):
+                with wk_cols[i]:
+                    if day_num == 0:
+                        st.write("")
+                    else:
+                        # Native Checkbox - Constraints
+                        chk_key = f"const_chk_{sel_month}_{day_num}"
+                        
+                        # Initialize default value based on loaded data (only if key not in session state)
+                        if chk_key not in st.session_state:
+                            st.session_state[chk_key] = day_num in default_day_nums
+                        
+                        # Render Checkbox
+                        # We use a simple label. The layout is handled by st.columns(7).
+                        is_checked = st.checkbox(f"{day_num}", key=chk_key)
+                        
+                        if is_checked:
+                            selected_from_grid.append(d_obj)
         
-        for d in flat_days:
-            if d == 0:
-                chip_items.append(sac.ChipItem(label=' ')) # Clean padding
-            else:
-                chip_items.append(sac.ChipItem(label=str(d)))
-        
-        # Render Single Component Calendar (Constraints)
-        st.markdown('<div class="calendar-chip-grid">', unsafe_allow_html=True)
-        
-        # Sync Key Logic
-        const_combined_key = f"const_batch_{sel_month}"
-        
-        # Initialize session state if missing (Persistence Logic)
-        if const_combined_key not in st.session_state:
-            selected_indices = []
-            for idx, d in enumerate(flat_days):
-                if d != 0 and d in default_day_nums:
-                    selected_indices.append(idx)
-            st.session_state[const_combined_key] = selected_indices
-        
-        # Use chip for the whole month
-        # NOTE: We DO NOT pass 'index' prop here. We rely on st.session_state[key] being set above.
-        selected_indices_grid = sac.chip(
-            items=chip_items,
-            align='center',
-            radius='sm',
-            multiple=True,
-            return_index=True,
-            key=const_combined_key,
-            color='indigo',
-            size='sm'
-        )
         st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Process Selection
-        # Convert selected indices back to real dates
-        for idx in selected_indices_grid:
-            day_num = flat_days[idx]
-            if day_num != 0:
-                selected_from_grid.append(date(2026, sel_month, day_num))
 
         
         st.divider()
@@ -1606,45 +1592,28 @@ else:
         
         selected_wishes = []
         
-        # Prepare items for single-component grid (Wishes)
-        wish_items = []
-        for d in flat_days:
-            if d == 0:
-                wish_items.append(sac.ChipItem(label=' '))
-            else:
-                wish_items.append(sac.ChipItem(label=str(d)))
+        # Prepare Wishes Calendar (Native Buttons)
+        st.markdown('<div class="calendar-grid-container">', unsafe_allow_html=True)
         
-        st.markdown('<div class="calendar-chip-grid">', unsafe_allow_html=True)
-        
-        # Sync Key Logic for Wishes
-        wish_combined_key = f"wish_batch_{sel_month}"
-        
-        # Initialize session state if missing
-        if wish_combined_key not in st.session_state:
-            selected_indices_wish = []
-            for idx, d in enumerate(flat_days):
-                if d != 0 and d in default_wish_nums:
-                    selected_indices_wish.append(idx)
-            st.session_state[wish_combined_key] = selected_indices_wish
-        
-        # Render Chip
-        selected_indices_wish_grid = sac.chip(
-            items=wish_items,
-            align='center',
-            radius='sm',
-            multiple=True,
-            return_index=True,
-            key=wish_combined_key,
-            color='indigo',
-            size='sm'
-        )
+        for week in cal:
+            w_wk_cols = st.columns(7)
+            for i, day_num in enumerate(week):
+                with w_wk_cols[i]:
+                    if day_num == 0:
+                        st.write("")
+                    else:
+                        # Native Checkbox - Wishes
+                        wish_chk_key = f"wish_chk_{sel_month}_{day_num}"
+                        
+                        if wish_chk_key not in st.session_state:
+                            st.session_state[wish_chk_key] = day_num in default_wish_nums
+                        
+                        is_wish_checked = st.checkbox(f"{day_num}", key=wish_chk_key)
+                        
+                        if is_wish_checked:
+                            selected_wishes.append(d_obj)
+
         st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Process Selection
-        for idx in selected_indices_wish_grid:
-            day_num = flat_days[idx]
-            if day_num != 0:
-                selected_wishes.append(date(2026, sel_month, day_num))
         
         # -----------------------------------
         st.divider()

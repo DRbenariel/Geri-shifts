@@ -281,29 +281,42 @@ def setup_style():
         color: #64748b !important;
     }
 
-    /* Optimized Single-Component Calendar Grid */
-    /* Target the specific wrapper we added */
-    .calendar-chip-grid > div > div {
+    /* Optimized Single-Component Calendar Grid via Key Targeting */
+    /* Target via Flex-Wrap detection (Most robust for SAC) */
+    div[class*="st-key-const_batch"] div[style*="wrap"],
+    div[class*="st-key-wish_batch"] div[style*="wrap"] {
         display: grid !important;
         grid-template-columns: repeat(7, 1fr) !important;
         gap: 6px !important;
         justify-items: center !important;
     }
+
+    /* Fallback/Specific Child Targeting */
+    div[class*="st-key-const_batch"] > div:first-child > div,
+    div[class*="st-key-wish_batch"] > div:first-child > div {
+         display: grid !important;
+         grid-template-columns: repeat(7, 1fr) !important;
+    }
     
-    /* Target the chip items themselves to ensure full width/centering */
-    .calendar-chip-grid div[role="button"] {
+    /* Target the chip items inside */
+    div[class*="st-key-const_batch"] div[role="button"],
+    div[class*="st-key-wish_batch"] div[role="button"] {
         width: 100% !important;
-        min-width: 0 !important; /* Allow shrinking */
+        min-width: 0 !important;
         justify-content: center !important;
         margin: 0 !important;
         padding: 4px 0 !important;
+        border-radius: 6px !important;
     }
     
-    /* Hide the spacer chips completely or style them */
-    .calendar-chip-grid div[aria-disabled="true"] {
-        visibility: hidden !important; 
-        /* We use visibility hidden so they still take up space in the grid */
+    /* Hide spacers */
+    div[class*="st-key-const_batch"] div[role="button"]:has(span:empty),
+    div[class*="st-key-wish_batch"] div[role="button"]:has(span:empty) {
+        visibility: hidden !important;
+        pointer-events: none !important;
     }
+    /* Fallback for browsers not supporting :has (though most do now) */
+    /* We can also rely on the label text if needed, but :has is safe enough for modern browsers */
 
     /* Global Right Alignment for specific containers */
     .element-container, .stMarkdown {
