@@ -282,19 +282,27 @@ def setup_style():
     }
 
     /* Optimized Single-Component Calendar Grid */
-    .calendar-chip-grid .st-key-chip_wrapper {
+    /* Target the specific wrapper we added */
+    .calendar-chip-grid > div > div {
         display: grid !important;
         grid-template-columns: repeat(7, 1fr) !important;
-        gap: 8px !important;
-        width: 100% !important;
+        gap: 6px !important;
+        justify-items: center !important;
     }
-    .calendar-chip-grid .st-key-chip_wrapper > div {
+    
+    /* Target the chip items themselves to ensure full width/centering */
+    .calendar-chip-grid div[role="button"] {
         width: 100% !important;
-        margin: 0 !important;
-    }
-    .calendar-chip-grid span {
-        width: 100% !important;
+        min-width: 0 !important; /* Allow shrinking */
         justify-content: center !important;
+        margin: 0 !important;
+        padding: 4px 0 !important;
+    }
+    
+    /* Hide the spacer chips completely or style them */
+    .calendar-chip-grid div[aria-disabled="true"] {
+        visibility: hidden !important; 
+        /* We use visibility hidden so they still take up space in the grid */
     }
 
     /* Global Right Alignment for specific containers */

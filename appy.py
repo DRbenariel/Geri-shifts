@@ -1571,10 +1571,11 @@ else:
         if const_combined_key not in st.session_state:
              st.session_state[const_combined_key] = selected_indices
         
-        # FIX: Remove 'index' prop to avoid sticky behavior. 
-        # The widget will use the value from st.session_state[key] automatically.
+        # FIX: Restore 'index' prop for persistence. 
+        # With single-component, this should not cause sticky issues if session state is managed correctly.
         selected_indices_grid = sac.chip(
             items=chip_items,
+            index=st.session_state[const_combined_key],
             align='center',
             radius='sm',
             multiple=True,
@@ -1637,9 +1638,10 @@ else:
         if wish_combined_key not in st.session_state:
              st.session_state[wish_combined_key] = selected_indices_wish
         
-        # FIX: Remove 'index' prop to avoid sticky behavior.
+        # FIX: Restore 'index' prop for persistence.
         selected_indices_wish_grid = sac.chip(
             items=wish_items,
+            index=st.session_state[wish_combined_key],
             align='center',
             radius='sm',
             multiple=True,
