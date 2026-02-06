@@ -230,6 +230,36 @@ def setup_style():
         width: fit-content !important;
     }
 
+    /* --- Calendar Assignment Styling (Button-like) --- */
+    .slot {
+        background-color: #4f46e5 !important; /* Indigo 600 */
+        color: white !important;
+        padding: 4px 8px !important;
+        border-radius: 6px !important;
+        margin-top: 4px !important;
+        font-size: 0.85rem !important;
+        text-align: center !important;
+        display: block !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1) !important;
+        border: none !important;
+    }
+    .slot span, .dept-label {
+        color: white !important;
+    }
+    .dept-label {
+        font-weight: 700 !important;
+        margin-left: 4px !important;
+        opacity: 0.9;
+    }
+    .empty-slot {
+        background-color: #f1f5f9 !important; /* Slate 100 */
+        color: #64748b !important; /* Slate 500 */
+        border: 1px dashed #cbd5e1 !important;
+    }
+    .empty-slot span {
+        color: #64748b !important;
+    }
+
     /* Global Right Alignment for specific containers */
     .element-container, .stMarkdown {
         direction: rtl;

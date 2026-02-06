@@ -28,8 +28,9 @@ def get_db_data(worksheet_name):
     # קריאה מהירה ללא מטמון כדי לקבל עדכונים בזמן אמת
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
+        # Enable caching (TTL=600 seconds) to prevent API rate limit issues
         # Use show_spinner=False to suppress the "Running..." toast/message
-        df = conn.read(worksheet=worksheet_name, ttl=0, show_spinner=False)
+        df = conn.read(worksheet=worksheet_name, ttl=600, show_spinner=False)
         return df
     except Exception as e:
         # טיפול חכם בשגיאות: רק אם הגיליון באמת לא קיים, נחזיר DataFrame ריק
@@ -851,7 +852,7 @@ if role == "מנהל/ת":
             emp_man = c_emp.selectbox("עובד:", st.session_state.staff['name'].tolist(), key="manual_emp")
             
             # כפתור שיבוץ
-            if c_btn_add.button("✅ שבוץ"):
+            if c_btn_add.button("✅ שיבוץ"):
                 # הסרת שיבוץ קיים לתאריך ולמחלקה הזו (אם יש)
                 st.session_state.schedule = st.session_state.schedule[
                     ~((st.session_state.schedule['date'] == str(d_man)) & 
