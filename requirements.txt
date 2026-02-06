@@ -3,3 +3,5 @@ pandas
 openpyxl
 matplotlib
 st-gsheets-connection
+streamlit-antd-components
+streamlit-extras
