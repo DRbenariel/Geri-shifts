@@ -788,14 +788,21 @@ st.markdown('<div class="main-header">', unsafe_allow_html=True)
 # FORCE INDIGO CHECKBOX CSS (Hardcoded Fix for Streamlit Cloud)
 st.markdown("""
 <style>
-    /* Force Indigo Checkbox Color */
-    div[data-testid="stCheckbox"] label[data-baseweb="checkbox"] > div:first-child[aria-checked="true"],
-    div[data-testid="stCheckbox"] label[data-baseweb="checkbox"] > div:first-child[aria-checked="mixed"] {
+    /* Force Indigo Checkbox Color - Broad Selector */
+    div[data-testid="stCheckbox"] *[aria-checked="true"] {
         background-color: #6366f1 !important;
         border-color: #6366f1 !important;
     }
-    div[data-testid="stCheckbox"] label[data-baseweb="checkbox"] > div:first-child[aria-checked="true"] svg {
+    
+    /* Force SVG Color */
+    div[data-testid="stCheckbox"] *[aria-checked="true"] svg {
         fill: white !important;
+        stroke: white !important;
+    }
+    
+    /* Fallback for specific structure if broad fails */
+    span[data-baseweb="checkbox"] div[aria-checked="true"] {
+         background-color: #6366f1 !important;
     }
 </style>
 """, unsafe_allow_html=True)
