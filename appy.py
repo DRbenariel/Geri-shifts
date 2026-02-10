@@ -299,10 +299,62 @@ else:
         </style>
     """, unsafe_allow_html=True)
 
+# --- Helper Function for Validity Checks (Shared by Auto-Scheduler and Swap Tool) ---
+def check_assignment_validity(schedule_data, person_name, check_date, target_dept, staff_df, requests_df):
+    """
+    Checks if assigning person_name to target_dept on check_date is valid.
+    schedule_data: List of dicts OR DataFrame
+    """
+    # Normalize to list of dicts if DataFrame
+    if isinstance(schedule_data, pd.DataFrame):
+        schedule_data = schedule_data.to_dict('records')
+        
+    check_d_obj = datetime.strptime(check_date, '%Y-%m-%d').date()
+    
+    # 1. Rest Check (2 days gap)
+    for offset in [-2, -1, 1, 2]:
+        nearby_date = str(check_d_obj + timedelta(days=offset))
+        if any(s for s in schedule_data if str(s['date']) == nearby_date and s['employee'] == person_name):
+            return False, "Rest Violation (Worked nearby)"
+            
+    # 2. Duplicate Check (Same Day)
+    if any(s for s in schedule_data if str(s['date']) == check_date and s['employee'] == person_name):
+        return False, "Already working this day"
+        
+    # 3. User Constraints (Hard Block)
+    # Ensure date column is string for comparison
+    req_date_str = requests_df['date'].astype(str)
+    if not requests_df[(requests_df['employee'] == person_name) & (req_date_str == check_date) & (requests_df['status'] == "אילוץ")].empty:
+        return False, "User Restriction (Blocked)"
+        
+    p_row = staff_df[staff_df['name'] == person_name]
+    if p_row.empty: return False, "Unknown Employee"
+    person = p_row.iloc[0]
+    
+    # 4. Department Type Compatibility
+    p_type = person['type']
+    if p_type == 'תורן חוץ' and 'פנימית' in target_dept:
+        return False, "External cannot work Internal"
+        
+    # 5. Home Department Restriction
+    only_home = person.get('only_home_dept', False)
+    if only_home:
+         target_context = target_dept
+         if "שישי בוקר" in target_dept:
+             target_context = "שיקום" if "שיקום" in target_dept else "פנימית גריאטרית"
+         
+         if person['dept'] != 'כללי' and person['dept'] != target_context:
+             return False, f"Restricted to Home Dept ({person['dept']})"
+
+    return True, "Valid"
 
 # טעינת נתונים ממסד הנתונים ל-Session State
 if 'staff' not in st.session_state:
     st.session_state.staff = get_db_data("staff")
+    # Initialize only_home_dept if missing
+    if 'only_home_dept' not in st.session_state.staff.columns:
+        st.session_state.staff['only_home_dept'] = False
+
 if 'schedule' not in st.session_state:
     st.session_state.schedule = get_db_data("schedule")
 if 'requests' not in st.session_state:
@@ -326,8 +378,26 @@ def toggle_state(key):
 def run_smart_scheduling(year, month, only_weekends=False):
     num_days = calendar.monthrange(year, month)[1]
     staff_df = st.session_state.staff.copy()
-    manual_entries = st.session_state.schedule[st.session_state.schedule['is_manual'] == True].to_dict('records')
-    new_schedule = manual_entries
+    
+    # טעינת כל השיבוצים הקיימים (לא רק ידניים) כדי לשמר מצב קיים
+    all_current_records = st.session_state.schedule.to_dict('records')
+    
+    # סינון מקדים:
+    # 1. שומרים את כל השיבוצים של חודשים אחרים.
+    # 2. בחודש הנוכחי: שומרים כל שיבוץ שיש בו עובד אמיתי (לא '---').
+    #    נמחקים רק שיבוצים של '---' בחודש הנוכחי כדי לאפשר למערכת לנסות לשבץ אותם מחדש.
+    new_schedule = []
+    current_month_prefix = f"{year}-{month:02d}"
+    
+    for r in all_current_records:
+        # אם התאריך לא בחודש הנוכחי - שומרים
+        if not str(r['date']).startswith(current_month_prefix):
+            new_schedule.append(r)
+        else:
+            # אם בחודש הנוכחי - שומרים רק אם זה לא כישלון ('---') 
+            # (כך שאם היה כישלון, המשבצת "מתפנה" לניסיון חוזר)
+            if r['employee'] != '---':
+                new_schedule.append(r)
     
     work_load = {row['name']: 0 for _, row in staff_df.iterrows()}
     weekends_worked = {row['name']: set() for _, row in staff_df.iterrows()}
@@ -335,17 +405,41 @@ def run_smart_scheduling(year, month, only_weekends=False):
     wed_counts = {row['name']: 0 for _, row in staff_df.iterrows()}
     thu_counts = {row['name']: 0 for _, row in staff_df.iterrows()}
     
-    # עדכון מונים לפי שיבוצים ידניים קיימים
-    for s in manual_entries:
-        if s['employee'] in work_load:
+    # איסוף נתונים לדיווח הוגנות
+    initial_wed_stats = {}
+    initial_thu_stats = {}
+    
+    # עדכון מונים: הפרדה בין מונים גלובליים (הוגנות) למונים חודשיים (מכסות)
+    for s in new_schedule:
+        if s['employee'] not in work_load or s['employee'] == '---': continue
+        
+        dt = datetime.strptime(s['date'], '%Y-%m-%d')
+        
+        # 1. מונים גלובליים (היסטוריה מלאה) - לאיזון ימי כוח
+        if dt.weekday() == 2: wed_counts[s['employee']] += 1
+        if dt.weekday() == 3: thu_counts[s['employee']] += 1
+        
+        # 2. מונים חודשיים בלבד - לבדיקת מכסות
+        if str(s['date']).startswith(current_month_prefix):
             work_load[s['employee']] += 1
-            dt = datetime.strptime(s['date'], '%Y-%m-%d')
             last_assignment[s['employee']] = dt.toordinal()
-            if dt.weekday() == 2: wed_counts[s['employee']] += 1
-            if dt.weekday() == 3: thu_counts[s['employee']] += 1
+            
             # תיקון: החרגת שישי בוקר ממכסת הסופ"ש
             if dt.weekday() in [4, 5] and "שישי בוקר" not in s.get('dept', ''): 
                 weekends_worked[s['employee']].add(dt.isocalendar()[1])
+
+    # חישוב סטטיסטיקה לפני השיבוץ הנוכחי
+    avg_wed = sum(wed_counts.values()) / len(wed_counts) if wed_counts else 0
+    avg_thu = sum(thu_counts.values()) / len(thu_counts) if thu_counts else 0
+    
+    # זיהוי עובדים שזקוקים לאיזון (מתחת לממוצע)
+    priority_wed = [k for k, v in wed_counts.items() if v < avg_wed]
+    priority_thu = [k for k, v in thu_counts.items() if v < avg_thu]
+    
+    balancing_msg = f"**דוח איזון הוגנות (רב-חודשי):**\n"
+    balancing_msg += f"- **רביעי:** ממוצע {avg_wed:.1f}. תועדפו: {len(priority_wed)} עובדים.\n"
+    balancing_msg += f"- **חמישי:** ממוצע {avg_thu:.1f}. תועדפו: {len(priority_thu)} עובדים.\n"
+    balancing_msg += f"- **שישי בוקר:** האיזון מבוצע אוטומטית על סמך כל ההיסטוריה."
 
     all_dates = [date(year, month, d) for d in range(1, num_days + 1)]
     
@@ -384,6 +478,20 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 # BUG FIX: Ensure employee is not already assigned to another department on the same day
                 if any(s for s in new_schedule if s['date'] == d_str and s['employee'] == name):
                     continue
+
+                # --- Department Restriction Check ---
+                only_home = person.get('only_home_dept', False)
+                if only_home:
+                     # Determine target shift's "Real" Department context
+                     target_context = dept
+                     if "שישי בוקר" in dept:
+                         target_context = "שיקום" if "שיקום" in dept else "פנימית גריאטרית"
+                     
+                     # Enforce restriction (General staff usually exempt unless we want otherwise)
+                     if person['dept'] != 'כללי' and person['dept'] != target_context:
+                         # failure_reasons.append(f"{name}: מוגבל למחלקת אם")
+                         continue
+                # ------------------------------------
 
                 # בדיקת מכסה קשיחה (חודשית)
                 monthly_quota = safe_int(person['monthly_quota'], 0)
@@ -466,6 +574,21 @@ def run_smart_scheduling(year, month, only_weekends=False):
                     days_diff = d.toordinal() - last_day
                     score += days_diff * 2  # בונוס על כל יום שעבר
                     
+                    # --- פקטור ריווח (Spacing/Pacing) ---
+                    # המטרה: לפזר את המשמרות לאורך החודש ולמנוע דחיסה בהתחלה
+                    # נחשב "קצב צפוי": באיזה יום בחודש אנו נמצאים, וכמה משמרות היה אמור לעשות עד עכשיו באופן לינארי.
+                    current_day_in_month = d.day
+                    month_progress = current_day_in_month / num_days # 0.0 to 1.0
+                    expected_shifts = quota * month_progress
+                    actual_shifts = work_load[name]
+                    
+                    # הציון הוא ההפרש:
+                    # אם expected (2.5) > actual (1) -> נקבל 1.5 חיובי (דחוף לשבץ)
+                    # אם expected (1.0) < actual (3) -> נקבל -2.0 שלילי (כבר עשה יותר מדי, להרגיע)
+                    pacing_score = (expected_shifts - actual_shifts) * 500 
+                    score += pacing_score
+                    # ------------------------------------
+
                     # פקטור סופ"ש לתורני חוץ בשיקום
                     if dept == "שיקום" and cand['type'] == 'תורן חוץ':
                         # ימי חמישי (3), שישי (4), שבת (5)
@@ -485,10 +608,13 @@ def run_smart_scheduling(year, month, only_weekends=False):
                     # אם המועמד שייך למחלקה הנוכחית או ל'כללי' - מקבל בונוס
                     # אם המועמד ממחלקה אחרת - נמצא רק בעדיפות אחרונה (ענישה)
                     cand_dept = cand['dept']
+                    
+                    # בדיקת התאמה מלאה - אם מוגבל למחלקת אם, הציון לא רלוונטי כי הוא נפסל למעלה,
+                    # אבל כאן זה נותן בונוס למי שנמצא במחלקה הנכונה
                     if cand_dept == dept or cand_dept == 'כללי':
-                        score += 500
+                         score += 500
                     else:
-                        score -= 500  # קנס משמעותי לשיבוץ במחלקה לא תואמת
+                         score -= 5000  # קנס משמעותי מאוד (היה 500, הגברנו ל-5000 ליתר ביטחון)
 
                     return score
 
@@ -508,29 +634,10 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 
                 # כלי עזר לבדיקת תקינות מלאה (כולל מנוחה, רצף, וכו') להחלפה
                 def is_valid_assignment_for_swap(person_name, check_date, target_dept):
-                    # בדיקת מנוחה (יומיים רווח) רק סביב התאריך הנבדק
-                    check_d_obj = datetime.strptime(check_date, '%Y-%m-%d').date()
-                    for offset in [-2, -1, 1, 2]:
-                        if any(s for s in new_schedule if s['date'] == str(check_d_obj + timedelta(days=offset)) and s['employee'] == person_name):
-                             return False
-                    
-                    # בדיקת כפילות באותו יום
-                    if any(s for s in new_schedule if s['date'] == check_date and s['employee'] == person_name): return False
-                    
-                    # בדיקת רצף חמישי-שישי בוקר (אם רלוונטי) - כאן זה בדיקה גנרית
-                    
-                    # בדיקת אילוצי משתמש (רק חסמים קשיחים)
-                    if not st.session_state.requests[(st.session_state.requests['employee'] == person_name) & (st.session_state.requests['date'] == check_date) & (st.session_state.requests['status'] == "אילוץ")].empty: return False
-                    
-                    # בדיקת סוג עובד: תורן חוץ לא יכול לבצע משמרת בפנימית
-                    p_row = staff_df[staff_df['name'] == person_name]
-                    if not p_row.empty:
-                        p_type = p_row['type'].iloc[0]
-                        if p_type == 'תורן חוץ' and 'פנימית' in target_dept:
-                            return False
-
-                    return True
-
+                    # Use the shared global validation function
+                    # check_assignment_validity returns (bool, reason)
+                    is_valid, _ = check_assignment_validity(new_schedule, person_name, check_date, target_dept, staff_df, st.session_state.requests)
+                    return is_valid
                 # נרוץ על המתמודדים שנפסלו (Candidate A) וננסה למצוא פתרון שיאפשר לשבץ אותם
                 for _, person_a in staff_df.iterrows():
                     name_a = person_a['name']
@@ -578,7 +685,11 @@ def run_smart_scheduling(year, month, only_weekends=False):
                             
                             # בדיקה קפדנית: האם B יכול להיכנס ל-conf_date?
                             if is_valid_assignment_for_swap(name_b, conf_date, conf_dept):
-                                suggestions.append(f"💡 הסטה: העבר את **{name_a}** מה-{conf_date} לפה, ושבץ שם את **{name_b}**.")
+                                # Format conf_date for display
+                                conf_date_obj = datetime.strptime(conf_date, '%Y-%m-%d')
+                                conf_date_fmt = conf_date_obj.strftime('%d/%m/%Y')
+
+                                suggestions.append(f"💡 הסטה: העבר את **{name_a}** מה-{conf_date_fmt} לפה, ושבץ שם את **{name_b}**.")
                                 
                                 core_key = f"{d_str}_{dept}"
                                 if core_key not in st.session_state.swap_suggestions: st.session_state.swap_suggestions[core_key] = []
@@ -588,7 +699,7 @@ def run_smart_scheduling(year, month, only_weekends=False):
                                     'conflicted_emp': name_a,
                                     'conflict_dept': conf_dept,
                                     'replacement_emp': name_b,
-                                    'desc': f"הסטה: {name_a} (מ-{conf_date}) ⬅️ {name_b}"
+                                    'desc': f"הסטה: {name_a} (מ-{conf_date_fmt}) ⬅️ {name_b}"
                                 })
                                 break
 
@@ -729,57 +840,311 @@ def run_smart_scheduling(year, month, only_weekends=False):
 
     st.session_state.schedule = final_df
     save_to_db("schedule", st.session_state.schedule)
+    
+    # הצגת דוח האיזון למשתמש
+    st.info(balancing_msg)
 # --- 4. פונקציית ציור הלוח ---
 def draw_calendar_view(year, month, role, user_name=None):
-    cal = calendar.monthcalendar(year, month)
-    days_names = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
-    header_cols = st.columns(7)
-    for i, name in enumerate(days_names):
-        header_cols[i].markdown(f"<div style='text-align: center; font-weight: bold;'>{name}</div>", unsafe_allow_html=True)
+    # Toggle for Mobile View (List vs Grid)
+    # Mobile Detection
+    try:
+        from streamlit_javascript import st_javascript
+        ui_width = st_javascript("window.innerWidth", key="screen_width_js")
+        # Default to True (Mobile) if width is small (< 768px)
+        # Note: st_javascript might return 0 or None initially
+        is_mobile_detected = False
+        if ui_width and isinstance(ui_width, int) and ui_width < 768:
+            is_mobile_detected = True
+    except ImportError:
+        is_mobile_detected = False # Fallback if library missing
 
-    for week in cal:
-        cols = st.columns(7)
-        for i, day in enumerate(week):
-            if day == 0: continue
-            with cols[i]:
+    is_mobile_view = st.toggle("📱 תצוגת רשימה (מומלץ לנייד)", value=is_mobile_detected, key="mobile_list_view")
+
+    cal = calendar.monthcalendar(year, month)
+    
+    if is_mobile_view:
+        # --- List View Implementation ---
+        st.caption("מציג רשימה אנכית למניעת עיוותים בנייד")
+        days_names = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
+        
+        # Collect all assignments first
+        month_sched = st.session_state.schedule
+        
+        # Iterate through days linearly
+        for week in cal:
+             for i, day in enumerate(week):
+                if day == 0: continue
+
+                
                 date_str = f"{year}-{month:02d}-{day:02d}"
-                is_weekend = "weekend-day" if i >= 5 else ""
-                day_sched = st.session_state.schedule[st.session_state.schedule['date'] == date_str]
+                day_name = days_names[i]
                 
-                html = f'<div class="calendar-day {is_weekend}"><div class="day-number">{day}</div>'
-                for dept in ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום (1)", "שישי בוקר - שיקום (2)", "שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)"]:
-                    rows = day_sched[day_sched['dept'] == dept]
-                    # אם מדובר בשישי בוקר ואין שורה כזו (כי זה לא יום שישי), דלג
-                    if "שישי בוקר" in dept and rows.empty: continue
+                # Check if user has shift this day (or if admin)
+                day_rows = month_sched[month_sched['date'] == date_str]
+                
+                # Filter for non-admin visibility
+                if role != "מנהל/ת":
+                    day_rows = day_rows[(day_rows['employee'] == user_name) | (day_rows['employee'] == "---")]
+                
+                if day_rows.empty and role != "מנהל/ת":
+                    continue
+                
+                # Render Day Card
+                with st.container():
+                    # Format: DD/MM/YYYY
+                    formatted_date = f"{day:02d}/{month:02d}/{year}"
+                    st.markdown(f"**{formatted_date} ({day_name})**")
+                    if day_rows.empty:
+                        st.caption("אין שיבוצים")
+                    else:
+                        for _, row in day_rows.iterrows():
+                             emp = row['employee']
+                             # Clean employee name from common icons if present
+                             emp_clean = emp.replace("👤", "").replace("🛡️", "").replace("🍼", "").strip()
+                             
+                             dept = row['dept']
+                             
+                             style = "color:#1e3a8a;" if "שיקום" in dept else "color:#ea580c;" # Indigo/Orange hints
+                             # Removed icon as requested
+                             st.markdown(f"<div style='margin-right:10px; {style}'>{dept}: <b>{emp_clean}</b></div>", unsafe_allow_html=True)
+                    st.divider()
+
+    else:
+        # --- Standard Grid View ---
+        days_names = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
+        header_cols = st.columns(7)
+        for i, name in enumerate(days_names):
+            header_cols[i].markdown(f"<div style='text-align: center; font-weight: bold;'>{name}</div>", unsafe_allow_html=True)
+    
+        for week in cal:
+            cols = st.columns(7)
+            for i, day in enumerate(week):
+                if day == 0: continue
+                with cols[i]:
+                    date_str = f"{year}-{month:02d}-{day:02d}"
+                    is_weekend = "weekend-day" if i >= 5 else ""
+                    day_sched = st.session_state.schedule[st.session_state.schedule['date'] == date_str]
                     
-                    # שינוי: ריצה על כל השורות שנמצאו (כדי לתמוך בכפילויות, למשל 2 תורני בוקר)
-                    for _, row in rows.iterrows():
-                        val = row['employee']
-                        reason = row['empty_reason'] if val == "---" else ""
+                    html = f'<div class="calendar-day {is_weekend}"><div class="day-number">{day}</div>'
+                    for dept in ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום (1)", "שישי בוקר - שיקום (2)", "שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)"]:
+                        rows = day_sched[day_sched['dept'] == dept]
+                        # אם מדובר בשישי בוקר ואין שורה כזו (כי זה לא יום שישי), דלג
+                        if "שישי בוקר" in dept and rows.empty: continue
                         
-                        # פילטור עבור מתמחים - רואים רק את השיבוצים של עצמם
-                        if role != "מנהל/ת" and val != user_name and val != "---":
-                            continue
+                        # שינוי: ריצה על כל השורות שנמצאו (כדי לתמוך בכפילויות, למשל 2 תורני בוקר)
+                        for _, row in rows.iterrows():
+                            val = row['employee']
+                            reason = row['empty_reason'] if val == "---" else ""
                             
-                        css = "shikum-slot" if "שיקום" in dept else "pnimia-slot"
-                        if val == "---": css = "empty-slot"
-                        
-                        label = "שיקום" if dept == "שיקום" else "פנימית"
-                        if "שישי בוקר" in dept: label = "🔊 בוקר (" + ("שיקום" if "שיקום" in dept else "פנימית") + ")"
-                        
-                        html += f'<div class="slot {css}"><span class="dept-label">{label}</span> <span>{val}</span>'
-                        if role == "מנהל/ת" and reason:
-                            html += f'<span class="error-hint">❓ {reason}</span>'
-                        html += '</div>'
+                            # פילטור עבור מתמחים - רואים רק את השיבוצים של עצמם
+                            if role != "מנהל/ת" and val != user_name and val != "---":
+                                continue
+                                
+                            css = "shikum-slot" if "שיקום" in dept else "pnimia-slot"
+                            if val == "---": css = "empty-slot"
+                            
+                            label = "שיקום" if dept == "שיקום" else "פנימית"
+                            if "שישי בוקר" in dept: label = "🔊 בוקר (" + ("שיקום" if "שיקום" in dept else "פנימית") + ")"
+                            
+                            html += f'<div class="slot {css}"><span class="dept-label">{label}</span> <span>{val}</span>'
+                            if role == "מנהל/ת" and reason:
+                                html += f'<span class="error-hint">❓ {reason}</span>'
+                            html += '</div>'
+                    
+                    # הצגת אילוצים ובקשות (למנהל בלבד או לעובד על עצמו)
+                    if role == "מנהל/ת":
+                        reqs = st.session_state.requests[st.session_state.requests['date'] == date_str]
+                        for _, r in reqs.iterrows():
+                            icon = "❌" if r['status'] == "אילוץ" else "⭐"
+                            html += f'<div style="font-size:10px; color:{"#991b1b" if r["status"] == "אילוץ" else "#eab308"};">{icon} {r["employee"]}</div>'
+                    
+                    st.markdown(html + "</div>", unsafe_allow_html=True)
+
+    # --- Smart Swap Assistant (Manager Only) ---
+    if role == "מנהל/ת":
+        st.divider()
+        st.subheader("🤖 עוזר החלפות חכם")
+        st.caption("כלי זה מציע החלפות משמרת לפי חוקיות: פנויים, החלפות הדדיות, והחלפות משולשות.")
+        
+        c1, c2 = st.columns(2)
+        # Safe Date Input
+        try:
+            default_d = date(year, month, 1)
+            max_d = date(year, month, calendar.monthrange(year, month)[1])
+        except:
+             default_d = date(2026, 1, 1)
+             max_d = date(2026, 12, 31)
+
+        target_date_swap = c1.date_input("תאריך לבדיקה", value=default_d, min_value=default_d, max_value=max_d)
+        target_dept_swap = c2.selectbox("מחלקה/משמרת", ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום (1)", "שישי בוקר - שיקום (2)", "שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)"])
+        
+        # Analyze Current Slot
+        t_date_str = str(target_date_swap)
+        sche_df = st.session_state.schedule
+        current_assignment = sche_df[(sche_df['date'] == t_date_str) & (sche_df['dept'] == target_dept_swap)]
+        
+        current_emp = "---"
+        if not current_assignment.empty:
+            current_emp = current_assignment.iloc[0]['employee']
+        
+        st.info(f"**מצב נוכחי:** {target_dept_swap} ב-{target_date_swap.strftime('%d/%m')}: **{current_emp}**")
+        
+        if st.button("🔍 מצא החלפות אפשריות"):
+            candidates_direct = []
+            candidates_exchange = []
+            candidates_triple = []
+            
+            # Pre-fetch data
+            staff_df = st.session_state.staff
+            requests_df = st.session_state.requests
+            schedule_records = sche_df.to_dict('records')
+            
+            # 1. Direct Replacements (Free & Valid)
+            # 2. Exchanges (Busy but can swap)
+            
+            for _, person in staff_df.iterrows():
+                p_name = person['name']
+                if p_name == current_emp: continue
                 
-                # הצגת אילוצים ובקשות (למנהל בלבד או לעובד על עצמו)
-                if role == "מנהל/ת":
-                    reqs = st.session_state.requests[st.session_state.requests['date'] == date_str]
-                    for _, r in reqs.iterrows():
-                        icon = "❌" if r['status'] == "אילוץ" else "⭐"
-                        html += f'<div style="font-size:10px; color:{"#991b1b" if r["status"] == "אילוץ" else "#eab308"};">{icon} {r["employee"]}</div>'
+                # Check validity for TARGET spot
+                is_valid, reason = check_assignment_validity(schedule_records, p_name, t_date_str, target_dept_swap, staff_df, requests_df)
                 
-                st.markdown(html + "</div>", unsafe_allow_html=True)
+                if is_valid:
+                    candidates_direct.append(p_name)
+                    
+                    # Also check for Triple Swap possibilities starting with this person (B)
+                    # If B moves to A's spot, B's old spot needs coverage (C)
+                    # Find B's current spot
+                    b_current_spot = next((s for s in schedule_records if s['date'] == t_date_str and s['employee'] == p_name), None)
+                    if b_current_spot:
+                        # B is busy, so this is actually NOT a direct swap (unless we free B).
+                        # Let's move this to Exchange/Triple logic.
+                        # Wait, check_assignment_validity checks "Already working".
+                        # So if is_valid is True, it means NOT working.
+                        pass
+                else:
+                    # Invalid. Why?
+                    if reason == "Already working this day":
+                        # Check for Exchange or Triple
+                        # Find where they are working
+                        other_spot = next((s for s in schedule_records if s['date'] == t_date_str and s['employee'] == p_name), None)
+                        if other_spot:
+                            other_dept = other_spot['dept']
+                            
+                            # --- Exchange Check (A <-> B) ---
+                            # Can Current Emp (A) take Other Spot (B's spot)?
+                            if current_emp != "---":
+                                valid_for_a, reason_a = check_assignment_validity(schedule_records, current_emp, t_date_str, other_dept, staff_df, requests_df)
+                                # Ignore "Already working" for A because we are moving A out
+                                if valid_for_a or reason_a == "Already working this day": 
+                                    # Double check A isn't blocked there due to OTHER reasons (like external/internal)
+                                    # We need to simulate A NOT being in Target first?
+                                    # Actually check_assignment_validity checks global constraints.
+                                    # Assuming A is valid for B's spot roughly.
+                                    candidates_exchange.append({'name': p_name, 'dept': other_dept})
+
+                            # --- Triple Swap Check (A -> Out, B -> A, C -> B) ---
+                            # B (p_name) moves to Target. C (Free) moves to B's spot.
+                            # We need to verify B can move to Target (we know they are busy, but otherwise valid?)
+                            # Re-run check ignoring "Already working"
+                            # We need a robust "can work if free" check.
+                            # Let's simplify: Is valid ignoring duplicate?
+                            # We can assume p_name is compatible if check_assignment_validity failed ONLY due to "Already working".
+                            
+                            # Find C (Free person) for B's spot (other_dept)
+                            for _, person_c in staff_df.iterrows():
+                                c_name = person_c['name']
+                                if c_name in [current_emp, p_name]: continue
+                                
+                                valid_c, reason_c = check_assignment_validity(schedule_records, c_name, t_date_str, other_dept, staff_df, requests_df)
+                                if valid_c:
+                                    candidates_triple.append({
+                                        'b_name': p_name, 
+                                        'b_dept': other_dept,
+                                        'c_name': c_name
+                                    })
+            
+            # --- Display Results ---
+            st.write("---")
+            
+            # 1. Direct
+            st.markdown("##### ✅ מחליפים ישירים (פנויים)")
+            if candidates_direct:
+                for c in candidates_direct:
+                    c1, c2 = st.columns([3, 1])
+                    c1.write(f"**{c}** (פנוי/ה)")
+                    if c2.button("בצע החלפה", key=f"do_direct_{c}"):
+                        # Update DB
+                        # Remove old A
+                        st.session_state.schedule = st.session_state.schedule[
+                            ~((st.session_state.schedule['date'] == t_date_str) & (st.session_state.schedule['dept'] == target_dept_swap))
+                        ]
+                        # Add new B
+                        new_row = {'date': t_date_str, 'dept': target_dept_swap, 'employee': c, 'is_manual': True}
+                        st.session_state.schedule = pd.concat([st.session_state.schedule, pd.DataFrame([new_row])], ignore_index=True)
+                        save_to_db("schedule", st.session_state.schedule)
+                        st.success(f"בוצע! {c} שובץ במקום {current_emp}")
+                        st.rerun()
+            else:
+                st.caption("לא נמצאו מחליפים פנויים.")
+
+            # 2. Exchanges
+            if current_emp != "---":
+                st.markdown("##### 🔄 החלפות הדדיות (ראש בראש)")
+                if candidates_exchange:
+                    for item in candidates_exchange:
+                        b = item['name']
+                        b_dept = item['dept']
+                        c1, c2 = st.columns([3, 1])
+                        c1.write(f"**{b}** ({b_dept}) ↔️ **{current_emp}**")
+                        if c2.button("החלף", key=f"do_swap_{b}"):
+                            # Update DB - Swap Depts
+                            mask_a = (st.session_state.schedule['date'] == t_date_str) & (st.session_state.schedule['dept'] == target_dept_swap)
+                            mask_b = (st.session_state.schedule['date'] == t_date_str) & (st.session_state.schedule['dept'] == b_dept)
+                            
+                            st.session_state.schedule.loc[mask_a, 'employee'] = b
+                            st.session_state.schedule.loc[mask_b, 'employee'] = current_emp
+                            st.session_state.schedule['is_manual'] = True # Mark as manual
+                            
+                            save_to_db("schedule", st.session_state.schedule)
+                            st.success("ההחלפה בוצעה בהצלחה!")
+                            st.rerun()
+                else:
+                    st.caption("לא נמצאו החלפות הדדיות מתאימות.")
+            
+            # 3. Triple
+            st.markdown("##### 🔺 החלפות משולשות (שרשרת)")
+            st.caption(f"תרחיש: {current_emp} יוצא/ת, B מחליף אותו, C (פנוי) מחליף את B.")
+            if candidates_triple:
+                # Limit to 3 for noise reduction
+                for i, item in enumerate(candidates_triple[:5]):
+                    b = item['b_name']
+                    b_dept = item['b_dept']
+                    c = item['c_name']
+                    
+                    c1, c2 = st.columns([3, 1])
+                    c1.write(f"1. **{b}** עובר מ-{b_dept} ל-{target_dept_swap}\n2. **{c}** (פנוי) נכנס ל-{b_dept}")
+                    if c2.button("בצע שרשרת", key=f"do_triple_{i}"):
+                        # 1. Remove A (Current)
+                        st.session_state.schedule = st.session_state.schedule[
+                            ~((st.session_state.schedule['date'] == t_date_str) & (st.session_state.schedule['dept'] == target_dept_swap))
+                        ]
+                        # 2. Update B to Target
+                        st.session_state.schedule.loc[
+                            (st.session_state.schedule['date'] == t_date_str) & (st.session_state.schedule['dept'] == b_dept), 
+                            ['dept', 'is_manual']
+                        ] = [target_dept_swap, True]
+                        
+                        # 3. Add C to B's old dept
+                        new_row_c = {'date': t_date_str, 'dept': b_dept, 'employee': c, 'is_manual': True}
+                        st.session_state.schedule = pd.concat([st.session_state.schedule, pd.DataFrame([new_row_c])], ignore_index=True)
+                        
+                        save_to_db("schedule", st.session_state.schedule)
+                        st.success("החלפה משולשת בוצעה!")
+                        st.rerun()
+            else:
+                 st.caption("לא נמצאו מסלולים משולשים.")
+
 
 # --- 5. ממשק המנהל והעובד ---
 # Header Area
@@ -879,7 +1244,7 @@ if role == "מנהל/ת":
                 if st.session_state.manual_date.month != sel_month:
                      st.session_state.manual_date = default_date
 
-            d_man = c_date.date_input("תאריך:", key="manual_date")
+            d_man = c_date.date_input("תאריך:", key="manual_date", format="DD/MM/YYYY")
             dept_man = c_dept.selectbox("מחלקה:", ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום (1)", "שישי בוקר - שיקום (2)", "שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)"], key="manual_dept")
             
             # סינון רשימת העובדים - הצגת מי שמשובץ כרגע למעלה או סימון מיוחד? לא קריטי כרגע.
@@ -904,7 +1269,7 @@ if role == "מנהל/ת":
                 save_to_db("schedule", st.session_state.schedule)
                 st.success(f"שובץ: {emp_man}")
                 st.rerun()
-
+ 
             # כפתור ביטול שיבוץ
             if c_btn_del.button("❌ בטל"):
                 # מחיקת השיבוץ הספציפי הזה
@@ -919,11 +1284,36 @@ if role == "מנהל/ת":
         c1, c2, c3 = st.columns(3)
         if c1.button("🪄 שיבוץ אוטומטי מלא"): run_smart_scheduling(2026, sel_month, only_weekends=False); st.rerun()
         if c2.button("☕ שיבוץ סופ\"שים בלבד"): run_smart_scheduling(2026, sel_month, only_weekends=True); st.rerun()
-        if c3.button("🗑️ נקה לוח"): 
-            # איפוס מלא של הלוח - שומר רק על מבנה העמודות
-            st.session_state.schedule = pd.DataFrame(columns=st.session_state.schedule.columns)
-            save_to_db("schedule", st.session_state.schedule)
-            st.rerun()
+        with c3:
+            with st.expander("🗑️ ניקוי"):
+                if st.button("🧹 נקה אוטומטי (חודש זה)", help="מוחק שיבוצים אוטומטיים בחודש הנוכחי בלבד"):
+                    current_prefix = f"2026-{sel_month:02d}"
+                    
+                    # Ensure is_manual column exists
+                    if 'is_manual' not in st.session_state.schedule.columns:
+                        st.session_state.schedule['is_manual'] = False
+                    
+                    # Logic: Delete if (Date matches prefix) AND (is_manual is NOT True)
+                    mask_current_month = st.session_state.schedule['date'].astype(str).str.startswith(current_prefix)
+                    mask_auto = (st.session_state.schedule['is_manual'] != True)
+                    mask_to_delete = mask_current_month & mask_auto
+                    
+                    st.session_state.schedule = st.session_state.schedule[~mask_to_delete]
+                    
+                    save_to_db("schedule", st.session_state.schedule)
+                    st.success(f"שיבוצים אוטומטיים לחודש {sel_month}/2026 נמחקו (חודשים אחרים וידניים נשמרו).")
+                    st.rerun()
+                
+                if st.button("💥 נקה הכל (חודש זה)", help="מוחק את כל הלוח לחודש זה"): 
+                    current_prefix = f"2026-{sel_month:02d}"
+                    
+                    # Logic: Delete if Date matches prefix
+                    mask_to_delete = st.session_state.schedule['date'].astype(str).str.startswith(current_prefix)
+                    
+                    st.session_state.schedule = st.session_state.schedule[~mask_to_delete]
+                    save_to_db("schedule", st.session_state.schedule)
+                    st.success(f"כל השיבוצים לחודש {sel_month}/2026 נמחקו.")
+                    st.rerun()
         
         # --- התראה על משמרות שלא שובצו ---
         if not st.session_state.schedule.empty:
@@ -932,7 +1322,10 @@ if role == "מנהל/ת":
                 st.error(f"⚠️ שימו לב: נמצאו {len(failures)} משמרות שלא ניתן היה לשבץ!")
                 with st.expander("🔻 לחץ כאן לפירוט השגיאות והסיבות", expanded=False):
                     for _, row in failures.iterrows():
-                        st.markdown(f"❌ **{row['date']}** ({row['dept']}): {row['empty_reason']}")
+                        # Format date for display
+                        d_obj = datetime.strptime(row['date'], '%Y-%m-%d')
+                        fmt_date = d_obj.strftime('%d/%m/%Y')
+                        st.markdown(f"❌ **{fmt_date}** ({row['dept']}): {row['empty_reason']}")
                         
                         # כפתורי ביצוע החלפה (Swap Actions)
                         actions_found = False
@@ -1034,6 +1427,7 @@ if role == "מנהל/ת":
                     new_dept = st.selectbox("מחלקה:", ["שיקום", "פנימית גריאטרית", "כללי", "הנהלה"])
                     new_quota = st.number_input("מכסה חודשית:", min_value=0, value=6)
                     new_weekend_quota = st.number_input("מכסת סופ\"ש:", min_value=0, value=1)
+                    new_only_home = st.checkbox("מוגבל למחלקה זו בלבד?", value=False)
                 
                 if st.form_submit_button("הוסף עובד"):
                     if new_name.strip():
@@ -1047,6 +1441,7 @@ if role == "מנהל/ת":
                                 'dept': new_dept,
                                 'monthly_quota': new_quota,
                                 'weekend_quota': new_weekend_quota,
+                                'only_home_dept': new_only_home,
                                 'password': def_pass_hash
                             }])
                             
@@ -1054,29 +1449,88 @@ if role == "מנהל/ת":
                             save_to_db("staff", st.session_state.staff)
                             st.success(f"העובד/ת {new_name} נוספ/ה בהצלחה! (סיסמה: 1234)")
                             st.rerun()
-                        else:
-                            st.error("שגיאה: שם העובד כבר קיים במערכת.")
-                    else:
-                        st.error("חובה להזין שם עובד.")
-        # -----------------------
-
+        
+        st.divider()
         st.caption("שינויים בטבלה נשמרים רק בלחיצה על כפתור השמירה")
         
         # עטיפה בטופס (Form) כדי למנוע טעינה מחדש בכל שינוי תא
         with st.form(key="staff_batch_edit_form"):
-            # היפוך עמודות לתצוגה RTL
-            reversed_staff_view = st.session_state.staff[st.session_state.staff.columns[::-1]]
-            staff_editor = st.data_editor(reversed_staff_view, use_container_width=True, num_rows="dynamic")
+            # Prepare view without password
+            # Explicitly select columns to show, excluding password
+            # Also ensure only_home_dept is present
+            if 'only_home_dept' not in st.session_state.staff.columns:
+                 st.session_state.staff['only_home_dept'] = False
+                 
+            # We want to edit: name, type, dept, monthly_quota, weekend_quota, only_home_dept
+            # We keep 'password' for saving but hide it from view
+            
+            # Create a viewcopy for editing (indexed by original index or name if unique)
+            # Use columns list excluding password
+            cols_to_show = [c for c in st.session_state.staff.columns if c != 'password']
+            staff_view = st.session_state.staff[cols_to_show]
+            
+            # Reorder for RTL or just keep consistent? 
+            # Original code did: reversed_staff_view = st.session_state.staff[st.session_state.staff.columns[::-1]]
+            # Let's respect RTL by reversing, but ensuring password is gone first.
+            
+            reversed_cols = cols_to_show[::-1]
+            reversed_staff_view = staff_view[reversed_cols]
+
+            staff_editor = st.data_editor(
+                reversed_staff_view, 
+                use_container_width=True, 
+                num_rows="dynamic",
+                column_config={
+                    "only_home_dept": st.column_config.CheckboxColumn(
+                        "רק במחלקת אם?",
+                        help="סמן אם העובד יכול לבצע משמרות רק במחלקה שלו",
+                        default=False,
+                    )
+                }
+            )
             submit_changes = st.form_submit_button("💾 שמור שינויים בצוות")
         
         if submit_changes:
-            # שחזור סדר העמודות המקורי (Name בהתחלה) לפני שמירה
-            if not staff_editor.empty:
-                original_order_df = staff_editor[staff_editor.columns[::-1]]
-                st.session_state.staff = original_order_df
-                save_to_db("staff", st.session_state.staff)
-                st.success("הנתונים נשמרו בהצלחה!")
-                st.rerun()
+            # Merge logic:
+            # 1. Take the editor result (staff_editor)
+            # 2. Get the original passwords from st.session_state.staff
+            # WE MUST BE CAREFUL: "dynamic" rows means users can add/delete rows.
+            # If a row is added here, it won't have a password. We should assign default.
+            
+            # Because we reversed columns for display, we reverse back to normal for processing
+            edited_df = staff_editor[staff_editor.columns[::-1]]
+            
+            # Ensure 'only_home_dept' is boolean
+            edited_df['only_home_dept'] = edited_df['only_home_dept'].fillna(False).astype(bool)
+
+            # We need to preserve passwords for existing users.
+            # Simple approach: Join with original on 'name' IF name is unique and didn't change.
+            # But users might change names. 
+            # Best effort: 
+            # If the index matches, keep the password.
+            # If new row (index not in old), set default password.
+            
+            final_df_list = []
+            old_df = st.session_state.staff
+            
+            for index, row in edited_df.iterrows():
+                # Check if this index existed in old_df
+                pass_val = hashlib.sha256("1234".encode()).hexdigest() # Default
+                
+                if index in old_df.index:
+                    # Check if name matched (sanity check, though index usually persists in editor unless sorted)
+                     pass_val = old_df.loc[index, 'password']
+                
+                row['password'] = pass_val
+                final_df_list.append(row)
+            
+            # Reconstruct DataFrame including password
+            final_new_staff = pd.DataFrame(final_df_list)
+            
+            st.session_state.staff = final_new_staff
+            save_to_db("staff", st.session_state.staff)
+            st.success("הנתונים נשמרו בהצלחה!")
+            st.rerun()
         
         st.markdown("---")
         col_sync, col_warn = st.columns([1, 3])
@@ -1100,98 +1554,98 @@ if role == "מנהל/ת":
         if selected_emp_mgr:
             st.write(f"עריכת אילוצים עבור: **{selected_emp_mgr}**")
             
-            # טעינת אילוצים ובקשות קיימים
-            existing_mgr = st.session_state.requests[st.session_state.requests['employee'] == selected_emp_mgr]
+            # --- טעינת נתונים קיימים ---
+            current_month_prefix = f"2026-{sel_month:02d}"
             
-            # יצירת מילון לגישה מהירה לפי תאריך -> סטטוס
-            date_status_map = {}
-            if not existing_mgr.empty:
-                for _, row in existing_mgr.iterrows():
-                     date_status_map[str(row['date'])] = row['status']
+            # נרמול עמודת התאריך למחרוזת
+            requests_df = st.session_state.requests.copy()
+            requests_df['date'] = requests_df['date'].astype(str)
             
-            # לוח שנה (Data Editor) לניהול
-            days_in_month = calendar.monthrange(2026, sel_month)[1]
-            month_dates = [date(2026, sel_month, d) for d in range(1, days_in_month + 1)]
+            # סינון רשומות רלוונטיות לעובד ולחודש
+            emp_reqs = requests_df[
+                (requests_df['employee'] == selected_emp_mgr) & 
+                (requests_df['date'].str.startswith(current_month_prefix))
+            ]
             
-            # יצירת טבלה זמנית
-            edit_data = []
-            for d_obj in month_dates:
-                d_str = str(d_obj)
-                current_status = date_status_map.get(d_str, "פנוי") # ברירת מחדל: פנוי
+            existing_constraints = emp_reqs[emp_reqs['status'] == 'אילוץ']['date'].tolist()
+            existing_wishes = emp_reqs[emp_reqs['status'] == 'בקשה']['date'].tolist()
+            
+            # --- ממשק ויזואלי (דמוי עובד) ---
+            cal = calendar.monthcalendar(2026, sel_month)
+            
+            # פונקציה לבניית גריד
+            def render_manager_grid(title, key_prefix, selected_dates, color_style=""):
+                st.markdown(f"##### {title}")
+                st.markdown(f'<div class="calendar-grid-container" style="{color_style}">', unsafe_allow_html=True)
                 
-                day_name = ["ב'", "ג'", "ד'", "ה'", "ו'", "ש'", "א'"][d_obj.weekday()] # 0=Monday
-                edit_data.append({
-                    "תאריך": d_obj,
-                    "יום": day_name,
-                    "משאב": current_status
-                })
-            
-            df_edit = pd.DataFrame(edit_data)
-            
-            st.caption("הגדר סטטוס לכל יום (אילוץ / בקשה / פנוי):")
-            # הפיכת עמודות לתצוגה RTL (טכנית כאן זה פחות קריטי כי יש מעט, אבל נשמור על אחידות)
-            # סדר רצוי מימין לשמאל: משאב, יום, תאריך. במקור: תאריך, יום, משאב.
-            # נהפוך: משאב, יום, תאריך
-            df_edit_reversed = df_edit[df_edit.columns[::-1]]
+                # כותרות ימים
+                cols_head = st.columns(7)
+                headers = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
+                for i, h in enumerate(headers):
+                    cols_head[i].markdown(f"<div style='text-align:center; font-weight:bold; font-size:0.8em;'>{h}</div>", unsafe_allow_html=True)
+                
+                selected_result = []
+                
+                for week in cal:
+                    cols = st.columns(7)
+                    for i, day_num in enumerate(week):
+                        with cols[i]:
+                            if day_num == 0:
+                                st.write("")
+                            else:
+                                d_str = f"2026-{sel_month:02d}-{day_num:02d}"
+                                unique_key = f"{key_prefix}_{selected_emp_mgr}_{sel_month}_{day_num}"
+                                
+                                # בדיקה אם מסומן
+                                is_checked = d_str in selected_dates
+                                
+                                # Checkbox
+                                new_val = st.checkbox(f"{day_num}", value=is_checked, key=unique_key)
+                                
+                                if new_val:
+                                    selected_result.append(d_str)
+                st.markdown('</div>', unsafe_allow_html=True)
+                return selected_result
 
-            with st.form(key=f"mgr_form_{selected_emp_mgr}"):
-                edited_df = st.data_editor(
-                    df_edit_reversed, 
-                    column_config={
-                        "תאריך": st.column_config.DateColumn("תאריך", format="DD/MM/YYYY", disabled=True),
-                        "יום": st.column_config.TextColumn("יום", disabled=True),
-                        "משאב": st.column_config.SelectboxColumn(
-                            "משאב",
-                            options=["פנוי", "אילוץ", "בקשה"],
-                            required=True,
-                            width="medium"
-                        )
-                    },
-                    hide_index=True,
-                    use_container_width=True,
-                    height=400
-                )
-                
-                submitted = st.form_submit_button("💾 שמור אילוצים לחודש זה")
-
-            if submitted:
-                # קודם כל, נהפוך בחזרה כדי לקבל גישה נוחה לשמות העמודות המקוריים
-                original_df = edited_df[edited_df.columns[::-1]]
-                
-                # סינון ימים שיש להם סטטוס שאינו פנוי
-                # אנו רוצים לשמור רק "אילוץ" או "בקשה"
-                to_save = original_df[original_df["משאב"] != "פנוי"]
-                
-                # ניקוי אילוצים קיימים לחודש זה עבור העובד
-                # המרה בטוחה למחרוזת
-                st.session_state.requests['date'] = st.session_state.requests['date'].astype(str)
-                current_month_prefix = f"2026-{sel_month:02d}"
-                
-                # מחיקת רשומות קודמות לחודש זה
-                mask_keep = ~((st.session_state.requests['employee'] == selected_emp_mgr) & 
-                              (st.session_state.requests['date'].astype(str).str.startswith(current_month_prefix)))
-                
-                st.session_state.requests = st.session_state.requests[mask_keep]
-                
-                # הוספת הרשומות החדשות
-                new_records = []
-                if not to_save.empty:
-                    for _, row in to_save.iterrows():
-                        new_records.append({
-                            'employee': selected_emp_mgr,
-                            'date': str(row['תאריך']),
-                            'status': row['משאב']
-                        })
+            # 1. גריד אילוצים
+            st.divider()
+            new_constraints = render_manager_grid("🔒 חסימות (לא יכול לעבוד)", "mgr_const", existing_constraints)
+            
+            # 2. גריד בקשות
+            st.divider()
+            new_wishes = render_manager_grid("⭐ בקשות (מעדיף לעבוד)", "mgr_wish", existing_wishes)
+            
+            st.divider()
+            
+            if st.button("💾 שמור שינויים לעובד זה"):
+                # בדיקת חפיפה (סתירה)
+                overlap = set(new_constraints).intersection(set(new_wishes))
+                if overlap:
+                    formatted_overlap = [datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m') for d in overlap]
+                    st.error(f"שגיאה: התאריכים הבאים מסומנים גם כחסימה וגם כבקשה: {', '.join(formatted_overlap)}")
+                else:
+                    # הכל תקין - שמירה
+                    
+                    # 1. מחיקת הישן לחודש זה
+                    mask_keep = ~((st.session_state.requests['employee'] == selected_emp_mgr) & 
+                                  (st.session_state.requests['date'].astype(str).str.startswith(current_month_prefix)))
+                    st.session_state.requests = st.session_state.requests[mask_keep]
+                    
+                    # 2. הוספת החדש
+                    new_records = []
+                    for d in new_constraints:
+                        new_records.append({'employee': selected_emp_mgr, 'date': d, 'status': 'אילוץ'})
+                    for d in new_wishes:
+                        new_records.append({'employee': selected_emp_mgr, 'date': d, 'status': 'בקשה'})
                     
                     if new_records:
                         st.session_state.requests = pd.concat([st.session_state.requests, pd.DataFrame(new_records)], ignore_index=True)
-                
-                # וידוא שוב שהכל מחרוזות
-                st.session_state.requests['date'] = st.session_state.requests['date'].astype(str)
-                
-                save_to_db("requests", st.session_state.requests)
-                st.success(f"הנתונים של {selected_emp_mgr} לחודש {sel_month}/2026 עודכנו בהצלחה!")
-                st.rerun()
+                    
+                    save_to_db("requests", st.session_state.requests)
+                    st.success(f"האילוצים של {selected_emp_mgr} עודכנו בהצלחה!")
+                    # ניקוי cache של הממשק (לא חובה כי ה-rerun ירענן את הערכים ב-checkbox כי ה-key תלוי בערך? 
+                    # לא, ה-value=is_checked יתעדכן בגלל ה-rerun והטעינה מחדש של existing_constraints)
+                    st.rerun()
     elif selected_nav == 'דוחות וניהול':
         # st.header("דוח סטטוס ומסכמים") - Removed by user request
         

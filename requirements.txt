@@ -6,3 +6,4 @@ st-gsheets-connection
 streamlit-antd-components
 streamlit-extras
 streamlit-shadcn-ui
+streamlit-javascript
