@@ -309,6 +309,9 @@ def check_assignment_validity(schedule_data, person_name, check_date, target_dep
     if isinstance(schedule_data, pd.DataFrame):
         schedule_data = schedule_data.to_dict('records')
         
+    if person_name in ['ADMIN', '---']:
+        return False, "Invalid Person"
+        
     check_d_obj = datetime.strptime(check_date, '%Y-%m-%d').date()
     
     # 1. Rest Check (2 days gap)
@@ -981,7 +984,12 @@ def draw_calendar_view(year, month, role, user_name=None):
         # Analyze Current Slot
         t_date_str = str(target_date_swap)
         sche_df = st.session_state.schedule
-        current_assignment = sche_df[(sche_df['date'] == t_date_str) & (sche_df['dept'] == target_dept_swap)]
+        
+        # Robust filtering with strip() to avoid whitespace mismatches
+        current_assignment = sche_df[
+            (sche_df['date'] == t_date_str) & 
+            (sche_df['dept'].astype(str).str.strip() == target_dept_swap.strip())
+        ]
         
         current_emp = "---"
         if not current_assignment.empty:
@@ -1004,7 +1012,8 @@ def draw_calendar_view(year, month, role, user_name=None):
             
             for _, person in staff_df.iterrows():
                 p_name = person['name']
-                if p_name == current_emp: continue
+                # Filter out ADMIN, placeholder, and current employee
+                if p_name in ['ADMIN', '---', current_emp]: continue
                 
                 # Check validity for TARGET spot
                 is_valid, reason = check_assignment_validity(schedule_records, p_name, t_date_str, target_dept_swap, staff_df, requests_df)
@@ -1017,10 +1026,6 @@ def draw_calendar_view(year, month, role, user_name=None):
                     # Find B's current spot
                     b_current_spot = next((s for s in schedule_records if s['date'] == t_date_str and s['employee'] == p_name), None)
                     if b_current_spot:
-                        # B is busy, so this is actually NOT a direct swap (unless we free B).
-                        # Let's move this to Exchange/Triple logic.
-                        # Wait, check_assignment_validity checks "Already working".
-                        # So if is_valid is True, it means NOT working.
                         pass
                 else:
                     # Invalid. Why?
@@ -1037,25 +1042,16 @@ def draw_calendar_view(year, month, role, user_name=None):
                                 valid_for_a, reason_a = check_assignment_validity(schedule_records, current_emp, t_date_str, other_dept, staff_df, requests_df)
                                 # Ignore "Already working" for A because we are moving A out
                                 if valid_for_a or reason_a == "Already working this day": 
-                                    # Double check A isn't blocked there due to OTHER reasons (like external/internal)
-                                    # We need to simulate A NOT being in Target first?
-                                    # Actually check_assignment_validity checks global constraints.
-                                    # Assuming A is valid for B's spot roughly.
                                     candidates_exchange.append({'name': p_name, 'dept': other_dept})
 
                             # --- Triple Swap Check (A -> Out, B -> A, C -> B) ---
-                            # B (p_name) moves to Target. C (Free) moves to B's spot.
-                            # We need to verify B can move to Target (we know they are busy, but otherwise valid?)
-                            # Re-run check ignoring "Already working"
-                            # We need a robust "can work if free" check.
-                            # Let's simplify: Is valid ignoring duplicate?
-                            # We can assume p_name is compatible if check_assignment_validity failed ONLY due to "Already working".
-                            
                             # Find C (Free person) for B's spot (other_dept)
                             for _, person_c in staff_df.iterrows():
                                 c_name = person_c['name']
-                                if c_name in [current_emp, p_name]: continue
+                                # Filter C: Must not be ADMIN, placeholder, A, or B
+                                if c_name in ['ADMIN', '---', current_emp, p_name]: continue
                                 
+                                # Validate C for B's Department
                                 valid_c, reason_c = check_assignment_validity(schedule_records, c_name, t_date_str, other_dept, staff_df, requests_df)
                                 if valid_c:
                                     candidates_triple.append({
@@ -1095,8 +1091,11 @@ def draw_calendar_view(year, month, role, user_name=None):
                     for item in candidates_exchange:
                         b = item['name']
                         b_dept = item['dept']
+                        # Format date for display
+                        d_disp = datetime.strptime(t_date_str, '%Y-%m-%d').strftime('%d/%m')
+                        
                         c1, c2 = st.columns([3, 1])
-                        c1.write(f"**{b}** ({b_dept}) ↔️ **{current_emp}**")
+                        c1.write(f"**{b}** ({b_dept} ב-**{d_disp}**) ↔️ **{current_emp}** ({target_dept_swap})")
                         if c2.button("החלף", key=f"do_swap_{b}"):
                             # Update DB - Swap Depts
                             mask_a = (st.session_state.schedule['date'] == t_date_str) & (st.session_state.schedule['dept'] == target_dept_swap)
@@ -1121,9 +1120,10 @@ def draw_calendar_view(year, month, role, user_name=None):
                     b = item['b_name']
                     b_dept = item['b_dept']
                     c = item['c_name']
+                    d_disp = datetime.strptime(t_date_str, '%Y-%m-%d').strftime('%d/%m')
                     
                     c1, c2 = st.columns([3, 1])
-                    c1.write(f"1. **{b}** עובר מ-{b_dept} ל-{target_dept_swap}\n2. **{c}** (פנוי) נכנס ל-{b_dept}")
+                    c1.write(f"1. **{b}** ({b_dept} ב-**{d_disp}**) ➡️ {target_dept_swap}\n2. **{c}** (פנוי) ➡️ {b_dept}")
                     if c2.button("בצע שרשרת", key=f"do_triple_{i}"):
                         # 1. Remove A (Current)
                         st.session_state.schedule = st.session_state.schedule[
