@@ -300,10 +300,12 @@ else:
     """, unsafe_allow_html=True)
 
 # --- Helper Function for Validity Checks (Shared by Auto-Scheduler and Swap Tool) ---
-def check_assignment_validity(schedule_data, person_name, check_date, target_dept, staff_df, requests_df):
+# --- Helper Function for Validity Checks (Shared by Auto-Scheduler and Swap Tool) ---
+def check_assignment_validity(schedule_data, person_name, check_date, target_dept, staff_df, requests_df, ignore_quota=False):
     """
     Checks if assigning person_name to target_dept on check_date is valid.
     schedule_data: List of dicts OR DataFrame
+    ignore_quota: If True, skips the max shifts check (useful for Swaps where count doesn't increase)
     """
     # Normalize to list of dicts if DataFrame
     if isinstance(schedule_data, pd.DataFrame):
@@ -312,43 +314,51 @@ def check_assignment_validity(schedule_data, person_name, check_date, target_dep
     if person_name in ['ADMIN', '---']:
         return False, "Invalid Person"
         
-    check_d_obj = datetime.strptime(check_date, '%Y-%m-%d').date()
-    
-    # 1. Rest Check (2 days gap)
-    for offset in [-2, -1, 1, 2]:
-        nearby_date = str(check_d_obj + timedelta(days=offset))
-        if any(s for s in schedule_data if str(s['date']) == nearby_date and s['employee'] == person_name):
-            return False, "Rest Violation (Worked nearby)"
-            
-    # 2. Duplicate Check (Same Day)
-    if any(s for s in schedule_data if str(s['date']) == check_date and s['employee'] == person_name):
-        return False, "Already working this day"
-        
-    # 3. User Constraints (Hard Block)
-    # Ensure date column is string for comparison
-    req_date_str = requests_df['date'].astype(str)
-    if not requests_df[(requests_df['employee'] == person_name) & (req_date_str == check_date) & (requests_df['status'] == "אילוץ")].empty:
-        return False, "User Restriction (Blocked)"
-        
     p_row = staff_df[staff_df['name'] == person_name]
     if p_row.empty: return False, "Unknown Employee"
     person = p_row.iloc[0]
     
-    # 4. Department Type Compatibility
-    p_type = str(person['type']).strip()
-    # Check if 'חוץ' is in the type name (e.g. 'תורן חוץ') to catch variations
+    # --- 1. Static Constraints (Critical - Must Fail First) ---
+    # Type Check (External vs Internal)
+    p_type = str(person.get('type', '')).strip()
     if 'חוץ' in p_type and 'פנימית' in target_dept:
         return False, "External cannot work Internal"
-        
-    # 5. Home Department Restriction
+
+    # Home Dept Check
     only_home = person.get('only_home_dept', False)
     if only_home:
          target_context = target_dept
          if "שישי בוקר" in target_dept:
              target_context = "שיקום" if "שיקום" in target_dept else "פנימית גריאטרית"
-         
          if person['dept'] != 'כללי' and person['dept'] != target_context:
              return False, f"Restricted to Home Dept ({person['dept']})"
+
+    # --- 2. Hard User Constraints ---
+    req_date_str = requests_df['date'].astype(str)
+    if not requests_df[(requests_df['employee'] == person_name) & (req_date_str == check_date) & (requests_df['status'] == "אילוץ")].empty:
+        return False, "User Restriction (Blocked)"
+        
+    # --- 3. Quota Check ---
+    if not ignore_quota:
+        # Count current shifts in this schedule
+        current_shifts = len([s for s in schedule_data if s['employee'] == person_name])
+        # Default quota to 6 if missing
+        max_quota = int(person.get('quota', 6))
+        if current_shifts >= max_quota:
+             return False, f"Quota Exceeded ({current_shifts}/{max_quota})"
+
+    # --- 4. Situational Constraints ---
+    check_d_obj = datetime.strptime(check_date, '%Y-%m-%d').date()
+    
+    # Rest Check (2 days gap)
+    for offset in [-2, -1, 1, 2]:
+        nearby_date = str(check_d_obj + timedelta(days=offset))
+        if any(s for s in schedule_data if str(s['date']) == nearby_date and s['employee'] == person_name):
+            return False, "Rest Violation (Worked nearby)"
+            
+    # Duplicate Check (Same Day)
+    if any(s for s in schedule_data if str(s['date']) == check_date and s['employee'] == person_name):
+        return False, "Already working this day"
 
     return True, "Valid"
 
@@ -852,28 +862,28 @@ def draw_calendar_view(year, month, role, user_name=None):
     # Toggle for Mobile View (List vs Grid)
     # Mobile Detection
     # Mobile Detection
+    if 'mobile_detected_persistent' not in st.session_state:
+        st.session_state.mobile_detected_persistent = False
+        
     try:
         from streamlit_javascript import st_javascript
-        # Check User Agent (More reliable for device type)
+        # Check User Agent and Width
         ua_string = st_javascript("window.navigator.userAgent", key="ua_check_1")
-        # Check Width
         ui_width = st_javascript("window.innerWidth", key="width_check_1")
-        
-        is_mobile_detected = False
         
         # 1. User Agent Check
         if ua_string and isinstance(ua_string, str):
              if any(x in ua_string for x in ["Android", "iPhone", "iPad", "Mobile", "webOS"]):
-                 is_mobile_detected = True
+                 st.session_state.mobile_detected_persistent = True
                  
         # 2. Width Check (Backup)
-        if not is_mobile_detected and ui_width and isinstance(ui_width, int) and 300 < ui_width < 768:
-             is_mobile_detected = True
+        if ui_width and isinstance(ui_width, int) and 300 < ui_width < 768:
+             st.session_state.mobile_detected_persistent = True
              
     except:
-        is_mobile_detected = False
+        pass
 
-    is_mobile_view = st.toggle("📱 תצוגת רשימה", value=is_mobile_detected, key="mobile_list_view")
+    is_mobile_view = st.toggle("📱 תצוגת רשימה", value=st.session_state.mobile_detected_persistent, key="mobile_list_view")
 
     cal = calendar.monthcalendar(year, month)
     
