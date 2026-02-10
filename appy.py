@@ -1038,6 +1038,9 @@ def draw_calendar_view(year, month, role, user_name=None):
             candidates_exchange = []
             candidates_triple = []
             
+            # Debug counters
+            failure_reasons = {}
+            
             # Pre-fetch data
             staff_df = st.session_state.staff
             requests_df = st.session_state.requests
@@ -1048,8 +1051,8 @@ def draw_calendar_view(year, month, role, user_name=None):
             
             for _, person in staff_df.iterrows():
                 p_name = person['name']
-                # Filter out ADMIN, placeholder, and current employee
-                if p_name in ['ADMIN', '---', current_emp]: continue
+                # Filter out ADMIN (Case Insensitive), placeholder, and current employee
+                if str(p_name).upper() == 'ADMIN' or p_name == '---' or p_name == current_emp: continue
                 
                 # Check validity for TARGET spot
                 is_valid, reason = check_assignment_validity(schedule_records, p_name, t_date_str, target_dept_swap, staff_df, requests_df)
@@ -1064,6 +1067,9 @@ def draw_calendar_view(year, month, role, user_name=None):
                     if b_current_spot:
                         pass
                 else:
+                    # Log failure reason
+                    failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+                    
                     # Invalid. Why?
                     # If failed due to "Already working" OR "Quota Exceeded", they might be valid for Exchange (Net Zero change)
                     # Note: "Quota" failure implies Static Constraints (External/Home) passed.
@@ -1183,6 +1189,10 @@ def draw_calendar_view(year, month, role, user_name=None):
                         st.rerun()
             else:
                  st.caption("לא נמצאו מסלולים משולשים.")
+
+            # Debug Info
+            with st.expander("מידע למפתח (למה נפסלו עובדים?)"):
+                st.write(failure_reasons)
 
 
 # --- 5. ממשק המנהל והעובד ---
