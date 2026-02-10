@@ -1050,7 +1050,9 @@ def draw_calendar_view(year, month, role, user_name=None):
                         pass
                 else:
                     # Invalid. Why?
-                    if reason == "Already working this day":
+                    # If failed due to "Already working" OR "Quota Exceeded", they might be valid for Exchange (Net Zero change)
+                    # Note: "Quota" failure implies Static Constraints (External/Home) passed.
+                    if reason == "Already working this day" or "Quota Exceeded" in reason:
                         # Check for Exchange or Triple
                         # Find where they are working
                         other_spot = next((s for s in schedule_records if s['date'] == t_date_str and s['employee'] == p_name), None)
@@ -1060,7 +1062,8 @@ def draw_calendar_view(year, month, role, user_name=None):
                             # --- Exchange Check (A <-> B) ---
                             # Can Current Emp (A) take Other Spot (B's spot)?
                             if current_emp != "---":
-                                valid_for_a, reason_a = check_assignment_validity(schedule_records, current_emp, t_date_str, other_dept, staff_df, requests_df)
+                                # A is also maintaining count, so ignore quota for A too
+                                valid_for_a, reason_a = check_assignment_validity(schedule_records, current_emp, t_date_str, other_dept, staff_df, requests_df, ignore_quota=True)
                                 # Ignore "Already working" for A because we are moving A out
                                 if valid_for_a or reason_a == "Already working this day": 
                                     candidates_exchange.append({'name': p_name, 'dept': other_dept})
