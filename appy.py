@@ -335,8 +335,9 @@ def check_assignment_validity(schedule_data, person_name, check_date, target_dep
     person = p_row.iloc[0]
     
     # 4. Department Type Compatibility
-    p_type = person['type']
-    if p_type == 'תורן חוץ' and 'פנימית' in target_dept:
+    p_type = str(person['type']).strip()
+    # Check if 'חוץ' is in the type name (e.g. 'תורן חוץ') to catch variations
+    if 'חוץ' in p_type and 'פנימית' in target_dept:
         return False, "External cannot work Internal"
         
     # 5. Home Department Restriction
@@ -850,24 +851,34 @@ def run_smart_scheduling(year, month, only_weekends=False):
 def draw_calendar_view(year, month, role, user_name=None):
     # Toggle for Mobile View (List vs Grid)
     # Mobile Detection
+    # Mobile Detection
     try:
         from streamlit_javascript import st_javascript
-        ui_width = st_javascript("window.innerWidth", key="screen_width_js")
-        # Default to True (Mobile) if width is small (< 768px)
-        # Note: st_javascript might return 0 or None initially
+        # Check User Agent (More reliable for device type)
+        ua_string = st_javascript("window.navigator.userAgent", key="ua_check_1")
+        # Check Width
+        ui_width = st_javascript("window.innerWidth", key="width_check_1")
+        
         is_mobile_detected = False
-        if ui_width and isinstance(ui_width, int) and ui_width < 768:
-            is_mobile_detected = True
-    except ImportError:
-        is_mobile_detected = False # Fallback if library missing
+        
+        # 1. User Agent Check
+        if ua_string and isinstance(ua_string, str):
+             if any(x in ua_string for x in ["Android", "iPhone", "iPad", "Mobile", "webOS"]):
+                 is_mobile_detected = True
+                 
+        # 2. Width Check (Backup)
+        if not is_mobile_detected and ui_width and isinstance(ui_width, int) and 300 < ui_width < 768:
+             is_mobile_detected = True
+             
+    except:
+        is_mobile_detected = False
 
-    is_mobile_view = st.toggle("📱 תצוגת רשימה (מומלץ לנייד)", value=is_mobile_detected, key="mobile_list_view")
+    is_mobile_view = st.toggle("📱 תצוגת רשימה", value=is_mobile_detected, key="mobile_list_view")
 
     cal = calendar.monthcalendar(year, month)
     
     if is_mobile_view:
         # --- List View Implementation ---
-        st.caption("מציג רשימה אנכית למניעת עיוותים בנייד")
         days_names = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
         
         # Collect all assignments first
@@ -947,7 +958,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                             if val == "---": css = "empty-slot"
                             
                             label = "שיקום" if dept == "שיקום" else "פנימית"
-                            if "שישי בוקר" in dept: label = "🔊 בוקר (" + ("שיקום" if "שיקום" in dept else "פנימית") + ")"
+                            if "שישי בוקר" in dept: label = "בוקר (" + ("שיקום" if "שיקום" in dept else "פנימית") + ")"
                             
                             html += f'<div class="slot {css}"><span class="dept-label">{label}</span> <span>{val}</span>'
                             if role == "מנהל/ת" and reason:
@@ -1095,7 +1106,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                         d_disp = datetime.strptime(t_date_str, '%Y-%m-%d').strftime('%d/%m')
                         
                         c1, c2 = st.columns([3, 1])
-                        c1.write(f"**{b}** ({b_dept} ב-**{d_disp}**) ↔️ **{current_emp}** ({target_dept_swap})")
+                        c1.write(f"**{b}** ({b_dept} ב-**{d_disp}**) ↔️ **{current_emp}** ({target_dept_swap} ב-**{d_disp}**)")
                         if c2.button("החלף", key=f"do_swap_{b}"):
                             # Update DB - Swap Depts
                             mask_a = (st.session_state.schedule['date'] == t_date_str) & (st.session_state.schedule['dept'] == target_dept_swap)
@@ -1123,7 +1134,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                     d_disp = datetime.strptime(t_date_str, '%Y-%m-%d').strftime('%d/%m')
                     
                     c1, c2 = st.columns([3, 1])
-                    c1.write(f"1. **{b}** ({b_dept} ב-**{d_disp}**) ➡️ {target_dept_swap}\n2. **{c}** (פנוי) ➡️ {b_dept}")
+                    c1.write(f"1. **{b}** עובר מ-{b_dept} (ב-**{d_disp}**) אל {target_dept_swap} (ב-**{d_disp}**)\n2. **{c}** (פנוי ב-**{d_disp}**) נכנס אל {b_dept} (ב-**{d_disp}**)")
                     if c2.button("בצע שרשרת", key=f"do_triple_{i}"):
                         # 1. Remove A (Current)
                         st.session_state.schedule = st.session_state.schedule[
