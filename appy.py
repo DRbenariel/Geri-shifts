@@ -301,11 +301,14 @@ else:
 
 # --- Helper Function for Validity Checks (Shared by Auto-Scheduler and Swap Tool) ---
 # --- Helper Function for Validity Checks (Shared by Auto-Scheduler and Swap Tool) ---
-def check_assignment_validity(schedule_data, person_name, check_date, target_dept, staff_df, requests_df, ignore_quota=False):
+# --- Helper Function for Validity Checks (Shared by Auto-Scheduler and Swap Tool) ---
+def check_assignment_validity(schedule_data, person_name, check_date, target_dept, staff_df, requests_df, ignore_quota=False, ignore_home_restrict=False, ignore_rest=False):
     """
     Checks if assigning person_name to target_dept on check_date is valid.
     schedule_data: List of dicts OR DataFrame
     ignore_quota: If True, skips the max shifts check (useful for Swaps where count doesn't increase)
+    ignore_home_restrict: If True, skips "Restricted to Home Dept" check
+    ignore_rest: If True, skips "Rest Violation" (nearby days) check
     """
     # Normalize to list of dicts if DataFrame
     if isinstance(schedule_data, pd.DataFrame):
@@ -325,13 +328,14 @@ def check_assignment_validity(schedule_data, person_name, check_date, target_dep
         return False, "External cannot work Internal"
 
     # Home Dept Check
-    only_home = person.get('only_home_dept', False)
-    if only_home:
-         target_context = target_dept
-         if "שישי בוקר" in target_dept:
-             target_context = "שיקום" if "שיקום" in target_dept else "פנימית גריאטרית"
-         if person['dept'] != 'כללי' and person['dept'] != target_context:
-             return False, f"Restricted to Home Dept ({person['dept']})"
+    if not ignore_home_restrict:
+        only_home = person.get('only_home_dept', False)
+        if only_home:
+             target_context = target_dept
+             if "שישי בוקר" in target_dept:
+                 target_context = "שיקום" if "שיקום" in target_dept else "פנימית גריאטרית"
+             if person['dept'] != 'כללי' and person['dept'] != target_context:
+                 return False, f"Restricted to Home Dept ({person['dept']})"
 
     # --- 2. Hard User Constraints ---
     req_date_str = requests_df['date'].astype(str)
@@ -366,10 +370,11 @@ def check_assignment_validity(schedule_data, person_name, check_date, target_dep
     check_d_obj = datetime.strptime(check_date, '%Y-%m-%d').date()
     
     # Rest Check (2 days gap)
-    for offset in [-2, -1, 1, 2]:
-        nearby_date = str(check_d_obj + timedelta(days=offset))
-        if any(s for s in schedule_data if str(s['date']) == nearby_date and s['employee'] == person_name):
-            return False, "Rest Violation (Worked nearby)"
+    if not ignore_rest:
+        for offset in [-2, -1, 1, 2]:
+            nearby_date = str(check_d_obj + timedelta(days=offset))
+            if any(s for s in schedule_data if str(s['date']) == nearby_date and s['employee'] == person_name):
+                return False, "Rest Violation (Worked nearby)"
             
     # Duplicate Check (Same Day)
     if any(s for s in schedule_data if str(s['date']) == check_date and s['employee'] == person_name):
@@ -1070,24 +1075,37 @@ def draw_calendar_view(year, month, role, user_name=None):
                     # Log failure reason
                     failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                     
-                    # Invalid. Why?
-                    # If failed due to "Already working" OR "Quota Exceeded", they might be valid for Exchange (Net Zero change)
-                    # Note: "Quota" failure implies Static Constraints (External/Home) passed.
-                    if reason == "Already working this day" or "Quota Exceeded" in reason:
-                        # Check for Exchange or Triple
-                        # Find where they are working
+                    # Logic: If failed due to a constraint we can relax for Swaps (because they are busy and we keep invariant)
+                    ignorable_for_swap = ["Quota Exceeded", "Restricted to Home Dept", "Rest Violation", "Already working"]
+                    is_ignorable = any(ign in reason for ign in ignorable_for_swap)
+                    
+                    if is_ignorable:
+                        # Check if they are actually working today (Condition for Exchange)
                         other_spot = next((s for s in schedule_records if s['date'] == t_date_str and s['employee'] == p_name), None)
+                        
                         if other_spot:
-                            other_dept = other_spot['dept']
+                            # Re-validate B for Target with relaxed rules
+                            # We ignore: Quota, Home Restrict, Rest (since date invariant)
+                            is_valid_relaxed, reason_relaxed = check_assignment_validity(
+                                schedule_records, p_name, t_date_str, target_dept_swap, staff_df, requests_df,
+                                ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
+                            )
                             
-                            # --- Exchange Check (A <-> B) ---
-                            # Can Current Emp (A) take Other Spot (B's spot)?
-                            if current_emp != "---":
-                                # A is also maintaining count, so ignore quota for A too
-                                valid_for_a, reason_a = check_assignment_validity(schedule_records, current_emp, t_date_str, other_dept, staff_df, requests_df, ignore_quota=True)
-                                # Ignore "Already working" for A because we are moving A out
-                                if valid_for_a or reason_a == "Already working this day": 
-                                    candidates_exchange.append({'name': p_name, 'dept': other_dept})
+                            # If valid (or blocked only by "Already working" which is expected)
+                            if is_valid_relaxed or reason_relaxed == "Already working this day":
+                                other_dept = other_spot['dept']
+                                
+                                # --- Exchange Check (A <-> B) ---
+                                # Can Current Emp (A) take Other Spot (B's spot)?
+                                if current_emp != "---":
+                                    # A is also maintaining count/date, so relax rules for A too
+                                    valid_for_a, reason_a = check_assignment_validity(
+                                        schedule_records, current_emp, t_date_str, other_dept, staff_df, requests_df, 
+                                        ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
+                                    )
+                                    
+                                    if valid_for_a or reason_a == "Already working this day": 
+                                        candidates_exchange.append({'name': p_name, 'dept': other_dept})
 
                             # --- Triple Swap Check (A -> Out, B -> A, C -> B) ---
                             # Find C (Free person) for B's spot (other_dept)
