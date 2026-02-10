@@ -339,11 +339,26 @@ def check_assignment_validity(schedule_data, person_name, check_date, target_dep
         return False, "User Restriction (Blocked)"
         
     # --- 3. Quota Check ---
-    if not ignore_quota:
-        # Count current shifts in this schedule
-        current_shifts = len([s for s in schedule_data if s['employee'] == person_name])
-        # Default quota to 6 if missing
+    # Default quota to 6 if missing
+    try:
         max_quota = int(person.get('quota', 6))
+    except:
+        max_quota = 6
+
+    if max_quota == 0:
+        return False, "Quota is 0 (Inactive)"
+
+    if not ignore_quota:
+        # Filter for current month only
+        # check_date is 'YYYY-MM-DD'
+        target_month_prefix = check_date[:7] # 'YYYY-MM'
+        
+        current_shifts = len([
+            s for s in schedule_data 
+            if s['employee'] == person_name 
+            and str(s['date']).startswith(target_month_prefix)
+        ])
+        
         if current_shifts >= max_quota:
              return False, f"Quota Exceeded ({current_shifts}/{max_quota})"
 
