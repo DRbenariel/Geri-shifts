@@ -1060,7 +1060,11 @@ def draw_calendar_view(year, month, role, user_name=None):
                 if str(p_name).upper() == 'ADMIN' or p_name == '---' or p_name == current_emp: continue
                 
                 # Check validity for TARGET spot
-                is_valid, reason = check_assignment_validity(schedule_records, p_name, t_date_str, target_dept_swap, staff_df, requests_df)
+                # Relaxed constraints for Manager Swap: Quota, Home Dept, Rest - but keep External/Internal check
+                is_valid, reason = check_assignment_validity(
+                    schedule_records, p_name, t_date_str, target_dept_swap, staff_df, requests_df,
+                    ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
+                )
                 
                 if is_valid:
                     candidates_direct.append(p_name)
@@ -1081,7 +1085,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                     
                     if is_ignorable:
                         # Check if they are actually working today (Condition for Exchange)
-                        other_spot = next((s for s in schedule_records if s['date'] == t_date_str and s['employee'] == p_name), None)
+                        other_spot = next((s for s in schedule_records if str(s['date']) == t_date_str and s['employee'] == p_name), None)
                         
                         if other_spot:
                             # Re-validate B for Target with relaxed rules
@@ -1114,8 +1118,11 @@ def draw_calendar_view(year, month, role, user_name=None):
                                 # Filter C: Must not be ADMIN, placeholder, A, or B
                                 if c_name in ['ADMIN', '---', current_emp, p_name]: continue
                                 
-                                # Validate C for B's Department
-                                valid_c, reason_c = check_assignment_validity(schedule_records, c_name, t_date_str, other_dept, staff_df, requests_df)
+                                # Validate C for B's Department - Relax constraints for C as well to find more options
+                                valid_c, reason_c = check_assignment_validity(
+                                    schedule_records, c_name, t_date_str, other_dept, staff_df, requests_df,
+                                    ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
+                                )
                                 if valid_c:
                                     candidates_triple.append({
                                         'b_name': p_name, 
