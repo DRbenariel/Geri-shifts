@@ -1551,6 +1551,7 @@ if st.button("התנתק", key="logout_top", use_container_width=False):
 st.markdown('</div>', unsafe_allow_html=True)
 
 role = st.session_state.user_role
+user_name = st.session_state.user_name
 
 # שליפת החודש הפעיל (Logic preserevd)
 if 'settings' not in st.session_state:
