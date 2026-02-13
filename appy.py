@@ -1066,6 +1066,9 @@ def draw_calendar_view(year, month, role, user_name=None):
                     ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
                 )
                 
+                # DEBUG: Print status for each person
+                # st.write(f"Checking {p_name}: Valid? {is_valid} ({reason})")
+
                 if is_valid:
                     candidates_direct.append(p_name)
                     
@@ -1130,13 +1133,29 @@ def draw_calendar_view(year, month, role, user_name=None):
                                         'c_name': c_name
                                     })
             
-            # --- Display Results ---
+            # Store results in Session State
+            st.session_state['swap_results'] = {
+                'direct': candidates_direct,
+                'exchange': candidates_exchange,
+                'triple': candidates_triple,
+                'date': t_date_str,
+                'dept': target_dept_swap,
+                'fail_reasons': failure_reasons
+            }
+
+        # --- Display Results from Session State ---
+        if 'swap_results' in st.session_state and \
+           st.session_state['swap_results']['date'] == t_date_str and \
+           st.session_state['swap_results']['dept'] == target_dept_swap:
+            
+            res = st.session_state['swap_results']
+            
             st.write("---")
             
             # 1. Direct
             st.markdown("##### ✅ מחליפים ישירים (פנויים)")
-            if candidates_direct:
-                for c in candidates_direct:
+            if res['direct']:
+                for c in res['direct']:
                     c1, c2 = st.columns([3, 1])
                     c1.write(f"**{c}** (פנוי/ה)")
                     if c2.button("בצע החלפה", key=f"do_direct_{c}"):
@@ -1149,6 +1168,9 @@ def draw_calendar_view(year, month, role, user_name=None):
                         new_row = {'date': t_date_str, 'dept': target_dept_swap, 'employee': c, 'is_manual': True}
                         st.session_state.schedule = pd.concat([st.session_state.schedule, pd.DataFrame([new_row])], ignore_index=True)
                         save_to_db("schedule", st.session_state.schedule)
+                        
+                        # Clear results and rerun
+                        del st.session_state['swap_results']
                         st.success(f"בוצע! {c} שובץ במקום {current_emp}")
                         st.rerun()
             else:
@@ -1157,8 +1179,8 @@ def draw_calendar_view(year, month, role, user_name=None):
             # 2. Exchanges
             if current_emp != "---":
                 st.markdown("##### 🔄 החלפות הדדיות (ראש בראש)")
-                if candidates_exchange:
-                    for item in candidates_exchange:
+                if res['exchange']:
+                    for item in res['exchange']:
                         b = item['name']
                         b_dept = item['dept']
                         # Format date for display
@@ -1176,6 +1198,8 @@ def draw_calendar_view(year, month, role, user_name=None):
                             st.session_state.schedule['is_manual'] = True # Mark as manual
                             
                             save_to_db("schedule", st.session_state.schedule)
+                            
+                            del st.session_state['swap_results']
                             st.success("ההחלפה בוצעה בהצלחה!")
                             st.rerun()
                 else:
@@ -1184,9 +1208,9 @@ def draw_calendar_view(year, month, role, user_name=None):
             # 3. Triple
             st.markdown("##### 🔺 החלפות משולשות (שרשרת)")
             st.caption(f"תרחיש: {current_emp} יוצא/ת, B מחליף אותו, C (פנוי) מחליף את B.")
-            if candidates_triple:
+            if res['triple']:
                 # Limit to 3 for noise reduction
-                for i, item in enumerate(candidates_triple[:5]):
+                for i, item in enumerate(res['triple'][:5]):
                     b = item['b_name']
                     b_dept = item['b_dept']
                     c = item['c_name']
@@ -1210,6 +1234,8 @@ def draw_calendar_view(year, month, role, user_name=None):
                         st.session_state.schedule = pd.concat([st.session_state.schedule, pd.DataFrame([new_row_c])], ignore_index=True)
                         
                         save_to_db("schedule", st.session_state.schedule)
+                        
+                        del st.session_state['swap_results']
                         st.success("החלפה משולשת בוצעה!")
                         st.rerun()
             else:
@@ -1217,7 +1243,7 @@ def draw_calendar_view(year, month, role, user_name=None):
 
             # Debug Info
             with st.expander("מידע למפתח (למה נפסלו עובדים?)"):
-                st.write(failure_reasons)
+                st.write(res['fail_reasons'])
 
 
 # --- 5. ממשק המנהל והעובד ---
