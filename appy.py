@@ -16,7 +16,7 @@ calendar.setfirstweekday(calendar.SUNDAY)
 import ui_components # Modular UI components
 
 # --- 1. עיצוב ו-CSS ---
-st.set_page_config(page_title="מערכת שיבוץות", layout="wide")
+st.set_page_config(page_title="מערכת שיבוץ", layout="wide")
 ui_components.setup_style()
 
 import hashlib
@@ -1045,7 +1045,7 @@ def draw_calendar_view(year, month, role, user_name=None):
             
             # Debug counters
             failure_reasons = {}
-            debug_log = []  # Detailed debug trail
+            debug_log = []
             
             # Pre-fetch data
             staff_df = st.session_state.staff
@@ -1053,7 +1053,6 @@ def draw_calendar_view(year, month, role, user_name=None):
             schedule_records = sche_df.to_dict('records')
             
             debug_log.append(f"Target: {target_dept_swap} on {t_date_str}, Current: {current_emp}")
-            debug_log.append(f"Total staff: {len(staff_df)}, Total schedule records: {len(schedule_records)}")
             
             # Count how many people work on the target date
             workers_on_date = [s for s in schedule_records if str(s['date']) == t_date_str]
@@ -1090,19 +1089,14 @@ def draw_calendar_view(year, month, role, user_name=None):
                         # Check if they are actually working today (Condition for Exchange)
                         other_spot = next((s for s in schedule_records if str(s['date']) == t_date_str and s['employee'] == p_name), None)
                         
-                        debug_log.append(f"Exchange candidate {p_name}: reason={reason}, has_other_spot={other_spot is not None}")
-                        
                         if other_spot:
                             other_dept = other_spot['dept']
-                            debug_log.append(f"  {p_name} works in {other_dept} on {t_date_str}")
                             
                             # Re-validate B for Target with relaxed rules
                             is_valid_relaxed, reason_relaxed = check_assignment_validity(
                                 schedule_records, p_name, t_date_str, target_dept_swap, staff_df, requests_df,
                                 ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
                             )
-                            
-                            debug_log.append(f"  B relaxed check: valid={is_valid_relaxed}, reason={reason_relaxed}")
                             
                             # If valid (or blocked only by "Already working" which is expected)
                             if is_valid_relaxed or reason_relaxed == "Already working this day":
@@ -1115,32 +1109,21 @@ def draw_calendar_view(year, month, role, user_name=None):
                                         ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
                                     )
                                     
-                                    debug_log.append(f"  A ({current_emp}) for {other_dept}: valid={valid_for_a}, reason={reason_a}")
-                                    
                                     if valid_for_a or reason_a == "Already working this day": 
-                                        candidates_exchange.append({'name': p_name, 'dept': other_dept})
-                                        debug_log.append(f"  ✅ Exchange added: {p_name} <-> {current_emp}")
-                                    else:
-                                        debug_log.append(f"  ❌ Exchange rejected: A failed for {other_dept}")
-                                else:
-                                    debug_log.append(f"  ❌ Exchange skipped: current_emp is ---")
+                                        # --- Strict Constraints Check ---
+                                        # 1. Morning <-> Morning
+                                        is_target_morning = 'שישי בוקר' in target_dept_swap or 'שיקום (1)' in target_dept_swap or 'שיקום (2)' in target_dept_swap
+                                        is_other_morning = 'שישי בוקר' in other_dept or 'שיקום (1)' in other_dept or 'שיקום (2)' in other_dept
+                                        
+                                        # 2. Weekday <-> Weekday
+                                        t_date_obj = datetime.strptime(t_date_str, '%Y-%m-%d')
+                                        is_target_weekend = t_date_obj.weekday() in [4, 5]
+                                        # Since exchange is same day, date is same. So this check is always passed logic-wise.
+                                        
+                                        if is_target_morning == is_other_morning:
+                                             candidates_exchange.append({'name': p_name, 'dept': other_dept})
 
-                            # --- Triple Swap Check (A -> Out, B -> A, C -> B) ---
-                            # Find C (Free person) for B's spot (other_dept)
-                            for _, person_c in staff_df.iterrows():
-                                c_name = person_c['name']
-                                if c_name in ['ADMIN', '---', current_emp, p_name]: continue
-                                
-                                valid_c, reason_c = check_assignment_validity(
-                                    schedule_records, c_name, t_date_str, other_dept, staff_df, requests_df,
-                                    ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
-                                )
-                                if valid_c:
-                                    candidates_triple.append({
-                                        'b_name': p_name, 
-                                        'b_dept': other_dept,
-                                        'c_name': c_name
-                                    })
+                            # --- Triple Swap Skipped (User Request) ---
             
             # Store results in Session State
             st.session_state['swap_results'] = {
@@ -1149,8 +1132,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                 'triple': candidates_triple,
                 'date': t_date_str,
                 'dept': target_dept_swap,
-                'fail_reasons': failure_reasons,
-                'debug_log': debug_log
+                'fail_reasons': failure_reasons
             }
 
             # --- Advanced Swaps (Cross-Date) ---
@@ -1158,7 +1140,36 @@ def draw_calendar_view(year, month, role, user_name=None):
             
             advanced_log = []
             
-            # 4. Mutual Cross-Date Swaps (A <-> B on different dates)
+            # Helper for strict constraints
+            def check_advanced_constraints(date1, dept1, date2, dept2):
+                # 1. Morning Swap Rule: Morning only with Morning
+                is_m1 = 'שישי בוקר' in dept1 or 'שיקום (1)' in dept1 or 'שיקום (2)' in dept1
+                is_m2 = 'שישי בוקר' in dept2 or 'שיקום (1)' in dept2 or 'שיקום (2)' in dept2
+                if is_m1 != is_m2: return False
+                
+                # 2. Weekend Swap Rule: Weekend only with Weekend
+                # Weekday: Sun(6), Mon(0)-Thu(3). Weekend: Fri(4), Sat(5).
+                d1 = datetime.strptime(date1, '%Y-%m-%d')
+                d2 = datetime.strptime(date2, '%Y-%m-%d')
+                is_w1 = d1.weekday() in [4, 5]
+                is_w2 = d2.weekday() in [4, 5]
+                if is_w1 != is_w2: return False
+                
+                return True
+
+            # Helper for consecutive check (Zero Gap)
+            def is_creating_consecutive_violation(emp, new_date, schedule_data):
+                # Check if emp works on new_date +/- 1 day
+                d_obj = datetime.strptime(new_date, '%Y-%m-%d').date()
+                for offset in [-1, 1]:
+                    check_s = str(d_obj + timedelta(days=offset))
+                    # Ignore if the conflict is the slot we are moving OUT of? 
+                    # No, we assume we move TO new_date.
+                    if any(s for s in schedule_data if s['date'] == check_s and s['employee'] == emp):
+                        return True
+                return False
+            
+            # 4. Mutual Cross-Date Swaps
             # Scenario: A is on Date 1 (Target). B is on Date 2.
             # Proposal: A goes to Date 2 (replacing B), B goes to Date 1 (replacing A).
             
@@ -1206,6 +1217,16 @@ def draw_calendar_view(year, month, role, user_name=None):
                     if not valid_a_to_other:
                         continue
                         
+                    # --- NEW STRICT CHECKS ---
+                    if not check_advanced_constraints(t_date_str, target_dept_swap, other_date, other_dept):
+                         continue
+                    
+                    if is_creating_consecutive_violation(current_emp, other_date, schedule_records):
+                         continue
+                    if is_creating_consecutive_violation(other_emp, t_date_str, schedule_records):
+                         continue
+                    # -------------------------
+
                     # If both valid, we have a match!
                     candidates_mutual_cross.append({
                         'b_name': other_emp,
@@ -1294,6 +1315,24 @@ def draw_calendar_view(year, month, role, user_name=None):
                         )
                         
                         if valid_b:
+                            # --- NEW STRICT CHECKS for Circular Swap ---
+                            # A -> (Date 2, Dept 2)
+                            # B -> (Date 3, Dept 3)
+                            # C -> (Target Date, Target Dept)
+
+                            # Check A's move
+                            if not check_advanced_constraints(t_date_str, target_dept_swap, date_2, dept_2): continue
+                            if is_creating_consecutive_violation(current_emp, date_2, schedule_records): continue
+                            
+                            # Check B's move
+                            if not check_advanced_constraints(date_2, dept_2, date_3, dept_3): continue
+                            if is_creating_consecutive_violation(person_b, date_3, schedule_records): continue
+
+                            # Check C's move
+                            if not check_advanced_constraints(date_3, dept_3, t_date_str, target_dept_swap): continue
+                            if is_creating_consecutive_violation(c_name, t_date_str, schedule_records): continue
+                            # -------------------------------------------
+
                             # Found a chain!
                             # A -> (Date 2, Dept 2) [Replacing B]
                             # B -> (Date 3, Dept 3) [Replacing C]
@@ -1376,42 +1415,6 @@ def draw_calendar_view(year, month, role, user_name=None):
                 else:
                     st.caption("לא נמצאו החלפות הדדיות מתאימות.")
             
-            # 3. Triple (Same Day)
-            st.markdown("##### 🔺 החלפות משולשות (באותו יום)")
-            st.caption(f"תרחיש: {current_emp} יוצא/ת, B מחליף אותו, C (פנוי) מחליף את B (כולם באותו יום).")
-            if res['triple']:
-                # Limit to 3 for noise reduction
-                for i, item in enumerate(res['triple'][:5]):
-                    b = item['b_name']
-                    b_dept = item['b_dept']
-                    c = item['c_name']
-                    d_disp = datetime.strptime(t_date_str, '%Y-%m-%d').strftime('%d/%m')
-                    
-                    c1, c2 = st.columns([3, 1])
-                    c1.write(f"1. **{b}** עובר מ-{b_dept} (ב-**{d_disp}**) אל {target_dept_swap} (ב-**{d_disp}**)\n2. **{c}** (פנוי ב-**{d_disp}**) נכנס אל {b_dept} (ב-**{d_disp}**)")
-                    if c2.button("בצע שרשרת", key=f"do_triple_{i}"):
-                        # 1. Remove A (Current)
-                        st.session_state.schedule = st.session_state.schedule[
-                            ~((st.session_state.schedule['date'] == t_date_str) & (st.session_state.schedule['dept'] == target_dept_swap))
-                        ]
-                        # 2. Update B to Target
-                        st.session_state.schedule.loc[
-                            (st.session_state.schedule['date'] == t_date_str) & (st.session_state.schedule['dept'] == b_dept), 
-                            ['dept', 'is_manual']
-                        ] = [target_dept_swap, True]
-                        
-                        # 3. Add C to B's old dept
-                        new_row_c = {'date': t_date_str, 'dept': b_dept, 'employee': c, 'is_manual': True}
-                        st.session_state.schedule = pd.concat([st.session_state.schedule, pd.DataFrame([new_row_c])], ignore_index=True)
-                        
-                        save_to_db("schedule", st.session_state.schedule)
-                        
-                        del st.session_state['swap_results']
-                        st.success("החלפה משולשת בוצעה!")
-                        st.rerun()
-            else:
-                 st.caption("לא נמצאו מסלולים משולשים.")
-
             # 4. Mutual Cross-Date (New)
             st.markdown("##### 📅⚡ החלפות הדדיות בין תאריכים")
             st.caption(f"תרחיש: {current_emp} מחליף עם B בתאריך אחר.")
@@ -1511,13 +1514,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                  st.caption("לא נמצאו מעגלי החלפות.")
 
 
-            # Debug Info
-            with st.expander("מידע למפתח (למה נפסלו עובדים?)"):
-                st.write("**Failure Reasons:**", res['fail_reasons'])
-                if 'debug_log' in res:
-                    st.write("**Debug Log:**")
-                    for line in res['debug_log']:
-                        st.text(line)
+            # Debug Info Removed
 
 
 # --- 5. ממשק המנהל והעובד ---
