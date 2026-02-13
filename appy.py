@@ -1045,11 +1045,21 @@ def draw_calendar_view(year, month, role, user_name=None):
             
             # Debug counters
             failure_reasons = {}
+            debug_log = []  # Detailed debug trail
             
             # Pre-fetch data
             staff_df = st.session_state.staff
             requests_df = st.session_state.requests
             schedule_records = sche_df.to_dict('records')
+            
+            debug_log.append(f"Target: {target_dept_swap} on {t_date_str}, Current: {current_emp}")
+            debug_log.append(f"Total staff: {len(staff_df)}, Total schedule records: {len(schedule_records)}")
+            
+            # Count how many people work on the target date
+            workers_on_date = [s for s in schedule_records if str(s['date']) == t_date_str]
+            debug_log.append(f"Workers on {t_date_str}: {len(workers_on_date)}")
+            for w in workers_on_date:
+                debug_log.append(f"  - {w['employee']} @ {w['dept']}")
             
             # 1. Direct Replacements (Free & Valid)
             # 2. Exchanges (Busy but can swap)
@@ -1065,19 +1075,9 @@ def draw_calendar_view(year, month, role, user_name=None):
                     schedule_records, p_name, t_date_str, target_dept_swap, staff_df, requests_df,
                     ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
                 )
-                
-                # DEBUG: Print status for each person
-                # st.write(f"Checking {p_name}: Valid? {is_valid} ({reason})")
 
                 if is_valid:
                     candidates_direct.append(p_name)
-                    
-                    # Also check for Triple Swap possibilities starting with this person (B)
-                    # If B moves to A's spot, B's old spot needs coverage (C)
-                    # Find B's current spot
-                    b_current_spot = next((s for s in schedule_records if s['date'] == t_date_str and s['employee'] == p_name), None)
-                    if b_current_spot:
-                        pass
                 else:
                     # Log failure reason
                     failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
@@ -1090,38 +1090,47 @@ def draw_calendar_view(year, month, role, user_name=None):
                         # Check if they are actually working today (Condition for Exchange)
                         other_spot = next((s for s in schedule_records if str(s['date']) == t_date_str and s['employee'] == p_name), None)
                         
+                        debug_log.append(f"Exchange candidate {p_name}: reason={reason}, has_other_spot={other_spot is not None}")
+                        
                         if other_spot:
+                            other_dept = other_spot['dept']
+                            debug_log.append(f"  {p_name} works in {other_dept} on {t_date_str}")
+                            
                             # Re-validate B for Target with relaxed rules
-                            # We ignore: Quota, Home Restrict, Rest (since date invariant)
                             is_valid_relaxed, reason_relaxed = check_assignment_validity(
                                 schedule_records, p_name, t_date_str, target_dept_swap, staff_df, requests_df,
                                 ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
                             )
                             
+                            debug_log.append(f"  B relaxed check: valid={is_valid_relaxed}, reason={reason_relaxed}")
+                            
                             # If valid (or blocked only by "Already working" which is expected)
                             if is_valid_relaxed or reason_relaxed == "Already working this day":
-                                other_dept = other_spot['dept']
                                 
                                 # --- Exchange Check (A <-> B) ---
                                 # Can Current Emp (A) take Other Spot (B's spot)?
                                 if current_emp != "---":
-                                    # A is also maintaining count/date, so relax rules for A too
                                     valid_for_a, reason_a = check_assignment_validity(
                                         schedule_records, current_emp, t_date_str, other_dept, staff_df, requests_df, 
                                         ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
                                     )
                                     
+                                    debug_log.append(f"  A ({current_emp}) for {other_dept}: valid={valid_for_a}, reason={reason_a}")
+                                    
                                     if valid_for_a or reason_a == "Already working this day": 
                                         candidates_exchange.append({'name': p_name, 'dept': other_dept})
+                                        debug_log.append(f"  ✅ Exchange added: {p_name} <-> {current_emp}")
+                                    else:
+                                        debug_log.append(f"  ❌ Exchange rejected: A failed for {other_dept}")
+                                else:
+                                    debug_log.append(f"  ❌ Exchange skipped: current_emp is ---")
 
                             # --- Triple Swap Check (A -> Out, B -> A, C -> B) ---
                             # Find C (Free person) for B's spot (other_dept)
                             for _, person_c in staff_df.iterrows():
                                 c_name = person_c['name']
-                                # Filter C: Must not be ADMIN, placeholder, A, or B
                                 if c_name in ['ADMIN', '---', current_emp, p_name]: continue
                                 
-                                # Validate C for B's Department - Relax constraints for C as well to find more options
                                 valid_c, reason_c = check_assignment_validity(
                                     schedule_records, c_name, t_date_str, other_dept, staff_df, requests_df,
                                     ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
@@ -1140,7 +1149,8 @@ def draw_calendar_view(year, month, role, user_name=None):
                 'triple': candidates_triple,
                 'date': t_date_str,
                 'dept': target_dept_swap,
-                'fail_reasons': failure_reasons
+                'fail_reasons': failure_reasons,
+                'debug_log': debug_log
             }
 
         # --- Display Results from Session State ---
@@ -1152,14 +1162,33 @@ def draw_calendar_view(year, month, role, user_name=None):
             
             st.write("---")
             
-            # 1. Direct
-            st.markdown("##### ✅ מחליפים ישירים (פנויים)")
+            # 1. Direct - Available Replacements (main swap suggestions)
+            st.markdown("##### ✅ מחליפים זמינים להחלפה")
             if res['direct']:
-                names_list = ", ".join([f"**{c}**" for c in res['direct']])
-                st.markdown(f"נמצאו {len(res['direct'])} מחליפים פנויים: {names_list}")
-                st.caption("ניתן לבצע את ההחלפה דרך כלי השיבוץ הידני למעלה.")
+                st.success(f"נמצאו **{len(res['direct'])}** מחליפים זמינים עבור {target_dept_swap} ב-{t_date_str}:")
+                
+                # Selectbox to pick a replacement
+                selected_replacement = st.selectbox(
+                    "בחר מחליף/ה:", 
+                    res['direct'], 
+                    key="swap_select_direct"
+                )
+                
+                if st.button("✅ בצע החלפה", key="do_selected_swap"):
+                    # Remove old assignment
+                    st.session_state.schedule = st.session_state.schedule[
+                        ~((st.session_state.schedule['date'] == t_date_str) & (st.session_state.schedule['dept'] == target_dept_swap))
+                    ]
+                    # Add new assignment
+                    new_row = {'date': t_date_str, 'dept': target_dept_swap, 'employee': selected_replacement, 'is_manual': True, 'empty_reason': ''}
+                    st.session_state.schedule = pd.concat([st.session_state.schedule, pd.DataFrame([new_row])], ignore_index=True)
+                    save_to_db("schedule", st.session_state.schedule)
+                    
+                    del st.session_state['swap_results']
+                    st.success(f"בוצע! {selected_replacement} שובץ/ה במקום {current_emp}")
+                    st.rerun()
             else:
-                st.caption("לא נמצאו מחליפים פנויים.")
+                st.caption("לא נמצאו מחליפים זמינים.")
 
             # 2. Exchanges
             if current_emp != "---":
@@ -1228,7 +1257,11 @@ def draw_calendar_view(year, month, role, user_name=None):
 
             # Debug Info
             with st.expander("מידע למפתח (למה נפסלו עובדים?)"):
-                st.write(res['fail_reasons'])
+                st.write("**Failure Reasons:**", res['fail_reasons'])
+                if 'debug_log' in res:
+                    st.write("**Debug Log:**")
+                    for line in res['debug_log']:
+                        st.text(line)
 
 
 # --- 5. ממשק המנהל והעובד ---
