@@ -2562,3 +2562,40 @@ else:
                     st.rerun()
     elif selected_nav == 'לוח שיבוץ':
         draw_calendar_view(2026, sel_month, "עובד/ת", user_name)
+
+    elif selected_nav == 'הגדרות':
+        st.subheader("⚙️ הגדרות משתמש")
+        
+        # --- Change Password Section ---
+        with st.expander("🔑 שינוי סיסמה", expanded=True):
+            with st.form("change_password_form"):
+                st.caption("כאן ניתן לשנות את סיסמת ההתחברות למערכת.")
+                
+                curr_pass = st.text_input("סיסמה נוכחית", type="password")
+                new_pass = st.text_input("סיסמה חדשה", type="password")
+                conf_pass = st.text_input("אימות סיסמה חדשה", type="password")
+                
+                if st.form_submit_button("עדכן סיסמה"):
+                    # 1. Verify Current Password
+                    # Get user record
+                    user_record = st.session_state.staff[st.session_state.staff['name'] == user_name]
+                    if user_record.empty:
+                        st.error("שגיאה: משתמש לא נמצא.")
+                    else:
+                        stored_hash = user_record.iloc[0]['password']
+                        input_hash = hashlib.sha256(curr_pass.encode()).hexdigest()
+                        
+                        if input_hash != stored_hash:
+                            st.error("סיסמה נוכחית שגויה.")
+                        elif not new_pass:
+                            st.error("לא ניתן להגדיר סיסמה ריקה.")
+                        elif new_pass != conf_pass:
+                            st.error("הסיסמאות החדשות אינן תואמות.")
+                        else:
+                            # 2. Update Password
+                            new_hash = hashlib.sha256(new_pass.encode()).hexdigest()
+                            st.session_state.staff.loc[st.session_state.staff['name'] == user_name, 'password'] = new_hash
+                            
+                            # 3. Save to DB
+                            save_to_db("staff", st.session_state.staff)
+                            st.success("הסיסמה עודכנה בהצלחה!")
