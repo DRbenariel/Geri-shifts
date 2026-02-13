@@ -16,7 +16,7 @@ calendar.setfirstweekday(calendar.SUNDAY)
 import ui_components # Modular UI components
 
 # --- 1. עיצוב ו-CSS ---
-st.set_page_config(page_title="מערכת שיבוץ - כולל אבחון שגיאות", layout="wide")
+st.set_page_config(page_title="מערכת שיבוץות", layout="wide")
 ui_components.setup_style()
 
 import hashlib
