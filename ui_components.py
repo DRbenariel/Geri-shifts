@@ -343,6 +343,7 @@ def render_navbar(role):
         items.append(sac.MenuItem('הגשת אילוצים', icon='calendar-check'))
     
     items.append(sac.MenuItem('לוח שיבוץ', icon='calendar-week'))
+    items.append(sac.MenuItem('הגדרות', icon='gear'))
     
     # Wrap in RTL container using HTML dir attribute
     st.markdown('<div dir="rtl" style="text-align: right;">', unsafe_allow_html=True)
