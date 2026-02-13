@@ -1153,6 +1153,163 @@ def draw_calendar_view(year, month, role, user_name=None):
                 'debug_log': debug_log
             }
 
+            # --- Advanced Swaps (Cross-Date) ---
+            # Added as per user request for "Mutual Cross-Date" and "Circular Cross-Date"
+            
+            advanced_log = []
+            
+            # 4. Mutual Cross-Date Swaps (A <-> B on different dates)
+            # Scenario: A is on Date 1 (Target). B is on Date 2.
+            # Proposal: A goes to Date 2 (replacing B), B goes to Date 1 (replacing A).
+            
+            candidates_mutual_cross = []
+            
+            # We iterate over all OTHER assignments in the schedule (same month)
+            # To optimize, we focus on the displayed month or the relevant range
+            
+            if current_emp != "---":
+                for s_rec in schedule_records:
+                    # Skip same date (already covered by Exchange)
+                    if s_rec['date'] == t_date_str: continue
+                    
+                    # Skip empty slots or Admin
+                    other_emp = s_rec['employee']
+                    if other_emp == "---" or other_emp == 'ADMIN': continue
+                    if other_emp == current_emp: continue # Can't swap with self
+                    
+                    other_date = s_rec['date']
+                    other_dept = s_rec['dept']
+                    
+                    # Check 1: Can 'Other Emp' (B) move to 'Target Date' (Date 1) in 'Target Dept'?
+                    # We use relaxed constraints because B is technically busy on Date 2, but we are moving them.
+                    # We must ensure B is NOT busy on Date 1 (unless they are, which blocks them).
+                    
+                    valid_b_to_target, reason_b = check_assignment_validity(
+                        schedule_records, other_emp, t_date_str, target_dept_swap, staff_df, requests_df,
+                        ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
+                    )
+                    
+                    # If B is working on target date, they can't move here (unless we do complex 3-way, but let's keep simple)
+                    if not valid_b_to_target:
+                         # unique constraint: invalid because "Already working" is acceptable IF we were swapping same day, 
+                         # but here we are swapping CROSS date. So if B is working on Date 1, they can't take A's spot on Date 1.
+                         continue
+                         
+                    # Check 2: Can 'Current Emp' (A) move to 'Other Date' (Date 2) in 'Other Dept'?
+                    # We need to verify A is not busy on Date 2 (unless they are, which blocks them).
+                    
+                    valid_a_to_other, reason_a = check_assignment_validity(
+                        schedule_records, current_emp, other_date, other_dept, staff_df, requests_df,
+                        ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
+                    )
+                    
+                    if not valid_a_to_other:
+                        continue
+                        
+                    # If both valid, we have a match!
+                    candidates_mutual_cross.append({
+                        'b_name': other_emp,
+                        'b_date': other_date,
+                        'b_dept': other_dept
+                    })
+            
+            st.session_state['swap_results']['mutual_cross'] = candidates_mutual_cross
+
+
+            # 5. Circular Cross-Date Swaps (A -> B, B -> C, C -> A)
+            # Date 1 (Target): A is here. We want C here.
+            # Date 2: B is here. We want A here.
+            # Date 3: C is here. We want B here.
+            
+            candidates_circular = []
+            
+            # This is O(N^2) or O(N^3) search space. We must limit it.
+            # We already know who can accept A (from Mutual search step 2).
+            # Let's refine:
+            
+            # Step 1: Find potential "Date 2" slots where A can go.
+            # list of (Date 2, Dept 2, Person B) where A -> (Date 2, Dept 2) is valid.
+            
+            potential_destinations_for_a = []
+            if current_emp != "---":
+                for s_rec in schedule_records:
+                    if s_rec['date'] == t_date_str: continue # distinct dates
+                    person_b = s_rec['employee']
+                    if person_b == "---" or person_b == 'ADMIN' or person_b == current_emp: continue
+                    
+                    valid_a, _ = check_assignment_validity(
+                        schedule_records, current_emp, s_rec['date'], s_rec['dept'], staff_df, requests_df,
+                        ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
+                    )
+                    if valid_a:
+                        potential_destinations_for_a.append(s_rec)
+            
+            # Step 2: For each such slot, Person B needs to go somewhere (Date 3).
+            # We look for a "Date 3" slot where Person C exists, and B can go there.
+            # AND matching that C can go to "Date 1" (Target).
+            
+            # Optimization: Pre-calculate who can go to Target (Date 1).
+            # list of Person C who can Validly work at (Target Date, Target Dept)
+            potential_replacements_for_a = []
+            for _, person in staff_df.iterrows():
+                c_name = person['name']
+                if c_name == current_emp or c_name == 'ADMIN' or c_name == '---': continue
+                
+                # C must not be working on Date 1
+                is_busy_on_target = any(s['date'] == t_date_str and s['employee'] == c_name for s in schedule_records)
+                if is_busy_on_target: continue
+                
+                val_c, _ = check_assignment_validity(
+                    schedule_records, c_name, t_date_str, target_dept_swap, staff_df, requests_df,
+                    ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
+                )
+                if val_c:
+                    potential_replacements_for_a.append(c_name)
+                    
+            # Now Step 2 loop
+            import random
+            # Limit loop if too huge
+            for b_rec in potential_destinations_for_a[:50]: 
+                person_b = b_rec['employee']
+                date_2 = b_rec['date']
+                dept_2 = b_rec['dept']
+                
+                # Find where B can go (Date 3) where Person C is one of 'potential_replacements_for_a'
+                # We iterate over slots occupied by potential C's
+                
+                for c_name in potential_replacements_for_a:
+                    if c_name == person_b: continue 
+                    
+                    # Find slots occupied by C (Date 3)
+                    c_slots = [s for s in schedule_records if s['employee'] == c_name and s['date'] != t_date_str and s['date'] != date_2]
+                    
+                    for c_rec in c_slots:
+                        date_3 = c_rec['date']
+                        dept_3 = c_rec['dept']
+                        
+                        # Check: Can B go to (Date 3, Dept 3)?
+                        valid_b, _ = check_assignment_validity(
+                            schedule_records, person_b, date_3, dept_3, staff_df, requests_df,
+                            ignore_quota=True, ignore_home_restrict=True, ignore_rest=True
+                        )
+                        
+                        if valid_b:
+                            # Found a chain!
+                            # A -> (Date 2, Dept 2) [Replacing B]
+                            # B -> (Date 3, Dept 3) [Replacing C]
+                            # C -> (Target Date, Target Dept) [Replacing A]
+                            
+                            candidates_circular.append({
+                                'b_name': person_b, 'b_date': date_2, 'b_dept': dept_2,
+                                'c_name': c_name, 'c_date': date_3, 'c_dept': dept_3
+                            })
+                            if len(candidates_circular) > 10: break # Limit results
+                    if len(candidates_circular) > 10: break
+                if len(candidates_circular) > 10: break
+                
+            st.session_state['swap_results']['circular'] = candidates_circular
+
+
         # --- Display Results from Session State ---
         if 'swap_results' in st.session_state and \
            st.session_state['swap_results']['date'] == t_date_str and \
@@ -1219,9 +1376,9 @@ def draw_calendar_view(year, month, role, user_name=None):
                 else:
                     st.caption("לא נמצאו החלפות הדדיות מתאימות.")
             
-            # 3. Triple
-            st.markdown("##### 🔺 החלפות משולשות (שרשרת)")
-            st.caption(f"תרחיש: {current_emp} יוצא/ת, B מחליף אותו, C (פנוי) מחליף את B.")
+            # 3. Triple (Same Day)
+            st.markdown("##### 🔺 החלפות משולשות (באותו יום)")
+            st.caption(f"תרחיש: {current_emp} יוצא/ת, B מחליף אותו, C (פנוי) מחליף את B (כולם באותו יום).")
             if res['triple']:
                 # Limit to 3 for noise reduction
                 for i, item in enumerate(res['triple'][:5]):
@@ -1254,6 +1411,105 @@ def draw_calendar_view(year, month, role, user_name=None):
                         st.rerun()
             else:
                  st.caption("לא נמצאו מסלולים משולשים.")
+
+            # 4. Mutual Cross-Date (New)
+            st.markdown("##### 📅⚡ החלפות הדדיות בין תאריכים")
+            st.caption(f"תרחיש: {current_emp} מחליף עם B בתאריך אחר.")
+            
+            candidates_mutual_cross = res.get('mutual_cross', [])
+            if candidates_mutual_cross:
+                for i, item in enumerate(candidates_mutual_cross[:5]):
+                     b_name = item['b_name']
+                     b_date = item['b_date']
+                     b_dept = item['b_dept']
+                     
+                     # Displays
+                     d_disp_current = datetime.strptime(t_date_str, '%Y-%m-%d').strftime('%d/%m')
+                     d_disp_b = datetime.strptime(b_date, '%Y-%m-%d').strftime('%d/%m')
+                     
+                     c1, c2 = st.columns([3, 1])
+                     c1.write(f"**{b_name}** ({b_dept} ב-**{d_disp_b}**) ↔️ **{current_emp}** ({target_dept_swap} ב-**{d_disp_current}**)")
+                     
+                     if c2.button("החלף", key=f"do_cross_mutual_{i}"):
+                         # A goes to B's spot (Date 2)
+                         # B goes to A's spot (Date 1)
+                         
+                         sched = st.session_state.schedule
+                         
+                         # Mask for A's spot (Date 1)
+                         mask_a = (sched['date'] == t_date_str) & (sched['dept'] == target_dept_swap)
+                         # Mask for B's spot (Date 2)
+                         mask_b = (sched['date'] == b_date) & (sched['dept'] == b_dept)
+                         
+                         st.session_state.schedule.loc[mask_a, 'employee'] = b_name
+                         st.session_state.schedule.loc[mask_a, 'is_manual'] = True
+                         
+                         st.session_state.schedule.loc[mask_b, 'employee'] = current_emp
+                         st.session_state.schedule.loc[mask_b, 'is_manual'] = True
+                         
+                         save_to_db("schedule", st.session_state.schedule)
+                         del st.session_state['swap_results']
+                         st.success("החלפה הדדית בין תאריכים בוצעה!")
+                         st.rerun()
+            else:
+                st.caption("לא נמצאו החלפות הדדיות בין תאריכים.")
+
+            # 5. Circular Cross-Date (New)
+            st.markdown("##### 📅🔄 מעגל החלפות (3 תאריכים)")
+            st.caption(f"תרחיש: A (פה) ⬅️ B (תאריך 2) ⬅️ C (תאריך 3) ⬅️ A.")
+            
+            candidates_circular = res.get('circular', [])
+            if candidates_circular:
+                for i, item in enumerate(candidates_circular[:5]):
+                    b_name = item['b_name']
+                    b_date = item['b_date']
+                    b_dept = item['b_dept']
+                    
+                    c_name = item['c_name']
+                    c_date = item['c_date']
+                    c_dept = item['c_dept']
+                    
+                    d_disp_1 = datetime.strptime(t_date_str, '%Y-%m-%d').strftime('%d/%m') # Target (A is here)
+                    d_disp_2 = datetime.strptime(b_date, '%Y-%m-%d').strftime('%d/%m') # B is here
+                    d_disp_3 = datetime.strptime(c_date, '%Y-%m-%d').strftime('%d/%m') # C is here
+                    
+                    c1, c2 = st.columns([3, 1])
+                    c1.markdown(f"""
+                    1. **{current_emp}** עובר אל {b_dept} (**{d_disp_2}**)
+                    2. **{b_name}** עובר אל {c_dept} (**{d_disp_3}**)
+                    3. **{c_name}** עובר אל {target_dept_swap} (**{d_disp_1}**)
+                    """)
+                    
+                    if c2.button("בצע מעגל", key=f"do_circular_{i}"):
+                        sched = st.session_state.schedule
+                        
+                        # A's Spot (Date 1)
+                        mask_1 = (sched['date'] == t_date_str) & (sched['dept'] == target_dept_swap)
+                        # B's Spot (Date 2)
+                        mask_2 = (sched['date'] == b_date) & (sched['dept'] == b_dept)
+                        # C's Spot (Date 3)
+                        mask_3 = (sched['date'] == c_date) & (sched['dept'] == c_dept)
+                        
+                        # Apply Changes
+                        # 1. C -> Spot 1
+                        st.session_state.schedule.loc[mask_1, 'employee'] = c_name
+                        st.session_state.schedule.loc[mask_1, 'is_manual'] = True
+                        
+                        # 2. A -> Spot 2
+                        st.session_state.schedule.loc[mask_2, 'employee'] = current_emp
+                        st.session_state.schedule.loc[mask_2, 'is_manual'] = True
+                        
+                        # 3. B -> Spot 3
+                        st.session_state.schedule.loc[mask_3, 'employee'] = b_name
+                        st.session_state.schedule.loc[mask_3, 'is_manual'] = True
+                        
+                        save_to_db("schedule", st.session_state.schedule)
+                        del st.session_state['swap_results']
+                        st.success("מעגל החלפות בוצע בהצלחה!")
+                        st.rerun()
+            else:
+                 st.caption("לא נמצאו מעגלי החלפות.")
+
 
             # Debug Info
             with st.expander("מידע למפתח (למה נפסלו עובדים?)"):
