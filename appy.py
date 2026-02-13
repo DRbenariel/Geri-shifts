@@ -1155,24 +1155,9 @@ def draw_calendar_view(year, month, role, user_name=None):
             # 1. Direct
             st.markdown("##### ✅ מחליפים ישירים (פנויים)")
             if res['direct']:
-                for c in res['direct']:
-                    c1, c2 = st.columns([3, 1])
-                    c1.write(f"**{c}** (פנוי/ה)")
-                    if c2.button("בצע החלפה", key=f"do_direct_{c}"):
-                        # Update DB
-                        # Remove old A
-                        st.session_state.schedule = st.session_state.schedule[
-                            ~((st.session_state.schedule['date'] == t_date_str) & (st.session_state.schedule['dept'] == target_dept_swap))
-                        ]
-                        # Add new B
-                        new_row = {'date': t_date_str, 'dept': target_dept_swap, 'employee': c, 'is_manual': True}
-                        st.session_state.schedule = pd.concat([st.session_state.schedule, pd.DataFrame([new_row])], ignore_index=True)
-                        save_to_db("schedule", st.session_state.schedule)
-                        
-                        # Clear results and rerun
-                        del st.session_state['swap_results']
-                        st.success(f"בוצע! {c} שובץ במקום {current_emp}")
-                        st.rerun()
+                names_list = ", ".join([f"**{c}**" for c in res['direct']])
+                st.markdown(f"נמצאו {len(res['direct'])} מחליפים פנויים: {names_list}")
+                st.caption("ניתן לבצע את ההחלפה דרך כלי השיבוץ הידני למעלה.")
             else:
                 st.caption("לא נמצאו מחליפים פנויים.")
 
