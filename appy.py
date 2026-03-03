@@ -123,28 +123,8 @@ def init_db():
         if current_staff.empty or 'name' not in current_staff.columns:
             st.info("מאתחל נתונים ראשוניים ב-Google Sheets (פעולה חד פעמית)...")
             
-            interns = [
-                ('בוריס גורביץ', 'שיקום'), ('סלאמה קאסם', 'שיקום'), ('נטעלי בלייכמן', 'שיקום'), ('שאדי חאג יחיא', 'שיקום'),
-                ('בן אריאל', 'פנימית גריאטרית'), ('נטע פרל', 'פנימית גריאטרית'), ('יובל קירשנבוים', 'פנימית גריאטרית'),
-                ('שירה בנימיני', 'פנימית גריאטרית'), ('רוני מינר', 'פנימית גריאטרית'), ('בלודאן אבו גבאל', 'פנימית גריאטרית'),
-                ('חוסיין אבו דיה', 'פנימית גריאטרית'), ('סאגד מסארווה', 'פנימית גריאטרית'), ('אופיר קופל', 'פנימית גריאטרית')
-            ]
-            # סיסמת ברירת מחדל: 1234
-            def_pass = hashlib.sha256("1234".encode()).hexdigest()
-            
-            data = []
-            for n, d in interns:
-                data.append({'name': n, 'type': 'מתמחה', 'dept': d, 'monthly_quota': 6, 'weekend_quota': 1, 'password': def_pass})
-            
-            # תורני חוץ
-            externals = ['אחמד אלעמור', 'סגא עסלי', 'הייתם חגיר']
-            for n in externals:
-                data.append({'name': n, 'type': 'תורן חוץ', 'dept': 'שיקום', 'monthly_quota': 8, 'weekend_quota': 4, 'password': def_pass})
-            
-            # מנהל
-            data.append({'name': 'admin', 'type': 'מנהל/ת', 'dept': 'הנהלה', 'monthly_quota': 0, 'weekend_quota': 0, 'password': def_pass})
-            
-            staff_df = pd.DataFrame(data)
+            # יצירת טבלת עובדים ריקה בסיסית, ההזנה תתבצע מהמערכת
+            staff_df = pd.DataFrame(columns=['name', 'type', 'dept', 'monthly_quota', 'weekend_quota', 'password', 'only_home_dept'])
             save_to_db("staff", staff_df)
             
             # אתחול שאר הטבלאות
@@ -158,6 +138,10 @@ def init_db():
             next_month_init = (date.today().replace(day=1) + timedelta(days=32)).month
             settings_df = pd.DataFrame([{'key': 'active_month', 'value': str(next_month_init)}])
             save_to_db("settings", settings_df)
+            
+            # טבלת ימים מיוחדים (Special Days) עם סוג היום
+            special_days_df = pd.DataFrame(columns=['date', 'description', 'day_type'])
+            save_to_db("special_days", special_days_df)
             
             st.success("הנתונים אותחלו בהצלחה! אנא רענן את העמוד.")
 
@@ -299,6 +283,34 @@ else:
 # --- Helper Function for Validity Checks (Shared by Auto-Scheduler and Swap Tool) ---
 # --- Helper Function for Validity Checks (Shared by Auto-Scheduler and Swap Tool) ---
 # --- Helper Function for Validity Checks (Shared by Auto-Scheduler and Swap Tool) ---
+def get_functional_day_type(date_obj, special_days_df):
+    """Returns the functional day type ('רגיל', 'כמו שישי (ערב חג)', 'כמו שבת (חג)')"""
+    date_str = date_obj.strftime('%Y-%m-%d') if isinstance(date_obj, date) else date_obj
+    if not special_days_df.empty and 'day_type' in special_days_df.columns:
+        match = special_days_df[special_days_df['date'] == str(date_str)]
+        if not match.empty:
+            return match.iloc[0]['day_type']
+    return 'רגיל'
+
+def is_functional_weekend(date_obj, special_days_df):
+    """Returns True if the date acts as a weekend, including days functioning as Friday or Saturday."""
+    if isinstance(date_obj, str):
+        date_obj = datetime.strptime(date_obj, '%Y-%m-%d').date()
+    # 4 = Friday, 5 = Saturday
+    if date_obj.weekday() in [4, 5]:
+        return True
+    
+    day_type = get_functional_day_type(date_obj, special_days_df)
+    if day_type in ['כמו שישי (ערב חג)', 'כמו שבת (חג)']:
+        return True
+        
+    # The user specifically requested that the day BEFORE "Like Friday" behaves like a weekend day too
+    tomorrow = date_obj + timedelta(days=1)
+    if get_functional_day_type(tomorrow, special_days_df) == 'כמו שישי (ערב חג)':
+        return True
+        
+    return False
+
 def check_assignment_validity(schedule_data, person_name, check_date, target_dept, staff_df, requests_df, ignore_quota=False, ignore_home_restrict=False, ignore_rest=False):
     """
     Checks if assigning person_name to target_dept on check_date is valid.
@@ -390,6 +402,14 @@ if 'schedule' not in st.session_state:
     st.session_state.schedule = get_db_data("schedule")
 if 'requests' not in st.session_state:
     st.session_state.requests = get_db_data("requests")
+if 'special_days' not in st.session_state:
+    try:
+        st.session_state.special_days = get_db_data("special_days")
+        if 'day_type' not in st.session_state.special_days.columns:
+            st.session_state.special_days['day_type'] = 'רגיל'
+    except:
+        st.session_state.special_days = pd.DataFrame(columns=['date', 'description', 'day_type'])
+        save_to_db("special_days", st.session_state.special_days)
 
 # כלי שיבוץ ידני
 if 'manual_date' not in st.session_state:
@@ -455,8 +475,8 @@ def run_smart_scheduling(year, month, only_weekends=False):
             work_load[s['employee']] += 1
             last_assignment[s['employee']] = dt.toordinal()
             
-            # תיקון: החרגת שישי בוקר ממכסת הסופ"ש
-            if dt.weekday() in [4, 5] and "שישי בוקר" not in s.get('dept', ''): 
+            # תיקון: החרגת שישי בוקר ממכסת הסופ"ש + שילוב "סופ"שים פונקציונליים"
+            if is_functional_weekend(dt, st.session_state.special_days) and "שישי בוקר" not in s.get('dept', ''): 
                 weekends_worked[s['employee']].add(dt.isocalendar()[1])
 
     # חישוב סטטיסטיקה לפני השיבוץ הנוכחי
@@ -476,11 +496,11 @@ def run_smart_scheduling(year, month, only_weekends=False):
     
     # סינון תאריכים לפי דרישה
     if only_weekends:
-        # אם ביקשו רק סופ"שים, ניקח רק שישי-שבת
-        sorted_dates = [d for d in all_dates if d.weekday() in [4, 5]]
+        # אם ביקשו רק סופ"שים, ניקח רק שישי-שבת או ימים מיוחדים שמוגדרים סופ"ש
+        sorted_dates = [d for d in all_dates if is_functional_weekend(d, st.session_state.special_days)]
     else:
-        # תעדוף סופי שבוע ואז אמצע שבוע (שישי-שבת הם סופ"ש, ראשון-חמישי הם חול)
-        sorted_dates = [d for d in all_dates if d.weekday() in [4, 5]] + [d for d in all_dates if d.weekday() not in [4, 5]]
+        # תעדוף סופי שבוע פונקציונליים ואז אמצע שבוע
+        sorted_dates = [d for d in all_dates if is_functional_weekend(d, st.session_state.special_days)] + [d for d in all_dates if not is_functional_weekend(d, st.session_state.special_days)]
     
     # פונקציית עזר להמרה בטוחה למספר
     def safe_int(val, default=0):
@@ -530,9 +550,9 @@ def run_smart_scheduling(year, month, only_weekends=False):
                     failure_reasons.append(f"{name}: מכסה מלאה ({monthly_quota})")
                     continue
                 
-                # בדיקת סופ"ש
+                # בדיקת סופ"ש (כולל סופ"ש פונקציונלי)
                 weekend_quota = safe_int(person['weekend_quota'], 0)
-                if d.weekday() in [4, 5] and len(weekends_worked[name]) >= weekend_quota and week_num not in weekends_worked[name]:
+                if is_functional_weekend(d, st.session_state.special_days) and len(weekends_worked[name]) >= weekend_quota and week_num not in weekends_worked[name]:
                     failure_reasons.append(f"{name}: מכסת סופ\"ש")
                     continue
                 
@@ -622,8 +642,8 @@ def run_smart_scheduling(year, month, only_weekends=False):
 
                     # פקטור סופ"ש לתורני חוץ בשיקום
                     if dept == "שיקום" and cand['type'] == 'תורן חוץ':
-                        # ימי חמישי (3), שישי (4), שבת (5)
-                        if d.weekday() in [3, 4, 5]:
+                        # ימי חמישי (3), שישי (4), שבת (5) או סופ"ש פונקציונלי
+                        if d.weekday() in [3, 4, 5] or is_functional_weekend(d, st.session_state.special_days):
                             score += 2000 # בונוס ענק שמבטיח בחירה
                     
                     # פקטור איזון ימי רביעי/חמישי למתמחים (שלא תורני חוץ)
@@ -656,7 +676,7 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 last_assignment[final_choice] = d.toordinal()
                 if d.weekday() == 2: wed_counts[final_choice] += 1
                 if d.weekday() == 3: thu_counts[final_choice] += 1
-                if d.weekday() in [4, 5]: weekends_worked[final_choice].add(week_num)
+                if is_functional_weekend(d, st.session_state.special_days): weekends_worked[final_choice].add(week_num)
             else:
                 # --- לוגיקת הצעת החלפות ועזרה (Swap & Suggest) ---
                 suggestions = []
@@ -783,9 +803,9 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 
                 new_schedule.append({'date': d_str, 'dept': dept, 'employee': '---', 'is_manual': False, 'empty_reason': final_msg})
 
-    # --- לוגיקה חדשה: שיבוץ שישי בוקר (4 עובדים) ---
-    # רצים על כל ימי השישי בחודש
-    fridays = [d for d in all_dates if d.weekday() == 4]
+    # --- לוגיקה חדשה: שיבוץ משמרות כמו "שישי בוקר" (4 עובדים) ---
+    # רצים על כל ימי השישי האמיתיים + ימי "כמו שישי" האקסטרה
+    fridays = [d for d in all_dates if d.weekday() == 4 or get_functional_day_type(d, st.session_state.special_days) == 'כמו שישי (ערב חג)']
     for fri_date in fridays:
         fri_str = str(fri_date)
         sat_date = fri_date + timedelta(days=1)
@@ -911,6 +931,12 @@ def draw_calendar_view(year, month, role, user_name=None):
         # Collect all assignments first
         month_sched = st.session_state.schedule
         
+        # Collect special days
+        month_special_days = {}
+        if 'special_days' in st.session_state and not st.session_state.special_days.empty:
+            for _, row in st.session_state.special_days.iterrows():
+                month_special_days[row['date']] = row['description']
+        
         # Iterate through days linearly
         for week in cal:
              for i, day in enumerate(week):
@@ -932,9 +958,15 @@ def draw_calendar_view(year, month, role, user_name=None):
                 
                 # Render Day Card
                 with st.container():
-                    # Format: DD/MM/YYYY
                     formatted_date = f"{day:02d}/{month:02d}/{year}"
-                    st.markdown(f"**{formatted_date} ({day_name})**")
+                    
+                    # Display Special Day Header Info
+                    sd_text = ""
+                    if date_str in month_special_days:
+                        sd_text = f" &mdash; <span style='color:#b91c1c; font-weight:bold;'>🎉 {month_special_days[date_str]}</span>"
+                    
+                    st.markdown(f"**{formatted_date} ({day_name})**{sd_text}", unsafe_allow_html=True)
+                    
                     if day_rows.empty:
                         st.caption("אין שיבוצים")
                     else:
@@ -967,6 +999,14 @@ def draw_calendar_view(year, month, role, user_name=None):
                     day_sched = st.session_state.schedule[st.session_state.schedule['date'] == date_str]
                     
                     html = f'<div class="calendar-day {is_weekend}"><div class="day-number">{day}</div>'
+                    
+                    # Add special day note in grid
+                    if 'special_days' in st.session_state and not st.session_state.special_days.empty:
+                        sd_match = st.session_state.special_days[st.session_state.special_days['date'] == date_str]
+                        if not sd_match.empty:
+                            sd_desc = sd_match.iloc[0]['description']
+                            html += f'<div style="font-size:10px; color:#b91c1c; font-weight:bold; text-align:center; padding-bottom:5px;">🎉 {sd_desc}</div>'
+                            
                     for dept in ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום (1)", "שישי בוקר - שיקום (2)", "שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)"]:
                         rows = day_sched[day_sched['dept'] == dept]
                         # אם מדובר בשישי בוקר ואין שורה כזו (כי זה לא יום שישי), דלג
@@ -1620,6 +1660,38 @@ if selected_nav == 'הגדרות':
                         st.cache_data.clear()
                         
                         st.success("הסיסמה עודכנה בהצלחה!")
+
+    # --- Manage Special Days Section (Admin Only) ---
+    if role == "מנהל/ת":
+        with st.expander("📅 ניהול ימים מיוחדים וחגים", expanded=False):
+            st.caption("הוסף תאריכים מיוחדים כדי שמתמחים יראו אותם לפני הגשת אילוצים.")
+            
+            c_sd1, c_sd2, c_sd_type, c_sd3 = st.columns([1, 1.5, 1, 1])
+            sd_date = c_sd1.date_input("תאריך ליום מיוחד:", format="DD/MM/YYYY")
+            sd_desc = c_sd2.text_input("תיאור (למשל: ערב פסח):")
+            sd_type = c_sd_type.selectbox("סוג יום:", ["לידיעה בלבד", "כמו שישי (ערב חג)", "כמו שבת (חג)"])
+            
+            if c_sd3.button("➕ הוסף יום", use_container_width=True):
+                if sd_desc:
+                    new_sd = pd.DataFrame([{'date': str(sd_date), 'description': sd_desc, 'day_type': sd_type}])
+                    st.session_state.special_days = pd.concat([st.session_state.special_days, new_sd], ignore_index=True)
+                    save_to_db("special_days", st.session_state.special_days)
+                    st.success("היום המיוחד התווסף בהצלחה!")
+                    st.rerun()
+                else:
+                    st.error("חובה להזין תיאור.")
+            
+            if not st.session_state.special_days.empty:
+                st.write("ימים מיוחדים קיימים:")
+                for idx, row in st.session_state.special_days.iterrows():
+                    colA, colB, colC, colD = st.columns([1, 1.5, 1, 0.5])
+                    colA.write(f"**{row['date']}**")
+                    colB.write(row['description'])
+                    colC.write(row.get('day_type', 'רגיל'))
+                    if colD.button("🗑️", key=f"del_sd_{idx}"):
+                        st.session_state.special_days = st.session_state.special_days.drop(idx).reset_index(drop=True)
+                        save_to_db("special_days", st.session_state.special_days)
+                        st.rerun()
 
 elif role == "מנהל/ת":
     if selected_nav == 'לוח שיבוץ':
@@ -2352,6 +2424,19 @@ else:
         month_name = hebrew_months[sel_month - 1]
         st.subheader(f"הגשת אילוצים לחודש: {month_name}")
         
+        # --- הצגת ימים מיוחדים / חגים לחודש זה ---
+        if 'special_days' in st.session_state and not st.session_state.special_days.empty:
+            special_days_month = []
+            for _, row in st.session_state.special_days.iterrows():
+                try:
+                    d_obj = datetime.strptime(row['date'], '%Y-%m-%d').date()
+                    if d_obj.month == sel_month and d_obj.year == 2026:
+                        special_days_month.append(f"{d_obj.strftime('%d/%m/%Y')} - {row['description']}")
+                except: pass
+            
+            if special_days_month:
+                st.warning("⚠️ **שים לב לימים מיוחדים בחודש זה:**\n\n" + "\n".join([f"- {sd}" for sd in special_days_month]))
+        
         # --- Pre-initialize Chip States for the entire month ---
         cal = calendar.monthcalendar(2026, sel_month)
         
@@ -2401,8 +2486,17 @@ else:
         st.session_state[month_load_key] = True
 
         # --- הצגת אילוצים ובקשות קיימים ---
-        existing_constraints = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "אילוץ")]
-        existing_wishes_all = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "בקשה")]
+        existing_constraints = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "אילוץ")].copy()
+        existing_wishes_all = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "בקשה")].copy()
+        
+        # סינון להצגה רק של החודש הפעיל הנבחר ב-UI (sel_month)
+        if not existing_constraints.empty:
+            existing_constraints['date_dt'] = pd.to_datetime(existing_constraints['date'], errors='coerce')
+            existing_constraints = existing_constraints[(existing_constraints['date_dt'].dt.month == sel_month) & (existing_constraints['date_dt'].dt.year == 2026)]
+
+        if not existing_wishes_all.empty:
+            existing_wishes_all['date_dt'] = pd.to_datetime(existing_wishes_all['date'], errors='coerce')
+            existing_wishes_all = existing_wishes_all[(existing_wishes_all['date_dt'].dt.month == sel_month) & (existing_wishes_all['date_dt'].dt.year == 2026)]
         
         if not existing_constraints.empty or not existing_wishes_all.empty:
             msg = ""
@@ -2466,6 +2560,13 @@ else:
                         # Render Checkbox
                         is_checked = st.checkbox(f"{day_num}", key=chk_key)
                         
+                        # Add special day visual note for intern if exists
+                        if 'special_days' in st.session_state and not st.session_state.special_days.empty:
+                            sd_match = st.session_state.special_days[st.session_state.special_days['date'] == str(d_obj)]
+                            if not sd_match.empty:
+                                sd_desc = sd_match.iloc[0]['description']
+                                st.markdown(f"<div style='font-size:10px; color:#b91c1c; font-weight:bold; margin-top:-10px; margin-bottom:5px; line-height:1.1;'>🎉 {sd_desc}</div>", unsafe_allow_html=True)
+                        
                         if is_checked:
                             selected_from_grid.append(d_obj)
         
@@ -2511,8 +2612,15 @@ else:
                         
                         is_wish_checked = st.checkbox(f"{day_num}", key=wish_chk_key)
                         
+                        # Add special day visual note for intern if exists
+                        if 'special_days' in st.session_state and not st.session_state.special_days.empty:
+                            sd_match_wish = st.session_state.special_days[st.session_state.special_days['date'] == str(date(2026, sel_month, day_num))]
+                            if not sd_match_wish.empty:
+                                sd_desc_wish = sd_match_wish.iloc[0]['description']
+                                st.markdown(f"<div style='font-size:10px; color:#b91c1c; font-weight:bold; margin-top:-10px; margin-bottom:5px; line-height:1.1;'>🎉 {sd_desc_wish}</div>", unsafe_allow_html=True)
+                        
                         if is_wish_checked:
-                            selected_wishes.append(d_obj)
+                            selected_wishes.append(date(2026, sel_month, day_num))
 
         st.markdown('</div>', unsafe_allow_html=True)
         
