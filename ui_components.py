@@ -109,21 +109,24 @@ def setup_style():
     }
 
     /* --- ULTRA-AGGRESSIVE Button Styling --- */
-    /* Force ALL buttons to Indigo - v2 */
+    /* Force ALL buttons to premium Indigo */
     button, 
     div[data-testid="stButton"] > button, 
     div[data-testid="stFormSubmitButton"] > button,
     .stButton > button,
     [kind="primary"],
     [kind="secondary"] {
-        background: #4f46e5 !important;
-        background-color: #4f46e5 !important;
-        background-image: none !important;
+        background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%) !important;
+        background-image: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%) !important;
         color: white !important;
-        transition: all 0.2s;
-        box-shadow: none !important;
+        transition: all 0.2s ease-in-out !important;
+        box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2), 0 2px 4px -1px rgba(79, 70, 229, 0.1) !important;
         border: none !important;
-        border-radius: 8px !important;
+        border-radius: 12px !important;
+        font-weight: 500 !important;
+        letter-spacing: 0.5px !important;
+        padding-top: 0.5rem !important;
+        padding-bottom: 0.5rem !important;
     }
     button *,
     div[data-testid="stButton"] > button *,
@@ -134,11 +137,19 @@ def setup_style():
     div[data-testid="stButton"] > button:hover, 
     div[data-testid="stFormSubmitButton"] > button:hover,
     .stButton > button:hover {
-        background: #4338ca !important;
-        background-color: #4338ca !important;
-        background-image: none !important;
+        background: linear-gradient(135deg, #4338ca 0%, #3730a3 100%) !important;
+        background-image: linear-gradient(135deg, #4338ca 0%, #3730a3 100%) !important;
         color: white !important;
         border: none !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3), 0 4px 6px -2px rgba(79, 70, 229, 0.15) !important;
+    }
+    button:active,
+    div[data-testid="stButton"] > button:active, 
+    div[data-testid="stFormSubmitButton"] > button:active,
+    .stButton > button:active {
+        transform: translateY(0) !important;
+        box-shadow: 0 2px 4px -1px rgba(79, 70, 229, 0.2) !important;
     }
 
     /* --- Custom Checkbox Styling (Large & Round) --- */
@@ -180,37 +191,33 @@ def setup_style():
         direction: rtl !important;
     }
     
-    /* Force text to stick to the right side with padding */
+    /* Force text to stick to the right side */
     .ant-menu-item {
-        flex-direction: row-reverse !important;
-        justify-content: flex-end !important;
+        flex-direction: row !important; /* Keep natural flow in RTL */
+        justify-content: flex-start !important; /* Start from the right in RTL */
         text-align: right !important;
         direction: rtl !important;
         padding-right: 24px !important;
-        padding-left: 8px !important;
+        padding-left: 16px !important;
     }
     
-    /* Force text content to align right and add padding */
+    /* Force text content to align right */
     .ant-menu-title-content,
     .ant-menu-item-content,
     .ant-menu-item span {
         text-align: right !important;
         direction: rtl !important;
-        display: block !important;
-        width: 100% !important;
-        padding-right: 12px !important;
+        display: inline-block !important;
     }
     
-    /* Move icon to the left side (in RTL, this means visual right) */
+    /* Move icon to the right side */
     .ant-menu-item .anticon {
-        margin-left: 8px !important;
+        margin-left: 12px !important; /* Space between icon and text */
         margin-right: 0 !important;
-        order: 2 !important;
     }
     
     /* Force the menu item content to be on the right */
     .ant-menu-item-content {
-        order: 1 !important;
         flex: 1 !important;
         text-align: right !important;
     }
@@ -328,34 +335,30 @@ def setup_style():
     """, unsafe_allow_html=True)
 
 def render_navbar(role):
-    """Renders the responsive navigation bar."""
+    """Renders the responsive navigation bar using tabs for better RTL support."""
     
-    # Define standard menu items
     items = []
     
-    # Build items in reverse order for RTL effect
-    if role == "מנהל/ת":
-        items.append(sac.MenuItem('דוחות וניהול', icon='bar-chart-line'))
-        items.append(sac.MenuItem('צוות', icon='people'))
+    items.append(sac.TabsItem('הגדרות', icon='gear'))
+    items.append(sac.TabsItem('לוח שיבוץ', icon='calendar-week'))
     
-    # Show "הגשת אילוצים" ONLY for non-admins
     if role != "מנהל/ת":
-        items.append(sac.MenuItem('הגשת אילוצים', icon='calendar-check'))
+        items.append(sac.TabsItem('הגשת אילוצים', icon='calendar-check'))
+        
+    if role == "מנהל/ת":
+        items.append(sac.TabsItem('צוות', icon='people'))
+        items.append(sac.TabsItem('דוחות וניהול', icon='bar-chart-line'))
     
-    items.append(sac.MenuItem('לוח שיבוץ', icon='calendar-week'))
-    items.append(sac.MenuItem('הגדרות', icon='gear'))
-    
-    # Wrap in RTL container using HTML dir attribute
+    # Render horizontally using sac.tabs which handles RTL better Native-wise
     st.markdown('<div dir="rtl" style="text-align: right;">', unsafe_allow_html=True)
-    result = sac.menu(
+    result = sac.tabs(
         items=items,
         index=0,
         format_func='title',
         size='lg',
-        variant='filled',
-        color='#4f46e5', # Explicit Hex to match buttons
-        open_all=True,
-        return_index=False
+        color='#4f46e5',
+        return_index=False,
+        align='center' # Align items to the center or start/end
     )
     st.markdown('</div>', unsafe_allow_html=True)
     return result

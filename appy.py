@@ -24,23 +24,28 @@ from streamlit_gsheets import GSheetsConnection
 
 # --- 2. ניהול מסד נתונים (Google Sheets) ---
 
-def get_db_data(worksheet_name):
-    # קריאה מהירה ללא מטמון כדי לקבל עדכונים בזמן אמת
-    conn = st.connection("gsheets", type=GSheetsConnection)
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_sheet_data_silently(worksheet_name):
+    # הפונקציה הזו רצה מאחורי הקלעים ומביאה את הנתונים ללא הודעות קופצות
+    gc = get_gspread_client()
+    url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+    sh = gc.open_by_url(url)
     try:
-        # Enable caching (TTL=600 seconds) to prevent API rate limit issues
-        # Use show_spinner=False to suppress the "Running..." toast/message
-        df = conn.read(worksheet=worksheet_name, ttl=600, show_spinner=False)
+        ws = sh.worksheet(worksheet_name)
+        data = ws.get_all_records()
+        return pd.DataFrame(data)
+    except gspread.exceptions.WorksheetNotFound:
+        return pd.DataFrame()
+
+def get_db_data(worksheet_name):
+    try:
+        df = _fetch_sheet_data_silently(worksheet_name)
         return df
     except Exception as e:
-        # טיפול חכם בשגיאות: רק אם הגיליון באמת לא קיים, נחזיר DataFrame ריק
-        # אחרת (בעיות חיבור, Timeout, מכסה) נזרוק את השגיאה הלאה כדי לא לאפס בטעות
         err_msg = str(e).lower()
         if "worksheet" in err_msg and "not found" in err_msg:
              return pd.DataFrame()
-        # אם זו שגיאה אחרת - קריטי להרים אותה כדי ש-init_db לא ירוץ
         raise e
-
 
 def get_gspread_client():
     # יצירת קליינט gspread מתוך ה-secrets הקיימים
@@ -174,15 +179,17 @@ if 'db_initialized' not in st.session_state:
 def login_screen():
     st.markdown("""
         <style>
-            .login-container {
-                max-width: 400px;
-                margin: 20px auto; /* Reduced margin */
-                padding: 2rem;
-                background: white;
+            /* Center the entire screen content for login */
+            .main .block-container {
+                max-width: 450px !important;
+                padding-top: 5rem !important;
+                background-color: white;
                 border-radius: 20px;
-                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-                text-align: center;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+                margin-top: 40px;
+                padding-bottom: 2rem !important;
             }
+            
             div[data-testid="stTextInput"] input {
                 border: 2px solid #e2e8f0 !important;
                 background-color: #f8fafc;
@@ -199,41 +206,31 @@ def login_screen():
         </style>
     """, unsafe_allow_html=True)
 
-    # יצירת קונטיינר מרכזי נקי ללא עמודות דוחפות
-    # יצירת קונטיינר מרכזי נקי
-    st.markdown("<div class='login-container'>", unsafe_allow_html=True)
-    st.markdown("<h1 style='text-align: center; color: #1e293b;'>מערכת שיבוץ תורנויות המערך הגריאטרי</h1>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #1e293b; margin-bottom: 24px; font-size: 1.8rem;'>מערכת שיבוץ תורנויות המערך הגריאטרי</h1>", unsafe_allow_html=True)
     
-    # שימוש ב-columns רק כדי למרכז את הטופס מעט אם צריך, אבל הפעם נלך פשוט
-    c_login = st.empty() 
+    username = st.text_input("שם משתמש:").strip()
+    password = st.text_input("סיסמה:", type="password")
     
-    with c_login.container():
-        # שימוש ברוחב מוגבל דרך CSS כבר טופל ב-.login-container, אבל ה-Inputים הם סטרימליט
-        # נייצר עמודות דמה למרכוז האלמנטים של סטרימליט
-        lc1, lc2, lc3 = st.columns([1, 1, 1])
-        with lc2:
-            username = st.text_input("שם משתמש:").strip()
-            password = st.text_input("סיסמה:", type="password")
-            
-            if st.button("כניסה", use_container_width=True):
-                staff_df = get_db_data("staff")
-                hashed_pass = hashlib.sha256(password.encode()).hexdigest()
-                
-                # בדיקה אם המשתמש קיים
-                user_match = staff_df[staff_df['name'] == username]
-                
-                if not user_match.empty:
-                    user = user_match[user_match['password'] == hashed_pass]
-                    if not user.empty:
-                        st.session_state.logged_in = True
-                        st.session_state.user_name = username
-                        st.session_state.user_role = user.iloc[0]['type']
-                        st.rerun()
-                    else:
-                        st.error("סיסמה שגויה")
-                else:
-                    st.error("שם המשתמש לא נמצא במערכת")
+    st.markdown("<br>", unsafe_allow_html=True) # Spacing before button
+    
+    if st.button("כניסה", use_container_width=True):
+        staff_df = get_db_data("staff")
+        hashed_pass = hashlib.sha256(password.encode()).hexdigest()
+        
+        # בדיקה אם המשתמש קיים
+        user_match = staff_df[staff_df['name'] == username]
+        
+        if not user_match.empty:
+            user = user_match[user_match['password'] == hashed_pass]
+            if not user.empty:
+                st.session_state.logged_in = True
+                st.session_state.user_name = username
+                st.session_state.user_role = user.iloc[0]['type']
+                st.rerun()
+            else:
+                st.error("סיסמה שגויה")
+        else:
+            st.error("שם המשתמש לא נמצא במערכת")
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -2063,107 +2060,120 @@ elif role == "מנהל/ת":
     elif selected_nav == 'דוחות וניהול':
         # st.header("דוח סטטוס ומסכמים") - Removed by user request
         
-        # --- חלק חדש: טבלת סטטוס הגשת אילוצים ---
-        # --- חלק חדש: טבלת סטטוס הגשת אילוצים ---
-        st.subheader("סטטוס הגשת אילוצים לחודש זה")
+        # --- חלק חדש: לוח בקרה מודרני ---
+        st.markdown("### 📊 לוח בקרה - סיכום חודשי")
         
-        if not st.session_state.staff.empty:
-            # סינון רק למתמחים ותורני חוץ
-            relevant_staff = st.session_state.staff[st.session_state.staff['type'].isin(['מתמחה', 'תורן חוץ'])]
+        # --- 1. חישוב נתונים למדדים ---
+        current_month_prefix = f"2026-{sel_month:02d}"
+        relevant_staff = st.session_state.staff[st.session_state.staff['type'].isin(['מתמחה', 'תורן חוץ'])]
+        n_total = len(relevant_staff)
+        submitted_count = 0
+        status_list = []
+        
+        reqs_df = st.session_state.requests.copy()
+        if not reqs_df.empty:
+             reqs_df['date'] = reqs_df['date'].astype(str)
+
+        for _, emp in relevant_staff.iterrows():
+            name = emp['name']
             
-            if relevant_staff.empty:
-                st.info("לא נמצאו עובדים (מתמחים/תורני חוץ) להצגה.")
+            n_c, n_w = 0, 0
+            if not reqs_df.empty:
+                user_reqs = reqs_df[(reqs_df['employee'] == name) & (reqs_df['date'].str.startswith(current_month_prefix))]
+                n_c = len(user_reqs[user_reqs['status'] == 'אילוץ'])
+                n_w = len(user_reqs[user_reqs['status'] == 'בקשה'])
+            
+            has_submitted = (n_c + n_w) > 0
+            if has_submitted: submitted_count += 1
+            
+            status_list.append({
+                "שם העובד": name,
+                "תפקיד": emp['type'],
+                "סטטוס": "✅ הוגש" if has_submitted else "❌ טרם הוגש",
+                "חסימות": n_c,
+                "בקשות": n_w
+            })
+
+        # --- 2. הצגת כרטיסי מדדים מותאמים אישית (Custom Metric Cards) ---
+        m_cols = st.columns(3)
+        
+        # Helper function for generating HTML cards
+        def metric_html(title, value, subtitle, icon, color, gradient="from-[#ffffff] to-[#f9fafb]"):
+            return f"""
+            <div style="
+                background: linear-gradient(135deg, {gradient.split('to-')[0].replace('from-[', '').replace(']', '').strip()} 0%, {gradient.split('to-')[1].replace('[', '').replace(']', '').strip()} 100%);
+                border-radius: 12px;
+                padding: 20px;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                text-align: right;
+                direction: rtl;
+                border-top: 4px solid {color};
+                transition: transform 0.2s ease-in-out;
+                margin-bottom: 20px;
+            " onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+                <h4 style="color: #6b7280; font-size: 14px; margin: 0; padding-bottom: 8px;">{title}</h4>
+                <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                    <h2 style="color: #111827; font-size: 32px; font-weight: 700; margin: 0;">{value}</h2>
+                    <span style="font-size: 24px;">{icon}</span>
+                </div>
+                <p style="color: #10b981; font-size: 12px; margin-top: 8px; margin-bottom:0;">{subtitle}</p>
+            </div>
+            """
+
+        with m_cols[0]:
+            st.markdown(metric_html("סה״כ צוות", f"{n_total}", "מתמחים ותורני חוץ", "👥", "#4f46e5"), unsafe_allow_html=True)
+        with m_cols[1]:
+            st.markdown(metric_html("הגישו אילוצים", f"{submitted_count}", f"עבור חודש {sel_month}", "✅", "#10b981"), unsafe_allow_html=True)
+        with m_cols[2]:
+            pending = n_total - submitted_count
+            p_color = "#ef4444" if pending > 0 else "#10b981"
+            st.markdown(metric_html("ממתינים להגשה", f"{pending}", "נדרש תזכורת", "⚠️", p_color), unsafe_allow_html=True)
+
+        st.divider()
+
+        # --- 3. גרף משמרות וסטטוס הגשה (שני טורים) ---
+        col_chart, col_table = st.columns([1.2, 1])
+
+        with col_chart:
+            st.markdown("##### 📈 ספירת תורנויות")
+            sched = st.session_state.schedule
+            if not sched.empty:
+                # ספירת משמרות לפי עובד וסוג
+                reg_counts = sched[~sched['dept'].astype(str).str.contains("שישי בוקר", na=False)]['employee'].value_counts()
+                morn_counts = sched[sched['dept'].astype(str).str.contains("שישי בוקר", na=False)]['employee'].value_counts()
+                combined_df = pd.DataFrame({'תורנויות': reg_counts, 'שישי בוקר': morn_counts}).fillna(0)
+                st.bar_chart(combined_df, color=["#4f46e5", "#fb923c"]) # Indigo and Orange
             else:
-                status_data = []
-                current_month_prefix = f"2026-{sel_month:02d}"
-                
-                # וידוא שהעמודה מסוג מחרוזת (העתק מקומי)
-                reqs_df = st.session_state.requests.copy()
-                if not reqs_df.empty:
-                    reqs_df['date'] = reqs_df['date'].astype(str)
-                
-                # --- חישוב מקדים ל-KPIs (Shadcn UI) ---
-                n_total = len(relevant_staff)
-                submitted_count = 0
-                
-                # לולאה לצבירת נתונים
-                temp_status_list = []
-                for _, emp in relevant_staff.iterrows():
-                    name = emp['name']
-                    n_c, n_w = 0, 0
-                    
-                    if not reqs_df.empty:
-                        user_reqs = reqs_df[
-                            (reqs_df['employee'] == name) & 
-                            (reqs_df['date'].str.startswith(current_month_prefix))
-                        ]
-                        n_c = len(user_reqs[user_reqs['status'] == 'אילוץ'])
-                        n_w = len(user_reqs[user_reqs['status'] == 'בקשה'])
-                    
-                    has_submitted = (n_c + n_w) > 0
-                    if has_submitted:
-                        submitted_count += 1
-                        
-                    status_icon = "✅ הגיש" if has_submitted else "❌ טרם הגיש"
-                    
-                    # נשמור לרשימה כדי להשתמש בטבלה אח"כ
-                    temp_status_list.append({
-                        "שם העובד": name,
-                        "תפקיד": emp['type'],
-                        "סטטוס": status_icon,
-                        "חסימות (🔒)": n_c,
-                        "בקשות (⭐)": n_w
-                    })
+                st.info("אין נתוני שיבוץ להצגה בגרף")
 
-                # --- הצגת כרטיסי מדדים (Metric Cards) ---
-                st.markdown("##### סיכום נתונים בזמן אמת")
-                m_cols = st.columns(3)
-                with m_cols[0]:
-                    ui.metric_card(title="סה״כ מתמחים", content=f"{n_total}", description="רשומים במערכת", key="card_total")
-                with m_cols[1]:
-                    ui.metric_card(title="הגישו אילוצים", content=f"{submitted_count}", description="לחודש הנוכחי", key="card_sub")
-                with m_cols[2]:
-                    pending = n_total - submitted_count
-                    ui.metric_card(title="טרם הגישו", content=f"{pending}", description="נדרש תזכורת", key="card_pend")
-                
-                st.divider()
-
-                # --- הצגת הטבלה (שימוש בנתונים שחישבנו) ---
-                df_status = pd.DataFrame(temp_status_list)
-
-                
-                # אם הדאטה פריים ריק (לא אמור לקרות אם relevant_staff לא ריק), דואגים לעמודות
-                if df_status.empty:
-                     df_status = pd.DataFrame(columns=["שם העובד", "תפקיד", "סטטוס", "חסימות (🔒)", "בקשות (⭐)"])
-
-                # צביעת הטבלה
-                try:
-                    def highlight_status(val):
-                        try:
-                            color = '#d1fae5' if '✅' in str(val) else '#fee2e2'
-                            return f'background-color: {color}'
-                        except:
-                            return ''
-                    
-                    # שימוש ב-applymap שקיים בגרסאות ישנות וחדשות (עד שיוסר לחלוטין), או map בחדשות.
-                    # ננסה applymap ונתפוס שגיאה אם יש
-                    # הפיכת סדר העמודות (RTL ידני) והצגת הטבלה
-                    reversed_df = df_status[df_status.columns[::-1]]
-                    
-                    st.dataframe(
-                        reversed_df.style
-                        .applymap(highlight_status, subset=['סטטוס'])
-                        .set_properties(**{'text-align': 'right', 'direction': 'rtl'}),
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                except Exception as e:
-                    # Fallback ללא עיצוב במקרה של שגיאה
-                    st.dataframe(df_status, use_container_width=True, hide_index=True)
-
-        else:
-            st.info("אין עובדים במערכת.")
+        with col_table:
+            st.markdown("##### 📋 סטטוס הגשות")
+            df_status = pd.DataFrame(status_list)
             
+            if not df_status.empty:
+                df_status = df_status[["שם העובד", "תפקיד", "סטטוס", "חסימות", "בקשות"]] # Ensure order
+                # עיצוב טבלה מותאם
+                def style_status(val):
+                    try:
+                        color = '#dcfce7' if '✅' in str(val) else '#fee2e2'
+                        return f'background-color: {color}; color: #1e293b; font-weight: 500; border-radius: 4px;'
+                    except:
+                        return ''
+
+                # rtl support
+                reversed_df_status = df_status[df_status.columns[::-1]]
+                
+                try:
+                     styled_df = reversed_df_status.style.applymap(style_status, subset=['סטטוס']).set_properties(**{'text-align': 'right', 'direction': 'rtl'})
+                     st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                except AttributeError: # For newer pandas without applymap handling
+                     styled_df = reversed_df_status.style.map(style_status, subset=['סטטוס']).set_properties(**{'text-align': 'right', 'direction': 'rtl'})
+                     st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                except Exception as e:
+                     st.dataframe(reversed_df_status, use_container_width=True, hide_index=True)
+            else:
+                 st.info("אין נתונים להצגה.")
+
         st.divider()
 
         # --- ייצוא נתונים ---
@@ -2245,23 +2255,7 @@ elif role == "מנהל/ת":
             except Exception as e:
                 st.error(f"שגיאה בייצוא הנתונים: {e}")
 
-        st.divider()
-        st.subheader("ספירת משמרות")
-        
-        # הכנת נתונים לגרף משולב
-        sched = st.session_state.schedule
-        
-        # ספירה רגילה (ללא שישי בוקר)
-        reg_counts = sched[~sched['dept'].astype(str).str.contains("שישי בוקר", na=False)]['employee'].value_counts()
-        
-        # ספירת שישי בוקר בלבד
-        morn_counts = sched[sched['dept'].astype(str).str.contains("שישי בוקר", na=False)]['employee'].value_counts()
-        
-        # איחוד לטבלה אחת
-        combined_df = pd.DataFrame({'תורנויות רגילות': reg_counts, 'שישי בוקר': morn_counts}).fillna(0)
-        
-        st.bar_chart(combined_df)
-        st.caption("הגרף מציג בחלוקה לצבעים: תורנויות רגילות לעומת שישי בוקר")
+
     if selected_nav == 'דוחות וניהול': # Fairness merged into Reports
         st.subheader("מעקב הוגנות - ימי רביעי, חמישי ושישי (מתמחים בלבד)")
         
@@ -2324,7 +2318,24 @@ elif role == "מנהל/ת":
                     aggfunc='count', 
                     fill_value=0
                 )
-                st.dataframe(pivot, use_container_width=True)
+                
+                # Make sure all interns are displayed, even with 0 counts
+                if not pivot.empty:
+                    # all_interns was created earlier: all_interns = st.session_state.staff[st.session_state.staff['type'] == 'מתמחה']['name'].tolist()
+                    pivot = pivot.reindex(all_interns, fill_value=0)
+                    
+                    # Remove any interns who aren't listed in the current list of interns 
+                    # (in case the pivot table caught old data on names that changed/deleted)
+                    pivot = pivot[pivot.index.isin(all_interns)]
+                
+                # השטחת קטגוריות העמודות כדי למנוע טבלה "קפואה" בממשק
+                pivot.columns = [f"{col[1]} ({col[0]})" for col in pivot.columns.values]
+                pivot = pivot.reset_index().rename(columns={'employee': 'שם המתמחה'})
+                
+                # Make dataframe scrollable and more readable using styled rendering
+                reversed_pivot = pivot[pivot.columns[::-1]]
+                styled_pivot = reversed_pivot.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'})
+                st.dataframe(styled_pivot, use_container_width=True, hide_index=True)
             else:
                 st.info("אין נתונים להצגה בחיתוך חודשי")
         else:
