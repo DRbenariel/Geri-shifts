@@ -963,7 +963,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                     # Display Special Day Header Info
                     sd_text = ""
                     if date_str in month_special_days:
-                        sd_text = f" &mdash; <span style='color:#b91c1c; font-weight:bold;'>🎉 {month_special_days[date_str]}</span>"
+                        sd_text = f" &mdash; <span style='color:#b91c1c; font-weight:bold;'>{month_special_days[date_str]}</span>"
                     
                     st.markdown(f"**{formatted_date} ({day_name})**{sd_text}", unsafe_allow_html=True)
                     
@@ -1005,7 +1005,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                         sd_match = st.session_state.special_days[st.session_state.special_days['date'] == date_str]
                         if not sd_match.empty:
                             sd_desc = sd_match.iloc[0]['description']
-                            html += f'<div style="font-size:10px; color:#b91c1c; font-weight:bold; text-align:center; padding-bottom:5px;">🎉 {sd_desc}</div>'
+                            html += f'<div style="font-size:10px; color:#b91c1c; font-weight:bold; text-align:center; padding-bottom:5px;">{sd_desc}</div>'
                             
                     for dept in ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום (1)", "שישי בוקר - שיקום (2)", "שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)"]:
                         rows = day_sched[day_sched['dept'] == dept]
@@ -2536,7 +2536,7 @@ else:
                             sd_match = st.session_state.special_days[st.session_state.special_days['date'] == str(d_obj)]
                             if not sd_match.empty:
                                 sd_desc = sd_match.iloc[0]['description']
-                                st.markdown(f"<div style='font-size:10px; color:#b91c1c; font-weight:bold; margin-top:-10px; margin-bottom:5px; line-height:1.1;'>🎉 {sd_desc}</div>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='font-size:10px; color:#b91c1c; font-weight:bold; margin-top:-10px; margin-bottom:5px; line-height:1.1;'>{sd_desc}</div>", unsafe_allow_html=True)
                         
                         if is_checked:
                             selected_from_grid.append(d_obj)
@@ -2588,7 +2588,7 @@ else:
                             sd_match_wish = st.session_state.special_days[st.session_state.special_days['date'] == str(date(2026, sel_month, day_num))]
                             if not sd_match_wish.empty:
                                 sd_desc_wish = sd_match_wish.iloc[0]['description']
-                                st.markdown(f"<div style='font-size:10px; color:#b91c1c; font-weight:bold; margin-top:-10px; margin-bottom:5px; line-height:1.1;'>🎉 {sd_desc_wish}</div>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='font-size:10px; color:#b91c1c; font-weight:bold; margin-top:-10px; margin-bottom:5px; line-height:1.1;'>{sd_desc_wish}</div>", unsafe_allow_html=True)
                         
                         if is_wish_checked:
                             selected_wishes.append(date(2026, sel_month, day_num))
