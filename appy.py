@@ -2209,10 +2209,17 @@ elif role == "מנהל/ת":
         with col_chart:
             st.markdown("##### 📈 ספירת תורנויות")
             sched = st.session_state.schedule
+            
+            # סינון ספירת המשמרות לחודש הנוכחי בלבד
             if not sched.empty:
+                sched_month = sched[sched['date'].astype(str).str.startswith(current_month_prefix)]
+            else:
+                sched_month = sched
+
+            if not sched_month.empty:
                 # ספירת משמרות לפי עובד וסוג
-                reg_counts = sched[~sched['dept'].astype(str).str.contains("שישי בוקר", na=False)]['employee'].value_counts()
-                morn_counts = sched[sched['dept'].astype(str).str.contains("שישי בוקר", na=False)]['employee'].value_counts()
+                reg_counts = sched_month[~sched_month['dept'].astype(str).str.contains("שישי בוקר", na=False)]['employee'].value_counts()
+                morn_counts = sched_month[sched_month['dept'].astype(str).str.contains("שישי בוקר", na=False)]['employee'].value_counts()
                 combined_df = pd.DataFrame({'תורנויות': reg_counts, 'שישי בוקר': morn_counts}).fillna(0)
                 st.bar_chart(combined_df, color=["#4f46e5", "#fb923c"]) # Indigo and Orange
             else:
@@ -2373,43 +2380,7 @@ elif role == "מנהל/ת":
                 use_container_width=True
             )
             
-            st.divider()
-            st.caption("פירוט לפי חודשים:")
-            
-            # פירוט לפי חודשים (Pivot Table)
-            # אנו רוצים לראות לכל עובד, בחלוקה לחודשים, כמה ד' וכמה ה' עשה
-            monthly_breakdown = intern_schedule[intern_schedule['weekday'].isin([2, 3])].copy()
-            if not monthly_breakdown.empty:
-                monthly_breakdown['day_type'] = monthly_breakdown['weekday'].map({2: "יום ד'", 3: "יום ה'"})
-                
-                pivot = pd.pivot_table(
-                    monthly_breakdown, 
-                    values='date', 
-                    index=['employee'], 
-                    columns=['month_year', 'day_type'], 
-                    aggfunc='count', 
-                    fill_value=0
-                )
-                
-                # Make sure all interns are displayed, even with 0 counts
-                if not pivot.empty:
-                    # all_interns was created earlier: all_interns = st.session_state.staff[st.session_state.staff['type'] == 'מתמחה']['name'].tolist()
-                    pivot = pivot.reindex(all_interns, fill_value=0)
-                    
-                    # Remove any interns who aren't listed in the current list of interns 
-                    # (in case the pivot table caught old data on names that changed/deleted)
-                    pivot = pivot[pivot.index.isin(all_interns)]
-                
-                # השטחת קטגוריות העמודות כדי למנוע טבלה "קפואה" בממשק
-                pivot.columns = [f"{col[1]} ({col[0]})" for col in pivot.columns.values]
-                pivot = pivot.reset_index().rename(columns={'employee': 'שם המתמחה'})
-                
-                # Make dataframe scrollable and more readable using styled rendering
-                reversed_pivot = pivot[pivot.columns[::-1]]
-                styled_pivot = reversed_pivot.style.set_properties(**{'text-align': 'right', 'direction': 'rtl'})
-                st.dataframe(styled_pivot, use_container_width=True, hide_index=True)
-            else:
-                st.info("אין נתונים להצגה בחיתוך חודשי")
+            # פירוט לפי חודשים הוסר לבקשת המשתמש.
         else:
             st.info("הלוח עדיין ריק.")
         

@@ -348,12 +348,25 @@ def render_navbar(role):
     if role == "מנהל/ת":
         items.append(sac.TabsItem('צוות', icon='people'))
         items.append(sac.TabsItem('דוחות וניהול', icon='bar-chart-line'))
+    # Determine default selected index based on role
+    # In RTL, index 0 is sometimes visually left or right depending on the container direction.
+    # Currently items are: 
+    # Admin items: 0: Settings, 1: Schedule, 2: Team, 3: Reports
+    # Intern items: 0: Settings, 1: Schedule, 2: Constraints
     
+    # Check if this is the first render after login
+    if 'nav_initialized' not in st.session_state:
+        if role == "מנהל/ת":
+            st.session_state.current_nav_index = 3 # Reports
+        else:
+            st.session_state.current_nav_index = 2 # Constraints
+        st.session_state.nav_initialized = True
+
     # Render horizontally using sac.tabs which handles RTL better Native-wise
     st.markdown('<div dir="rtl" style="text-align: right;">', unsafe_allow_html=True)
     result = sac.tabs(
         items=items,
-        index=0,
+        index=st.session_state.current_nav_index,
         format_func='title',
         size='lg',
         color='#4f46e5',
@@ -361,6 +374,16 @@ def render_navbar(role):
         align='center' # Align items to the center or start/end
     )
     st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Update current index based on user selection to maintain state across reruns
+    # Find the index of the selected item
+    selected_idx = 0
+    for i, item in enumerate(items):
+        if item.label == result:
+            selected_idx = i
+            break
+    st.session_state.current_nav_index = selected_idx
+    
     return result
 
 def render_mobile_bottom_nav(role):
