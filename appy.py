@@ -1994,7 +1994,12 @@ elif role == "מנהל/ת":
             # If new row (index not in old), set default password.
             
             final_df_list = []
-            old_df = st.session_state.staff
+            # משיכת נתונים עדכניים כדי למנוע דריסת נתונים
+            latest_staff = get_db_data("staff")
+            if not latest_staff.empty:
+                old_df = latest_staff
+            else:
+                old_df = st.session_state.staff
             
             for index, row in edited_df.iterrows():
                 # Check if this index existed in old_df
@@ -2108,7 +2113,11 @@ elif role == "מנהל/ת":
                     st.error(f"שגיאה: התאריכים הבאים מסומנים גם כחסימה וגם כבקשה: {', '.join(formatted_overlap)}")
                 else:
                     # הכל תקין - שמירה
-                    
+                    # משיכת נתונים עדכניים מהגיליון
+                    latest_requests = get_db_data("requests")
+                    if not latest_requests.empty:
+                        st.session_state.requests = latest_requests
+                        
                     # 1. מחיקת הישן לחודש זה
                     mask_keep = ~((st.session_state.requests['employee'] == selected_emp_mgr) & 
                                   (st.session_state.requests['date'].astype(str).str.startswith(current_month_prefix)))
@@ -2671,6 +2680,11 @@ else:
 
                 # Vertical Stack Design for Mobile Robustness
                 if st.button("✅ כן, עדכן", type="primary", use_container_width=True):
+                    # משיכת נתונים עדכניים מהגיליון כדי למנוע דריסת נתונים
+                    latest_requests = get_db_data("requests")
+                    if not latest_requests.empty:
+                        st.session_state.requests = latest_requests
+
                     # הסרת כל האילוצים והבקשות הקודמים של המשתמש לחודש זה
                     current_month_prefix = f"2026-{sel_month:02d}"
                     mask_keep = ~((st.session_state.requests['employee'] == user_name) & 
