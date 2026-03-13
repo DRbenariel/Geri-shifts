@@ -898,6 +898,10 @@ def run_smart_scheduling(year, month, only_weekends=False):
                         
                         # האם כבר משובץ בשישי במקום אחר (למשל תורנות רגילה במחלקת שיקום בצד השני?)
                         if any(s['employee'] == emp and s['date'] == fri_str for s in new_schedule): continue
+                        
+                        # HARD QUOTA CHECK: האם המכסה החודשית שלו חוסמת אותו?
+                        monthly_quota = safe_int(row['monthly_quota'], 0)
+                        if work_load.get(emp, 0) >= monthly_quota: continue
 
                         # חישוב ציון הוגנות: כמה שישי בוקר כבר יש לו?
                         fri_morning_count = len([s for s in new_schedule if s['employee'] == emp and 'שישי בוקר' in s['dept']])
@@ -908,6 +912,7 @@ def run_smart_scheduling(year, month, only_weekends=False):
                     candidates.sort(key=lambda x: x[1]) # מהקטן לגדול
                     best_candidate = candidates[0][0]
                     new_schedule.append({'date': fri_str, 'dept': target_dept, 'employee': best_candidate, 'is_manual': False, 'empty_reason': f'השלמה במקום {worker_name}'})
+                    work_load[best_candidate] += 1 # עדכון מכסה כדי למנוע חריגה בחיפושים הבאים באותה ריצה
                 else:
                     new_schedule.append({'date': fri_str, 'dept': target_dept, 'employee': '---', 'is_manual': False, 'empty_reason': 'לא נמצא מחליף לבוקר'})
 
