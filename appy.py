@@ -686,6 +686,16 @@ def run_smart_scheduling(year, month, only_weekends=False):
                     if any(s for s in new_schedule if s['date'] == d_str and s['employee'] == c_name): continue
                     req = st.session_state.requests[(st.session_state.requests['employee'] == c_name) & (st.session_state.requests['date'] == d_str) & (st.session_state.requests['status'] == 'אילוץ')]
                     if not req.empty: continue
+                    
+                    # HARD QUOTA CHECK: Do not bypass quotas even in fallback
+                    monthly_quota = safe_int(cand['monthly_quota'], 0)
+                    if work_load.get(c_name, 0) >= monthly_quota: continue
+                    
+                    # Weekend quota
+                    weekend_quota = safe_int(cand['weekend_quota'], 0)
+                    if is_functional_weekend(d, st.session_state.special_days) and len(weekends_worked.get(c_name, set())) >= weekend_quota and week_num not in weekends_worked.get(c_name, set()):
+                        continue
+                        
                     fallback_pool.append(c_name)
                 
                 if fallback_pool:
@@ -1108,7 +1118,10 @@ def draw_calendar_view(year, month, role, user_name=None):
             # Pre-fetch data
             staff_df = st.session_state.staff
             requests_df = st.session_state.requests
-            schedule_records = sche_df.to_dict('records')
+            
+            # CRITICAL FIX: Limit schedule analysis STRICTLY to the target month to prevent March swaps in February
+            t_month_prefix = t_date_str[:7]
+            schedule_records = [s for s in sche_df.to_dict('records') if str(s['date']).startswith(t_month_prefix)]
             
             debug_log.append(f"Target: {target_dept_swap} on {t_date_str}, Current: {current_emp}")
             
@@ -1237,13 +1250,9 @@ def draw_calendar_view(year, month, role, user_name=None):
             # To optimize, we focus on the displayed month or the relevant range
             
             if current_emp != "---":
-                # Get the current month prefix (e.g. 2026-03) from the target date
-                t_month_prefix = t_date_str[:7]
                 for s_rec in schedule_records:
                     # Skip same date (already covered by Exchange)
                     if s_rec['date'] == t_date_str: continue
-                    # Skip out of month dates to avoid cross-month suggestions forever
-                    if not s_rec['date'].startswith(t_month_prefix): continue
                     
                     # Skip empty slots or Admin
                     other_emp = s_rec['employee']
@@ -1315,10 +1324,8 @@ def draw_calendar_view(year, month, role, user_name=None):
             
             potential_destinations_for_a = []
             if current_emp != "---":
-                t_month_prefix = t_date_str[:7]
                 for s_rec in schedule_records:
                     if s_rec['date'] == t_date_str: continue # distinct dates
-                    if not s_rec['date'].startswith(t_month_prefix): continue
                     person_b = s_rec['employee']
                     if person_b == "---" or person_b == 'ADMIN' or person_b == current_emp: continue
                     
@@ -1469,7 +1476,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                             
                             st.session_state.schedule.loc[mask_a, 'employee'] = b
                             st.session_state.schedule.loc[mask_b, 'employee'] = current_emp
-                            st.session_state.schedule['is_manual'] = True # Mark as manual
+                            st.session_state.schedule.loc[mask_a | mask_b, 'is_manual'] = True # Mark as manual
                             
                             save_to_db("schedule", st.session_state.schedule)
                             
@@ -1814,7 +1821,11 @@ elif role == "מנהל/ת":
                     
                     # Logic: Delete if (Date matches prefix) AND (is_manual is NOT True)
                     mask_current_month = st.session_state.schedule['date'].astype(str).str.startswith(current_prefix)
-                    mask_auto = (st.session_state.schedule['is_manual'] != True)
+                    
+                    # Handle both boolean True and string "TRUE" from Google Sheets serialization
+                    is_manual_s = st.session_state.schedule['is_manual']
+                    mask_manual = (is_manual_s == True) | (is_manual_s.astype(str).str.upper() == 'TRUE')
+                    mask_auto = ~mask_manual
                     mask_to_delete = mask_current_month & mask_auto
                     
                     st.session_state.schedule = st.session_state.schedule[~mask_to_delete]
