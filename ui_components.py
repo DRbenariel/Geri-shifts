@@ -246,8 +246,8 @@ def setup_style():
     }
     
     /* --- Minimize Column Padding for Chip Grid --- */
-    /* Remove extra padding from columns containing chips */
-    div[data-testid="column"] {
+    /* Remove padding but specifically target chip areas */
+    div.calendar-grid-container div[data-testid="column"] {
         padding: 2px !important;
     }
     
@@ -331,6 +331,26 @@ def setup_style():
         text-align: right;
     }
 
+    /* --- Universal Mobile Fixes --- */
+    @media (max-width: 768px) {
+        /* Allow tables/data_editors to scroll horizontally, instead of squishing and splitting text */
+        [data-testid="stDataFrame"] table, [data-testid="stDataEditor"] table {
+            white-space: nowrap !important;
+        }
+        
+        /* Make metric cards stack gracefully and have minimum widths */
+        div[data-testid="stHorizontalBlock"]:has(.metric-card) {
+            display: flex !important;
+            flex-direction: column !important;
+        }
+        
+        /* If metric html renders directly into markdown, force horizontal scroller */
+        .metric-card {
+            min-width: 100% !important;
+            margin-bottom: 15px !important;
+        }
+    }
+    
     </style>
     """, unsafe_allow_html=True)
 

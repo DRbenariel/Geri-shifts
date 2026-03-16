@@ -239,27 +239,33 @@ else:
                 display: none !important;
             }
             
-            /* 2. Mini-Calendar Grid for Mobile */
-            div[data-testid="stHorizontalBlock"] {
+            /* 2. Mini-Calendar Grid for Mobile (Target specific classes instead of all columns) */
+            /* Wrap the calendar in a container and target that, or target the specific 7-column child count if possible */
+            /* To avoid breaking Manager UI (Team/Settings/Swap), we only apply this 7-column grid to the specific Calendar container */
+            div.calendar-grid-container > div[data-testid="stHorizontalBlock"],
+            div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7):last-child) {
                 display: grid !important;
                 grid-template-columns: repeat(7, 1fr) !important;
                 gap: 1px !important;
                 padding: 0 !important;
                 width: 100% !important;
             }
-            div[data-testid="column"] {
+            div.calendar-grid-container div[data-testid="column"],
+            div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7):last-child) > div[data-testid="column"] {
                 width: auto !important;
                 min-width: 0 !important;
                 flex: 1 1 0 !important;
                 padding: 1px !important;
             }
-            div[data-testid="column"] > div {
+            div.calendar-grid-container div[data-testid="column"] > div,
+            div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7):last-child) > div[data-testid="column"] > div {
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
             }
-            div[data-testid="column"] div[data-testid="stMarkdownContainer"] p {
+            div.calendar-grid-container div[data-testid="column"] div[data-testid="stMarkdownContainer"] p,
+            div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7):last-child) div[data-testid="column"] div[data-testid="stMarkdownContainer"] p {
                  font-size: 11px !important;
                  text-align: center !important;
                  margin: 0 !important;
@@ -1021,6 +1027,7 @@ def draw_calendar_view(year, month, role, user_name=None):
     else:
         # --- Standard Grid View ---
         days_names = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
+        st.markdown('<div class="calendar-grid-container">', unsafe_allow_html=True)
         header_cols = st.columns(7)
         for i, name in enumerate(days_names):
             header_cols[i].markdown(f"<div style='text-align: center; font-weight: bold;'>{name}</div>", unsafe_allow_html=True)
@@ -1076,6 +1083,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                             html += f'<div style="font-size:10px; color:{"#991b1b" if r["status"] == "אילוץ" else "#eab308"};">{icon} {r["employee"]}</div>'
                     
                     st.markdown(html + "</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Smart Swap Assistant (Manager Only) ---
     if role == "מנהל/ת":
@@ -1083,6 +1091,7 @@ def draw_calendar_view(year, month, role, user_name=None):
         st.subheader("🤖 עוזר החלפות חכם")
         st.caption("כלי זה מציע החלפות משמרת לפי חוקיות: פנויים, החלפות הדדיות, והחלפות משולשות.")
         
+        # On mobile, we avoid tight column wrapping by using stack layout logic (handled natively if grid block removed above)
         c1, c2 = st.columns(2)
         # Safe Date Input
         try:
@@ -2303,6 +2312,7 @@ elif role == "מנהל/ת":
                 # rtl support
                 reversed_df_status = df_status[df_status.columns[::-1]]
                 
+                # Make mobile text unbreak using a dedicated mobile-responsive CSS injection inside ui_components.py
                 try:
                      styled_df = reversed_df_status.style.applymap(style_status, subset=['סטטוס']).set_properties(**{'text-align': 'right', 'direction': 'rtl'})
                      st.dataframe(styled_df, use_container_width=True, hide_index=True)
