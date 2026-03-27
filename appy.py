@@ -1997,6 +1997,19 @@ elif role == "מנהל/ת":
         st.divider()
         st.caption("שינויים בטבלה נשמרים רק בלחיצה על כפתור השמירה")
         
+        # --- הגדרות לתזכורות ווטסאפ במסך זה ---
+        import urllib.parse
+        st.markdown("**הגדרות תזכורת ווטסאפ (יופיעו כקישורים בטבלה למטה):**")
+        col_wa1, col_wa2 = st.columns(2)
+        with col_wa1:
+            hebrew_months = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"]
+            default_month_idx = (date.today().replace(day=1) + timedelta(days=32)).month - 1
+            wa_target_month = st.selectbox("חודש רלוונטי:", hebrew_months, index=default_month_idx)
+        with col_wa2:
+            default_deadline = date.today().replace(day=20) if date.today().day < 20 else (date.today().replace(day=1) + timedelta(days=32)).replace(day=20)
+            wa_deadline = st.date_input("תאריך יעד למילוי בקשות:", value=default_deadline)
+        # -----------------------------------------
+
         # עטיפה בטופס (Form) כדי למנוע טעינה מחדש בכל שינוי תא
         with st.form(key="staff_batch_edit_form"):
             # Prepare view without password
@@ -2011,7 +2024,23 @@ elif role == "מנהל/ת":
             # Create a viewcopy for editing (indexed by original index or name if unique)
             # Use columns list excluding password
             cols_to_show = [c for c in st.session_state.staff.columns if c != 'password']
-            staff_view = st.session_state.staff[cols_to_show]
+            staff_view = st.session_state.staff[cols_to_show].copy()
+            
+            # --- הוספת עמודת תזכורת ווטסאפ ---
+            whatsapp_links = []
+            for idx, row in staff_view.iterrows():
+                emp_name = str(row['name'])
+                if emp_name.strip() and emp_name != '---':
+                    wa_msg = f"היי {emp_name},\nתזכורת למלא בקשות לחודש {wa_target_month} עד לתאריך {wa_deadline.strftime('%d/%m/%Y')}.\nלמערכת השיבוצים: https://geri-shifts-scheduler.streamlit.app"
+                    encoded_msg = urllib.parse.quote(wa_msg)
+                    link = f"https://wa.me/?text={encoded_msg}"
+                else:
+                    link = None
+                whatsapp_links.append(link)
+            
+            staff_view['whatsapp_link'] = whatsapp_links
+            cols_to_show.append('whatsapp_link')
+            # -----------------------------------------
             
             # Reorder for RTL or just keep consistent? 
             # Original code did: reversed_staff_view = st.session_state.staff[st.session_state.staff.columns[::-1]]
@@ -2029,6 +2058,12 @@ elif role == "מנהל/ת":
                         "רק במחלקת אם?",
                         help="סמן אם העובד יכול לבצע משמרות רק במחלקה שלו",
                         default=False,
+                    ),
+                    "whatsapp_link": st.column_config.LinkColumn(
+                        "ווטסאפ",
+                        help="לחץ לפתיחת ווטסאפ",
+                        display_text="📱",
+                        width="small"
                     )
                 }
             )
@@ -2043,6 +2078,10 @@ elif role == "מנהל/ת":
             
             # Because we reversed columns for display, we reverse back to normal for processing
             edited_df = staff_editor[staff_editor.columns[::-1]]
+            
+            # Remove the whatsapp column so it doesn't get saved to DB!
+            if 'whatsapp_link' in edited_df.columns:
+                edited_df = edited_df.drop(columns=['whatsapp_link'])
             
             # Ensure 'only_home_dept' is boolean
             edited_df['only_home_dept'] = edited_df['only_home_dept'].fillna(False).astype(bool)
