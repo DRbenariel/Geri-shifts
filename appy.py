@@ -1969,6 +1969,7 @@ elif role == "מנהל/ת":
                 key="admin_active_month_setter_sched"
             )
             if new_active_month != active_month_int:
+                st.session_state.settings['value'] = st.session_state.settings['value'].astype(object)
                 st.session_state.settings.loc[st.session_state.settings['key'] == 'active_month', 'value'] = str(new_active_month)
                 save_to_db("settings", st.session_state.settings)
                 st.success(f"החודש הפעיל עודכן ל-{new_active_month}")
