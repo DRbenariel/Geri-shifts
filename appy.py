@@ -360,7 +360,7 @@ def check_assignment_validity(schedule_data, person_name, check_date, target_dep
     # --- 3. Quota Check ---
     # Default quota to 6 if missing
     try:
-        max_quota = int(person.get('quota', 6))
+        max_quota = int(person.get('monthly_quota', 6))
     except:
         max_quota = 6
 
@@ -432,6 +432,207 @@ def toggle_state(key):
         st.session_state[key] = not st.session_state[key]
         # st.toast(f"עודכן: {st.session_state[key]}") # Optional Debug
 
+def render_modern_calendar(year, month, default_constraint_days, default_wish_days,
+                           special_days_df=None, key_prefix='cal', show_validation=True):
+    """
+    Renders a unified modern calendar for constraint/wish selection using colored buttons.
+    Returns (constraint_day_nums, wish_day_nums) as lists of int day numbers.
+    """
+    const_key = f"{key_prefix}_c_{month}"
+    wish_key  = f"{key_prefix}_w_{month}"
+    mode_key  = f"{key_prefix}_m_{month}"
+    init_key  = f"{key_prefix}_init_{month}"
+    hash_key  = f"{key_prefix}_hash_{month}"
+
+    # Fingerprint the DB-derived defaults. If they differ from what was loaded last time
+    # (e.g. employee switched, or DB updated after save), reinitialize the calendar.
+    # If defaults haven't changed, session state is preserved so unsaved edits survive reruns.
+    defaults_hash = (
+        tuple(sorted(int(d) for d in default_constraint_days)),
+        tuple(sorted(int(d) for d in default_wish_days)),
+    )
+    if init_key not in st.session_state or st.session_state.get(hash_key) != defaults_hash:
+        st.session_state[const_key] = sorted(list(set(int(d) for d in default_constraint_days)))
+        st.session_state[wish_key]  = sorted(list(set(int(d) for d in default_wish_days)))
+        st.session_state[mode_key]  = 'c'
+        st.session_state[init_key]  = True
+        st.session_state[hash_key]  = defaults_hash
+
+    sel_c    = st.session_state[const_key]
+    sel_w    = st.session_state[wish_key]
+    cur_mode = st.session_state[mode_key]
+    pfx      = key_prefix
+
+    # ── Mode toggle ────────────────────────────────────────────────
+    # Inject CSS to color each mode button distinctly; active = solid, inactive = tinted
+    if cur_mode == 'c':
+        block_style = "background:#ef4444 !important;color:white !important;border:2px solid #dc2626 !important;box-shadow:0 0 0 3px rgba(239,68,68,0.25) !important;transform:none !important;"
+        wish_style  = "background:#dcfce7 !important;color:#166534 !important;border:2px solid #86efac !important;box-shadow:none !important;transform:none !important;"
+    else:
+        block_style = "background:#fee2e2 !important;color:#991b1b !important;border:2px solid #fca5a5 !important;box-shadow:none !important;transform:none !important;"
+        wish_style  = "background:#22c55e !important;color:white !important;border:2px solid #16a34a !important;box-shadow:0 0 0 3px rgba(34,197,94,0.25) !important;transform:none !important;"
+    st.markdown(f"""<style>
+    div[class*="st-key-{pfx}_mbtc_{month}"] button {{ {block_style} }}
+    div[class*="st-key-{pfx}_mbtc_{month}"] button:hover {{ opacity:0.9 !important; }}
+    div[class*="st-key-{pfx}_mbtw_{month}"] button {{ {wish_style} }}
+    div[class*="st-key-{pfx}_mbtw_{month}"] button:hover {{ opacity:0.9 !important; }}
+    </style>""", unsafe_allow_html=True)
+
+    mc1, mc2, mc3 = st.columns([1.3, 1.3, 2.4])
+    with mc1:
+        if st.button("🔒 חסימה", key=f"{pfx}_mbtc_{month}", use_container_width=True):
+            st.session_state[mode_key] = 'c'
+            st.rerun()
+    with mc2:
+        if st.button("⭐ בקשה", key=f"{pfx}_mbtw_{month}", use_container_width=True):
+            st.session_state[mode_key] = 'w'
+            st.rerun()
+    with mc3:
+        if cur_mode == 'c':
+            hint_html = "<span style='background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:6px;padding:4px 10px;font-weight:600;font-size:0.82rem;'>🔒 מצב חסימה פעיל</span>"
+        else:
+            hint_html = "<span style='background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:6px;padding:4px 10px;font-weight:600;font-size:0.82rem;'>⭐ מצב בקשה פעיל</span>"
+        st.markdown(
+            f"<div style='padding-top:8px;text-align:right;'>{hint_html}</div>",
+            unsafe_allow_html=True
+        )
+
+    # ── Dynamic CSS: color each day cell based on its state ────────
+    css_parts = [f"""
+    div[class*="st-key-{pfx}_d{month}_"] button {{
+        min-height: 42px !important; font-size: 0.95rem !important;
+        font-weight: 600 !important; border-radius: 10px !important;
+        padding: 4px 2px !important;
+        background: linear-gradient(135deg, #6366f1, #4f46e5) !important;
+        color: white !important; border: none !important;
+        box-shadow: 0 1px 3px rgba(79,70,229,0.3) !important; transform: none !important; letter-spacing: 0 !important;
+    }}
+    div[class*="st-key-{pfx}_d{month}_"] button:hover {{
+        background: linear-gradient(135deg, #4f46e5, #4338ca) !important;
+        transform: none !important; box-shadow: 0 2px 6px rgba(79,70,229,0.4) !important;
+    }}"""]
+    for d in sel_c:
+        css_parts.append(f"""
+    div[class*="st-key-{pfx}_d{month}_{d}x"] button {{
+        background: linear-gradient(135deg,#fca5a5,#ef4444) !important;
+        color: white !important; border-color: #dc2626 !important;
+    }}
+    div[class*="st-key-{pfx}_d{month}_{d}x"] button:hover {{
+        background: linear-gradient(135deg,#ef4444,#dc2626) !important;
+    }}""")
+    for d in sel_w:
+        css_parts.append(f"""
+    div[class*="st-key-{pfx}_d{month}_{d}x"] button {{
+        background: linear-gradient(135deg,#86efac,#22c55e) !important;
+        color: white !important; border-color: #16a34a !important;
+    }}
+    div[class*="st-key-{pfx}_d{month}_{d}x"] button:hover {{
+        background: linear-gradient(135deg,#22c55e,#16a34a) !important;
+    }}""")
+    st.markdown(f"<style>{''.join(css_parts)}</style>", unsafe_allow_html=True)
+
+    # ── Special days lookup ────────────────────────────────────────
+    special_map = {}
+    if special_days_df is not None and not special_days_df.empty:
+        for _, row in special_days_df.iterrows():
+            try:
+                d_obj = datetime.strptime(row['date'], '%Y-%m-%d').date()
+                if d_obj.month == month and d_obj.year == year:
+                    special_map[d_obj.day] = row['description']
+            except:
+                pass
+
+    # ── Day headers ────────────────────────────────────────────────
+    day_headers = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
+    hcols = st.columns(7)
+    for idx, h in enumerate(day_headers):
+        is_wk_col = idx in [5, 6]
+        hcols[idx].markdown(
+            f"<div style='text-align:center;font-weight:700;"
+            f"color:{'#7c3aed' if is_wk_col else '#64748b'};"
+            f"font-size:0.8rem;padding:4px 0 2px;'>{h}</div>",
+            unsafe_allow_html=True
+        )
+
+    # ── Calendar grid ──────────────────────────────────────────────
+    cal_weeks = calendar.monthcalendar(year, month)
+    for week in cal_weeks:
+        wcols = st.columns(7)
+        for col_idx, day_num in enumerate(week):
+            with wcols[col_idx]:
+                if day_num == 0:
+                    st.write("")
+                else:
+                    is_c       = day_num in sel_c
+                    is_w       = day_num in sel_w
+                    is_special = day_num in special_map
+                    icon  = "🔒" if is_c else ("⭐" if is_w else ("📌" if is_special else ""))
+                    label = f"{icon}{day_num}" if icon else str(day_num)
+
+                    if st.button(label, key=f"{pfx}_d{month}_{day_num}x", use_container_width=True):
+                        if cur_mode == 'c':
+                            if day_num in st.session_state[const_key]:
+                                st.session_state[const_key].remove(day_num)
+                            else:
+                                if day_num in st.session_state[wish_key]:
+                                    st.session_state[wish_key].remove(day_num)
+                                st.session_state[const_key].append(day_num)
+                        else:
+                            if day_num in st.session_state[wish_key]:
+                                st.session_state[wish_key].remove(day_num)
+                            else:
+                                if day_num in st.session_state[const_key]:
+                                    st.session_state[const_key].remove(day_num)
+                                st.session_state[wish_key].append(day_num)
+                        st.rerun()
+
+                    if is_special:
+                        desc = special_map[day_num]
+                        st.markdown(
+                            f"<div title='{desc}' style='font-size:9px;color:#b91c1c;"
+                            f"text-align:center;margin-top:-6px;line-height:1.2;"
+                            f"white-space:normal;word-break:break-word;overflow:visible;'>"
+                            f"{desc}</div>",
+                            unsafe_allow_html=True
+                        )
+
+    # ── Real-time status counter ───────────────────────────────────
+    days_in_month = calendar.monthrange(year, month)[1]
+    if show_validation:
+        all_dates_m = [date(year, month, d) for d in range(1, days_in_month + 1)]
+        total_thu = sum(1 for d in all_dates_m if d.weekday() == 3)
+        total_wk  = sum(1 for d in all_dates_m if d.weekday() in [4, 5])
+        blocked   = [date(year, month, d) for d in sel_c]
+        av_thu = total_thu - sum(1 for d in blocked if d.weekday() == 3)
+        av_wk  = total_wk  - sum(1 for d in blocked if d.weekday() in [4, 5])
+        thu_ok = av_thu >= 2
+        wk_ok  = av_wk  >= 4
+
+        def _chip(label, ok=None):
+            if ok is None:
+                bg, bc, tc = "#f1f5f9", "#e2e8f0", "#334155"
+            elif ok:
+                bg, bc, tc = "#dcfce7", "#22c55e", "#166534"
+            else:
+                bg, bc, tc = "#fee2e2", "#ef4444", "#991b1b"
+            icon = (" ✅" if ok else " ⚠️") if ok is not None else ""
+            return (f"<span style='background:{bg};border:1px solid {bc};border-radius:8px;"
+                    f"padding:5px 12px;font-weight:600;color:{tc};"
+                    f"font-size:0.85rem;white-space:nowrap;'>{label}{icon}</span>")
+
+        st.markdown(
+            f"<div style='display:flex;gap:8px;justify-content:center;margin-top:14px;"
+            f"flex-wrap:wrap;direction:rtl;'>"
+            f"{_chip(f'🔒 חסימות: {len(sel_c)}')}"
+            f"{_chip(f'⭐ בקשות: {len(sel_w)}')}"
+            f"{_chip(f'ימי ה׳ פנויים: {av_thu}/{total_thu}', thu_ok)}"
+            f"{_chip(f'סופ״ש פנויים: {av_wk}/{total_wk}', wk_ok)}"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+
+    return list(st.session_state[const_key]), list(st.session_state[wish_key])
+
 def run_smart_scheduling(year, month, only_weekends=False):
     num_days = calendar.monthrange(year, month)[1]
     staff_df = st.session_state.staff.copy()
@@ -461,28 +662,32 @@ def run_smart_scheduling(year, month, only_weekends=False):
     last_assignment = {row['name']: -999 for _, row in staff_df.iterrows()}
     wed_counts = {row['name']: 0 for _, row in staff_df.iterrows()}
     thu_counts = {row['name']: 0 for _, row in staff_df.iterrows()}
-    
+
     # איסוף נתונים לדיווח הוגנות
     initial_wed_stats = {}
     initial_thu_stats = {}
-    
+
     # עדכון מונים: הפרדה בין מונים גלובליים (הוגנות) למונים חודשיים (מכסות)
     for s in new_schedule:
         if s['employee'] not in work_load or s['employee'] == '---': continue
-        
+
         dt = datetime.strptime(s['date'], '%Y-%m-%d')
-        
+
         # 1. מונים גלובליים (היסטוריה מלאה) - לאיזון ימי כוח
         if dt.weekday() == 2: wed_counts[s['employee']] += 1
         if dt.weekday() == 3: thu_counts[s['employee']] += 1
-        
-        # 2. מונים חודשיים בלבד - לבדיקת מכסות
+
+        # 2. last_assignment מעודכן מכל ההיסטוריה (כולל חודשים קודמים)
+        # כדי שמי שעבד ב-31 למרץ לא יקבל בונוס ריווח מקסימלי ב-1 לאפריל
+        if dt.toordinal() > last_assignment[s['employee']]:
+            last_assignment[s['employee']] = dt.toordinal()
+
+        # 3. מונים חודשיים בלבד - לבדיקת מכסות
         if str(s['date']).startswith(current_month_prefix):
             work_load[s['employee']] += 1
-            last_assignment[s['employee']] = dt.toordinal()
-            
+
             # תיקון: החרגת שישי בוקר ממכסת הסופ"ש + שילוב "סופ"שים פונקציונליים"
-            if is_functional_weekend(dt, st.session_state.special_days) and "שישי בוקר" not in s.get('dept', ''): 
+            if is_functional_weekend(dt, st.session_state.special_days) and "שישי בוקר" not in s.get('dept', ''):
                 weekends_worked[s['employee']].add(dt.isocalendar()[1])
 
     # חישוב סטטיסטיקה לפני השיבוץ הנוכחי
@@ -555,7 +760,15 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 if work_load[name] >= monthly_quota:
                     failure_reasons.append(f"{name}: מכסה מלאה ({monthly_quota})")
                     continue
-                
+
+                # שמירת מכסה רכה (Soft Quota Reservation)
+                # אם אנחנו בחצי הראשון של החודש (לפני יום 15) ועובד כבר ניצל 50%+ מהמכסה שלו —
+                # נדחה אותו מהמאגר הראשי כדי לשמור לו משמרות לחצי השני.
+                # ה-Fallback עדיין יוכל לשלוף אותו כמוצא אחרון אם אין אף אחד אחר.
+                if d.day < 15 and monthly_quota > 0 and work_load[name] >= monthly_quota * 0.5:
+                    failure_reasons.append(f"{name}: שמירת מכסה (חצי ראשון)")
+                    continue
+
                 # בדיקת סופ"ש (כולל סופ"ש פונקציונלי)
                 weekend_quota = safe_int(person['weekend_quota'], 0)
                 if is_functional_weekend(d, st.session_state.special_days) and len(weekends_worked[name]) >= weekend_quota and week_num not in weekends_worked[name]:
@@ -689,6 +902,7 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 for _, cand in staff_df.iterrows():
                     c_name = cand['name']
                     if c_name == '---' or str(c_name).upper() == 'ADMIN': continue
+                    if cand['type'] == 'תורן חוץ' and dept == 'פנימית גריאטרית': continue
                     if any(s for s in new_schedule if s['date'] == d_str and s['employee'] == c_name): continue
                     req = st.session_state.requests[(st.session_state.requests['employee'] == c_name) & (st.session_state.requests['date'] == d_str) & (st.session_state.requests['status'] == 'אילוץ')]
                     if not req.empty: continue
@@ -882,12 +1096,7 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 new_schedule.append({'date': fri_str, 'dept': target_dept, 'employee': worker_name, 'is_manual': False, 'empty_reason': f'נגזר אוטומטית מ{source_day}'})
             else:
                 # אם זה תורן חוץ - מחפשים מחליף (מתמחה משיקום)
-                # קריטריונים: מחלקת שיקום, פנוי בשישי, לא עבד ברביעי/חמישי האחרונים
-                
-                # בדיקת עבודה ברביעי/חמישי
-                wed_date = fri_date - timedelta(days=2)
-                thu_date = fri_date - timedelta(days=1)
-                
+                # קריטריונים: מחלקת שיקום, פנוי בשישי, עומד בבדיקת מנוחה ±2 ימים
                 candidates = []
                 for _, row in staff_df.iterrows():
                     if row['type'] == 'מתמחה' and row['dept'] == 'שיקום' and row['name'] != worker_name:
@@ -897,11 +1106,13 @@ def run_smart_scheduling(year, month, only_weekends=False):
                         is_blocked = not st.session_state.requests[(st.session_state.requests['employee'] == emp) & (st.session_state.requests['date'] == fri_str) & (st.session_state.requests['status'] == "אילוץ")].empty
                         if is_blocked: continue
                         
-                        # האם עובד ברביעי או חמישי?
-                        worked_wed = any(s['employee'] == emp and s['date'] == wed_date.strftime('%Y-%m-%d') for s in new_schedule)
-                        worked_thu = any(s['employee'] == emp and s['date'] == thu_date.strftime('%Y-%m-%d') for s in new_schedule)
-                        if worked_wed or worked_thu: continue
-                        
+                        # בדיקת מנוחה: ±2 ימים מסביב ליום שישי
+                        has_rest_conflict = any(
+                            s['employee'] == emp and s['date'] == str(fri_date + timedelta(days=offset))
+                            for s in new_schedule for offset in [-2, -1, 1, 2]
+                        )
+                        if has_rest_conflict: continue
+
                         # האם כבר משובץ בשישי במקום אחר (למשל תורנות רגילה במחלקת שיקום בצד השני?)
                         if any(s['employee'] == emp and s['date'] == fri_str for s in new_schedule): continue
                         
@@ -2158,50 +2369,27 @@ elif role == "מנהל/ת":
             existing_constraints = emp_reqs[emp_reqs['status'] == 'אילוץ']['date'].tolist()
             existing_wishes = emp_reqs[emp_reqs['status'] == 'בקשה']['date'].tolist()
             
-            # --- ממשק ויזואלי (דמוי עובד) ---
-            cal = calendar.monthcalendar(2026, sel_month)
-            
-            # פונקציה לבניית גריד
-            def render_manager_grid(title, key_prefix, selected_dates, color_style=""):
-                st.markdown(f"##### {title}")
-                st.markdown(f'<div class="calendar-grid-container" style="{color_style}">', unsafe_allow_html=True)
-                
-                # כותרות ימים
-                cols_head = st.columns(7)
-                headers = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
-                for i, h in enumerate(headers):
-                    cols_head[i].markdown(f"<div style='text-align:center; font-weight:bold; font-size:0.8em;'>{h}</div>", unsafe_allow_html=True)
-                
-                selected_result = []
-                
-                for week in cal:
-                    cols = st.columns(7)
-                    for i, day_num in enumerate(week):
-                        with cols[i]:
-                            if day_num == 0:
-                                st.write("")
-                            else:
-                                d_str = f"2026-{sel_month:02d}-{day_num:02d}"
-                                unique_key = f"{key_prefix}_{selected_emp_mgr}_{sel_month}_{day_num}"
-                                
-                                # בדיקה אם מסומן
-                                is_checked = d_str in selected_dates
-                                
-                                # Checkbox
-                                new_val = st.checkbox(f"{day_num}", value=is_checked, key=unique_key)
-                                
-                                if new_val:
-                                    selected_result.append(d_str)
-                st.markdown('</div>', unsafe_allow_html=True)
-                return selected_result
+            # --- ממשק ויזואלי (מודרני) ---
+            # Use employee index for key_prefix — Hebrew names break CSS class selectors
+            emp_names_list = st.session_state.staff['name'].tolist()
+            emp_idx        = emp_names_list.index(selected_emp_mgr) if selected_emp_mgr in emp_names_list else 0
+            mgr_key_prefix = f"mgr_e{emp_idx}"
+            mgr_const_days = [int(d.split('-')[2]) for d in existing_constraints]
+            mgr_wish_days  = [int(d.split('-')[2]) for d in existing_wishes]
+            mgr_cal_sd     = st.session_state.get('special_days')
+            if isinstance(mgr_cal_sd, pd.DataFrame) and mgr_cal_sd.empty:
+                mgr_cal_sd = None
 
-            # 1. גריד אילוצים
             st.divider()
-            new_constraints = render_manager_grid("🔒 חסימות (לא יכול לעבוד)", "mgr_const", existing_constraints)
-            
-            # 2. גריד בקשות
-            st.divider()
-            new_wishes = render_manager_grid("⭐ בקשות (מעדיף לעבוד)", "mgr_wish", existing_wishes)
+            new_const_day_nums, new_wish_day_nums = render_modern_calendar(
+                2026, sel_month,
+                mgr_const_days, mgr_wish_days,
+                special_days_df=mgr_cal_sd,
+                key_prefix=mgr_key_prefix,
+                show_validation=False
+            )
+            new_constraints = [f"2026-{sel_month:02d}-{d:02d}" for d in new_const_day_nums]
+            new_wishes       = [f"2026-{sel_month:02d}-{d:02d}" for d in new_wish_day_nums]
             
             st.divider()
             
@@ -2235,8 +2423,7 @@ elif role == "מנהל/ת":
                     
                     save_to_db("requests", st.session_state.requests)
                     st.success(f"האילוצים של {selected_emp_mgr} עודכנו בהצלחה!")
-                    # ניקוי cache של הממשק (לא חובה כי ה-rerun ירענן את הערכים ב-checkbox כי ה-key תלוי בערך? 
-                    # לא, ה-value=is_checked יתעדכן בגלל ה-rerun והטעינה מחדש של existing_constraints)
+                    st.session_state.pop(f"{mgr_key_prefix}_init_{sel_month}", None)
                     st.rerun()
     elif selected_nav == 'דוחות וניהול':
         # st.header("דוח סטטוס ומסכמים") - Removed by user request
@@ -2544,27 +2731,8 @@ else:
         default_day_nums = get_day_nums(st.session_state.requests, "אילוץ")
         default_wish_nums = get_day_nums(st.session_state.requests, "בקשה")
         
-        # Unique key for this month's load status
-        month_load_key = f"chips_loaded_{sel_month}"
-        
-        # Initialize session state for all potential chips
-        # We FORCE initialization if this month hasn't been loaded yet in this session
-        should_force_init = month_load_key not in st.session_state
-        
-        for week in cal:
-            for day_num in week:
-                if day_num != 0:
-                    const_key = f"const_{sel_month}_{day_num}"
-                    wish_key = f"wish_{sel_month}_{day_num}"
-                    
-                    if should_force_init or const_key not in st.session_state:
-                         st.session_state[const_key] = [0] if day_num in default_day_nums else []
-                    
-                    if should_force_init or wish_key not in st.session_state:
-                         st.session_state[wish_key] = [0] if day_num in default_wish_nums else []
-        
-        # Mark as loaded so we don't overwrite user interactions on next rerun
-        st.session_state[month_load_key] = True
+        default_dates  = [date(2026, sel_month, d) for d in default_day_nums]
+        default_wishes = [date(2026, sel_month, d) for d in default_wish_nums]
 
         # --- הצגת אילוצים ובקשות קיימים ---
         existing_constraints = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "אילוץ")].copy()
@@ -2591,119 +2759,18 @@ else:
         # ----------------------------
 
         st.divider()
-        st.write("### שלב 1: סימון ימים בהם **אינך** יכול/ה לעבוד")
-        st.caption("חובה להשאיר לפחות 2 ימי חמישי ו-4 ימי סופ\"ש פנויים.")
-
-        # חישוב תאריכים שכבר נבחרו (לצורך אתחול - חסימות בלבד)
-        default_dates = []
-        if not existing_constraints.empty:
-            for d_str in existing_constraints['date']:
-                try:
-                    d_obj = datetime.strptime(d_str, '%Y-%m-%d').date()
-                    if d_obj.month == sel_month and d_obj.year == 2026:
-                        default_dates.append(d_obj)
-                except: pass
-        
-        # --- Calendar Grid with Chips (Optimized) ---
-        cal = calendar.monthcalendar(2026, sel_month)
-        days_in_month = calendar.monthrange(2026, sel_month)[1]
-        
-        # Day headers
-        days_cols = st.columns(7)
-        headers = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
-        for i, h in enumerate(headers):
-            days_cols[i].markdown(f"<div style='text-align:center; font-weight:bold; margin-bottom:8px;'>{h}</div>", unsafe_allow_html=True)
-        
-        # Prepare default selected day numbers
-        default_day_nums = [d.day for d in default_dates]
-        
-        selected_from_grid = []
-        
-        # Render calendar grid with Native Buttons (Robust Toggle)
-        # Using a container class for styling
-        st.markdown('<div class="calendar-grid-container">', unsafe_allow_html=True)
-        
-        for week in cal:
-            wk_cols = st.columns(7)
-            for i, day_num in enumerate(week):
-                with wk_cols[i]:
-                    if day_num == 0:
-                        st.write("")
-                    else:
-                        d_obj = date(2026, sel_month, day_num)
-                        # Native Checkbox - Constraints (Fast & Stable)
-                        chk_key = f"const_chk_{sel_month}_{day_num}"
-                        
-                        # Initialize default value based on loaded data (only if key not in session state)
-                        if chk_key not in st.session_state:
-                            st.session_state[chk_key] = day_num in default_day_nums
-                        
-                        # Render Checkbox
-                        is_checked = st.checkbox(f"{day_num}", key=chk_key)
-                        
-                        # Add special day visual note for intern if exists
-                        if 'special_days' in st.session_state and not st.session_state.special_days.empty:
-                            sd_match = st.session_state.special_days[st.session_state.special_days['date'] == str(d_obj)]
-                            if not sd_match.empty:
-                                sd_desc = sd_match.iloc[0]['description']
-                                st.markdown(f"<div style='font-size:10px; color:#b91c1c; font-weight:bold; margin-top:-10px; margin-bottom:5px; line-height:1.1;'>{sd_desc}</div>", unsafe_allow_html=True)
-                        
-                        if is_checked:
-                            selected_from_grid.append(d_obj)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        
-        st.divider()
-        st.write("### שלב 2: בקשות למשמרות - אופציונלי")
-        st.caption("ניתן לבחור עד **2 תאריכים** בחודש בהם היית רוצה לעבוד. המערכת תשתדל להתחשב, אך לא מבטיחה שיבוץ.")
-        
-        # בחירת בקשות חיוביות
-        existing_wishes = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "בקשה")]
-        default_wishes = []
-        if not existing_wishes.empty:
-            for d_str in existing_wishes['date']:
-                try:
-                    d_obj = datetime.strptime(d_str, '%Y-%m-%d').date()
-                    if d_obj.month == sel_month and d_obj.year == 2026:
-                        default_wishes.append(d_obj)
-                except: pass
-
-        # --- Calendar Grid with Chips for Wishes (Optimized) ---
-        # Prepare default selected day numbers
-        default_wish_nums = [d.day for d in default_wishes]
-        
-        selected_wishes = []
-        
-        # Prepare Wishes Calendar (Native Buttons)
-        st.markdown('<div class="calendar-grid-container">', unsafe_allow_html=True)
-        
-        for week in cal:
-            w_wk_cols = st.columns(7)
-            for i, day_num in enumerate(week):
-                with w_wk_cols[i]:
-                    if day_num == 0:
-                        st.write("")
-                    else:
-                        # Native Checkbox - Wishes
-                        wish_chk_key = f"wish_chk_{sel_month}_{day_num}"
-                        
-                        if wish_chk_key not in st.session_state:
-                            st.session_state[wish_chk_key] = day_num in default_wish_nums
-                        
-                        is_wish_checked = st.checkbox(f"{day_num}", key=wish_chk_key)
-                        
-                        # Add special day visual note for intern if exists
-                        if 'special_days' in st.session_state and not st.session_state.special_days.empty:
-                            sd_match_wish = st.session_state.special_days[st.session_state.special_days['date'] == str(date(2026, sel_month, day_num))]
-                            if not sd_match_wish.empty:
-                                sd_desc_wish = sd_match_wish.iloc[0]['description']
-                                st.markdown(f"<div style='font-size:10px; color:#b91c1c; font-weight:bold; margin-top:-10px; margin-bottom:5px; line-height:1.1;'>{sd_desc_wish}</div>", unsafe_allow_html=True)
-                        
-                        if is_wish_checked:
-                            selected_wishes.append(date(2026, sel_month, day_num))
-
-        st.markdown('</div>', unsafe_allow_html=True)
+        cal_sd = st.session_state.get('special_days')
+        if isinstance(cal_sd, pd.DataFrame) and cal_sd.empty:
+            cal_sd = None
+        constraint_days, wish_days = render_modern_calendar(
+            2026, sel_month,
+            default_day_nums, default_wish_nums,
+            special_days_df=cal_sd,
+            key_prefix='user_cal',
+            show_validation=(st.session_state.user_role == 'מתמחה')
+        )
+        selected_from_grid = [date(2026, sel_month, d) for d in constraint_days]
+        selected_wishes    = [date(2026, sel_month, d) for d in wish_days]
         
         # -----------------------------------
         st.divider()
@@ -2803,6 +2870,7 @@ else:
                     save_to_db("requests", st.session_state.requests)
                     st.success("האילוצים עודכנו בהצלחה!")
                     st.session_state['confirm_request_save'] = False
+                    st.session_state.pop(f"user_cal_init_{sel_month}", None)
                     st.rerun()
                 
                 if st.button("❌ בטל", use_container_width=True):
