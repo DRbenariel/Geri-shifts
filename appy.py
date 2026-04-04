@@ -514,11 +514,11 @@ def render_modern_calendar(year, month, default_constraint_days, default_wish_da
     for d in sel_c:
         css_parts.append(f"""
     div[class*="st-key-{pfx}_d{month}_{d}x"] button {{
-        background: linear-gradient(135deg,#fca5a5,#ef4444) !important;
-        color: white !important; border-color: #dc2626 !important;
+        background: linear-gradient(135deg,#fecaca,#f87171) !important;
+        color: white !important; border-color: #f87171 !important;
     }}
     div[class*="st-key-{pfx}_d{month}_{d}x"] button:hover {{
-        background: linear-gradient(135deg,#ef4444,#dc2626) !important;
+        background: linear-gradient(135deg,#f87171,#ef4444) !important;
     }}""")
     for d in sel_w:
         css_parts.append(f"""
