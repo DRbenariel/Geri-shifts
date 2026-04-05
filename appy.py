@@ -2202,12 +2202,29 @@ elif role == "מנהל/ת":
             if 'only_home_dept' not in st.session_state.staff.columns:
                  st.session_state.staff['only_home_dept'] = False
                  
-            # We want to edit: name, type, dept, monthly_quota, weekend_quota, only_home_dept
-            # We keep 'password' for saving but hide it from view
+            # Fix True/False serialization from Google Sheets
+            def _is_true(v):
+                if pd.isna(v): return False
+                if isinstance(v, bool): return v
+                return str(v).strip().lower() == 'true'
+                
+            st.session_state.staff['only_home_dept'] = st.session_state.staff['only_home_dept'].apply(_is_true)
             
-            # Create a viewcopy for editing (indexed by original index or name if unique)
-            # Use columns list excluding password
-            cols_to_show = [c for c in st.session_state.staff.columns if c != 'password']
+            # Multi-select for Home Dept only
+            valid_names = [n for n in st.session_state.staff['name'].tolist() if str(n).strip() and n != '---']
+            default_homes = st.session_state.staff[st.session_state.staff['only_home_dept']]['name'].dropna().tolist()
+            default_homes = [n for n in default_homes if n in valid_names]
+            
+            selected_home_depts = st.multiselect(
+                "עובדים המוגבלים למחלקת האם בלבד (ללא חציות למחלקות אחרות):",
+                options=valid_names,
+                default=default_homes
+            )
+            st.divider()
+
+            # We want to edit: name, type, dept, monthly_quota, weekend_quota
+            # We remove 'password' and 'only_home_dept' from the editable table
+            cols_to_show = [c for c in st.session_state.staff.columns if c not in ['password', 'only_home_dept']]
             staff_view = st.session_state.staff[cols_to_show].copy()
             
             # --- הוספת עמודת תזכורת ווטסאפ ---
@@ -2238,11 +2255,6 @@ elif role == "מנהל/ת":
                 use_container_width=True, 
                 num_rows="dynamic",
                 column_config={
-                    "only_home_dept": st.column_config.CheckboxColumn(
-                        "רק במחלקת אם?",
-                        help="סמן אם העובד יכול לבצע משמרות רק במחלקה שלו",
-                        default=False,
-                    ),
                     "whatsapp_link": st.column_config.LinkColumn(
                         "ווטסאפ",
                         help="לחץ לפתיחת ווטסאפ",
@@ -2267,8 +2279,8 @@ elif role == "מנהל/ת":
             if 'whatsapp_link' in edited_df.columns:
                 edited_df = edited_df.drop(columns=['whatsapp_link'])
             
-            # Ensure 'only_home_dept' is boolean
-            edited_df['only_home_dept'] = edited_df['only_home_dept'].fillna(False).astype(bool)
+            # Reattach only_home_dept dynamically from the multiselect
+            edited_df['only_home_dept'] = edited_df['name'].isin(selected_home_depts)
 
             # We need to preserve passwords for existing users.
             # Simple approach: Join with original on 'name' IF name is unique and didn't change.
