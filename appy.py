@@ -201,7 +201,8 @@ def login_screen():
         staff_df = get_db_data("staff")
         hashed_pass = hashlib.sha256(password.encode()).hexdigest()
         
-        # בדיקה אם המשתמש קיים
+        # בדיקה אם המשתמש קיים (strip whitespace from sheet names to avoid invisible-character mismatches)
+        staff_df['name'] = staff_df['name'].astype(str).str.strip()
         user_match = staff_df[staff_df['name'] == username]
         
         if not user_match.empty:
@@ -1849,16 +1850,15 @@ st.markdown('</div>', unsafe_allow_html=True)
 role = st.session_state.user_role
 user_name = st.session_state.user_name
 
-# שליפת החודש הפעיל (Logic preserevd)
-if 'settings' not in st.session_state:
-    try:
-        st.session_state.settings = get_db_data("settings")
-    except:
-        st.session_state.settings = pd.DataFrame([{'key': 'active_month', 'value': str(date.today().month + 1)}])
+# שליפת החודש הפעיל — נטען מחדש בכל רינדור כדי שעדכון מנהל יגיע לכל המשתמשים מיד
+try:
+    st.session_state.settings = get_db_data("settings")
+except:
+    st.session_state.settings = pd.DataFrame([{'key': 'active_month', 'value': str(date.today().month + 1)}])
 
 if 'key' not in st.session_state.settings.columns:
-     st.session_state.settings = pd.DataFrame([{'key': 'active_month', 'value': str(date.today().month + 1)}])
-     save_to_db("settings", st.session_state.settings)
+    st.session_state.settings = pd.DataFrame([{'key': 'active_month', 'value': str(date.today().month + 1)}])
+    save_to_db("settings", st.session_state.settings)
 
 try:
     active_month_setting = st.session_state.settings[st.session_state.settings['key'] == 'active_month']['value'].iloc[0]
