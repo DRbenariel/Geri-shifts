@@ -455,48 +455,23 @@ def render_modern_calendar(year, month, default_constraint_days, default_wish_da
     if init_key not in st.session_state or st.session_state.get(hash_key) != defaults_hash:
         st.session_state[const_key] = sorted(list(set(int(d) for d in default_constraint_days)))
         st.session_state[wish_key]  = sorted(list(set(int(d) for d in default_wish_days)))
-        st.session_state[mode_key]  = 'c'
         st.session_state[init_key]  = True
         st.session_state[hash_key]  = defaults_hash
 
     sel_c    = st.session_state[const_key]
     sel_w    = st.session_state[wish_key]
-    cur_mode = st.session_state[mode_key]
     pfx      = key_prefix
 
-    # ── Mode toggle ────────────────────────────────────────────────
-    # Inject CSS to color each mode button distinctly; active = solid, inactive = tinted
-    if cur_mode == 'c':
-        block_style = "background:#ef4444 !important;color:white !important;border:2px solid #dc2626 !important;box-shadow:0 0 0 3px rgba(239,68,68,0.25) !important;transform:none !important;"
-        wish_style  = "background:#dcfce7 !important;color:#166534 !important;border:2px solid #86efac !important;box-shadow:none !important;transform:none !important;"
-    else:
-        block_style = "background:#fee2e2 !important;color:#991b1b !important;border:2px solid #fca5a5 !important;box-shadow:none !important;transform:none !important;"
-        wish_style  = "background:#22c55e !important;color:white !important;border:2px solid #16a34a !important;box-shadow:0 0 0 3px rgba(34,197,94,0.25) !important;transform:none !important;"
-    st.markdown(f"""<style>
-    div[class*="st-key-{pfx}_mbtc_{month}"] button {{ {block_style} }}
-    div[class*="st-key-{pfx}_mbtc_{month}"] button:hover {{ opacity:0.9 !important; }}
-    div[class*="st-key-{pfx}_mbtw_{month}"] button {{ {wish_style} }}
-    div[class*="st-key-{pfx}_mbtw_{month}"] button:hover {{ opacity:0.9 !important; }}
-    </style>""", unsafe_allow_html=True)
-
-    mc1, mc2, mc3 = st.columns([1.3, 1.3, 2.4])
-    with mc1:
-        if st.button("🔒 חסימה", key=f"{pfx}_mbtc_{month}", use_container_width=True):
-            st.session_state[mode_key] = 'c'
-            st.rerun()
-    with mc2:
-        if st.button("⭐ בקשה", key=f"{pfx}_mbtw_{month}", use_container_width=True):
-            st.session_state[mode_key] = 'w'
-            st.rerun()
-    with mc3:
-        if cur_mode == 'c':
-            hint_html = "<span style='background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:6px;padding:4px 10px;font-weight:600;font-size:0.82rem;'>🔒 מצב חסימה פעיל</span>"
-        else:
-            hint_html = "<span style='background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:6px;padding:4px 10px;font-weight:600;font-size:0.82rem;'>⭐ מצב בקשה פעיל</span>"
-        st.markdown(
-            f"<div style='padding-top:8px;text-align:right;'>{hint_html}</div>",
-            unsafe_allow_html=True
-        )
+    # ── Legend ────────────────────────────────────────────────────
+    st.markdown(
+        "<div style='display:flex;gap:12px;justify-content:center;margin-bottom:8px;flex-wrap:wrap;direction:rtl;'>"
+        "<span style='background:linear-gradient(135deg,#6366f1,#4f46e5);color:white;border-radius:8px;padding:4px 12px;font-size:0.8rem;font-weight:600;'>רגיל</span>"
+        "<span style='background:linear-gradient(135deg,#fecaca,#f87171);color:white;border-radius:8px;padding:4px 12px;font-size:0.8rem;font-weight:600;'>🔒 חסימה</span>"
+        "<span style='background:linear-gradient(135deg,#86efac,#22c55e);color:white;border-radius:8px;padding:4px 12px;font-size:0.8rem;font-weight:600;'>⭐ בקשה</span>"
+        "<span style='color:#64748b;font-size:0.8rem;padding-top:4px;'>לחץ יום כדי לעבור בין המצבים</span>"
+        "</div>",
+        unsafe_allow_html=True
+    )
 
     # ── Dynamic CSS: color each day cell based on its state ────────
     css_parts = [f"""
@@ -571,20 +546,17 @@ def render_modern_calendar(year, month, default_constraint_days, default_wish_da
                     label = f"{icon}{day_num}" if icon else str(day_num)
 
                     if st.button(label, key=f"{pfx}_d{month}_{day_num}x", use_container_width=True):
-                        if cur_mode == 'c':
-                            if day_num in st.session_state[const_key]:
-                                st.session_state[const_key].remove(day_num)
-                            else:
-                                if day_num in st.session_state[wish_key]:
-                                    st.session_state[wish_key].remove(day_num)
-                                st.session_state[const_key].append(day_num)
+                        # Cycle: regular → חסימה → בקשה → regular
+                        if day_num in st.session_state[const_key]:
+                            # חסימה → בקשה
+                            st.session_state[const_key].remove(day_num)
+                            st.session_state[wish_key].append(day_num)
+                        elif day_num in st.session_state[wish_key]:
+                            # בקשה → regular
+                            st.session_state[wish_key].remove(day_num)
                         else:
-                            if day_num in st.session_state[wish_key]:
-                                st.session_state[wish_key].remove(day_num)
-                            else:
-                                if day_num in st.session_state[const_key]:
-                                    st.session_state[const_key].remove(day_num)
-                                st.session_state[wish_key].append(day_num)
+                            # regular → חסימה
+                            st.session_state[const_key].append(day_num)
                         st.rerun()
 
                     if is_special:
@@ -2869,10 +2841,14 @@ else:
                         st.session_state.requests = pd.concat([st.session_state.requests, new_wishes], ignore_index=True)
                     
                     save_to_db("requests", st.session_state.requests)
-                    st.success("האילוצים עודכנו בהצלחה!")
                     st.session_state['confirm_request_save'] = False
                     st.session_state.pop(f"user_cal_init_{sel_month}", None)
+                    st.session_state['show_update_success'] = True
                     st.rerun()
+
+            if st.session_state.get('show_update_success'):
+                st.success("✅ האילוצים עודכנו בהצלחה!")
+                st.session_state['show_update_success'] = False
                 
                 if st.button("❌ בטל", use_container_width=True):
                     st.session_state['confirm_request_save'] = False
