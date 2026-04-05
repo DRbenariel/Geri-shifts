@@ -2181,21 +2181,21 @@ elif role == "מנהל/ת":
         st.divider()
         st.caption("שינויים בטבלה נשמרים רק בלחיצה על כפתור השמירה")
         
-        # --- הגדרות לתזכורות ווטסאפ במסך זה ---
-        import urllib.parse
-        st.markdown("**הגדרות תזכורת ווטסאפ (יופיעו כקישורים בטבלה למטה):**")
-        col_wa1, col_wa2 = st.columns(2)
-        with col_wa1:
-            hebrew_months = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"]
-            default_month_idx = (date.today().replace(day=1) + timedelta(days=32)).month - 1
-            wa_target_month = st.selectbox("חודש רלוונטי:", hebrew_months, index=default_month_idx)
-        with col_wa2:
-            default_deadline = date.today().replace(day=20) if date.today().day < 20 else (date.today().replace(day=1) + timedelta(days=32)).replace(day=20)
-            wa_deadline = st.date_input("תאריך יעד למילוי בקשות:", value=default_deadline)
-        # -----------------------------------------
-
         # עטיפה בטופס (Form) כדי למנוע טעינה מחדש בכל שינוי תא
+        # הגדרות ווטסאפ בתוך הטופס כדי ששינויי תאריך לא יגרמו לאיפוס הטבלה
         with st.form(key="staff_batch_edit_form"):
+            # --- הגדרות לתזכורות ווטסאפ ---
+            import urllib.parse
+            st.markdown("**הגדרות תזכורת ווטסאפ (יופיעו כקישורים בטבלה למטה):**")
+            col_wa1, col_wa2 = st.columns(2)
+            with col_wa1:
+                hebrew_months = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"]
+                default_month_idx = (date.today().replace(day=1) + timedelta(days=32)).month - 1
+                wa_target_month = st.selectbox("חודש רלוונטי:", hebrew_months, index=default_month_idx)
+            with col_wa2:
+                default_deadline = date.today().replace(day=20) if date.today().day < 20 else (date.today().replace(day=1) + timedelta(days=32)).replace(day=20)
+                wa_deadline = st.date_input("תאריך יעד למילוי בקשות:", value=default_deadline)
+            # -----------------------------------------
             # Prepare view without password
             # Explicitly select columns to show, excluding password
             # Also ensure only_home_dept is present
