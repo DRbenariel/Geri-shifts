@@ -2657,7 +2657,7 @@ elif role == "מנהל/ת":
                     "סה\"כ ימי ד' (מבוקש)": wed_count,
                     "סה\"כ ימי ה' (קשה)": thu_count,
                     "שישי בוקר": fri_morn_count,
-                    'ציון הוגנות (נטו)': wed_count - thu_count # חיובי = קיבל יותר טובים, שלילי = קיבל יותר קשים
+                    'ציון הוגנות (נטו)': wed_count - (thu_count + fri_morn_count) # חיובי = קיבל יותר טובים, שלילי = קיבל יותר קשים
                 })
             
             df_fairness = pd.DataFrame(tracker).sort_values('ציון הוגנות (נטו)', ascending=False)
