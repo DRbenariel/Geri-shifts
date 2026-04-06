@@ -1143,8 +1143,8 @@ def draw_calendar_view(year, month, role, user_name=None):
             st.session_state.requests['date'].astype(str).str.startswith(month_prefix)
         ] if not st.session_state.requests.empty else pd.DataFrame()
 
-        submitted_names = set(reqs_month['employee'].unique()) if not reqs_month.empty else set()
-        all_active_names = set(active_staff['name'].dropna().tolist())
+        submitted_names  = set(reqs_month['employee'].astype(str).str.strip().unique()) if not reqs_month.empty else set()
+        all_active_names = set(active_staff['name'].dropna().astype(str).str.strip().tolist())
         show_availability = bool(all_active_names) and all_active_names.issubset(submitted_names)
 
         if show_availability:
@@ -1153,7 +1153,7 @@ def draw_calendar_view(year, month, role, user_name=None):
             wished_dates  = {}   # emp -> set of date strings
             if not reqs_month.empty:
                 for _, r in reqs_month.iterrows():
-                    emp = r['employee']
+                    emp = str(r['employee']).strip()
                     d   = str(r['date'])[:10]
                     if r['status'] == 'אילוץ':
                         blocked_dates.setdefault(emp, set()).add(d)
@@ -1170,7 +1170,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                 wished   = []
                 available = []
                 for _, emp in active_staff.iterrows():
-                    name = emp['name']
+                    name = str(emp['name']).strip()
                     if d_str in blocked_dates.get(name, set()):  continue  # blocked
                     if name in assigned_today:                    continue  # already scheduled
                     if d_str in wished_dates.get(name, set()):
