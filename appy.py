@@ -4,6 +4,7 @@ from datetime import datetime, date, timedelta
 import calendar
 import random
 import io
+import os
 import streamlit_shadcn_ui as ui
 import streamlit_antd_components as sac  # Added for Chips/Menu
 import hashlib
@@ -1128,6 +1129,57 @@ def run_smart_scheduling(year, month, only_weekends=False):
     st.info(balancing_msg)
 # --- 4. פונקציית ציור הלוח ---
 def draw_calendar_view(year, month, role, user_name=None):
+    # --- Pre-compute availability (admin only, only when ALL employees submitted) ---
+    show_availability = False
+    date_availability = {}  # {date_str: [available_names]}
+
+    if role == "מנהל/ת":
+        month_prefix = f"{year}-{month:02d}"
+        active_staff = st.session_state.staff[
+            st.session_state.staff['type'].isin(['מתמחה', 'תורן חוץ']) &
+            ~st.session_state.staff['name'].isin(['---', 'ADMIN'])
+        ]
+        reqs_month = st.session_state.requests[
+            st.session_state.requests['date'].astype(str).str.startswith(month_prefix)
+        ] if not st.session_state.requests.empty else pd.DataFrame()
+
+        submitted_names = set(reqs_month['employee'].unique()) if not reqs_month.empty else set()
+        all_active_names = set(active_staff['name'].dropna().tolist())
+        show_availability = bool(all_active_names) and all_active_names.issubset(submitted_names)
+
+        if show_availability:
+            # Build per-employee blocked/wished sets for this month
+            blocked_dates = {}   # emp -> set of date strings
+            wished_dates  = {}   # emp -> set of date strings
+            if not reqs_month.empty:
+                for _, r in reqs_month.iterrows():
+                    emp = r['employee']
+                    d   = str(r['date'])[:10]
+                    if r['status'] == 'אילוץ':
+                        blocked_dates.setdefault(emp, set()).add(d)
+                    elif r['status'] == 'בקשה':
+                        wished_dates.setdefault(emp, set()).add(d)
+
+            num_days = calendar.monthrange(year, month)[1]
+            sched_records = st.session_state.schedule.to_dict('records') if not st.session_state.schedule.empty else []
+
+            date_wished = {}  # {date_str: [wished_names]}
+            for day in range(1, num_days + 1):
+                d_str = f"{year}-{month:02d}-{day:02d}"
+                assigned_today = {s['employee'] for s in sched_records if str(s['date']) == d_str and s['employee'] != '---'}
+                wished   = []
+                available = []
+                for _, emp in active_staff.iterrows():
+                    name = emp['name']
+                    if d_str in blocked_dates.get(name, set()):  continue  # blocked
+                    if name in assigned_today:                    continue  # already scheduled
+                    if d_str in wished_dates.get(name, set()):
+                        wished.append(name)
+                    else:
+                        available.append(name)
+                date_wished[d_str]       = wished
+                date_availability[d_str] = available
+
     # Toggle for Mobile View (List vs Grid)
     # Mobile Detection
     # Mobile Detection
@@ -1206,12 +1258,32 @@ def draw_calendar_view(year, month, role, user_name=None):
                              emp = row['employee']
                              # Clean employee name from common icons if present
                              emp_clean = emp.replace("👤", "").replace("🛡️", "").replace("🍼", "").strip()
-                             
+
                              dept = row['dept']
-                             
+
                              style = "color:#1e3a8a;" if "שיקום" in dept else "color:#ea580c;" # Indigo/Orange hints
                              # Removed icon as requested
                              st.markdown(f"<div style='margin-right:10px; {style}'>{dept}: <b>{emp_clean}</b></div>", unsafe_allow_html=True)
+
+                    # Availability panel for list view (admin only, after all submitted)
+                    if show_availability:
+                        wished_here = date_wished.get(date_str, [])
+                        avail       = date_availability.get(date_str, [])
+                        if wished_here:
+                            st.markdown(
+                                f"<div style='font-size:11px; color:#854d0e;'>⭐ ביקשו: {', '.join(wished_here)}</div>",
+                                unsafe_allow_html=True
+                            )
+                        if avail:
+                            st.markdown(
+                                f"<div style='font-size:11px; color:#166534;'>✅ זמינים: {', '.join(avail)}</div>",
+                                unsafe_allow_html=True
+                            )
+                        if not wished_here and not avail:
+                            st.markdown(
+                                "<div style='font-size:11px; color:#991b1b;'>⚠️ אין זמינים</div>",
+                                unsafe_allow_html=True
+                            )
                     st.divider()
 
     else:
@@ -1271,7 +1343,28 @@ def draw_calendar_view(year, month, role, user_name=None):
                         for _, r in reqs.iterrows():
                             icon = "❌" if r['status'] == "אילוץ" else "⭐"
                             html += f'<div style="font-size:10px; color:{"#991b1b" if r["status"] == "אילוץ" else "#eab308"};">{icon} {r["employee"]}</div>'
-                    
+
+                    # Availability panel — shown only after all employees submitted
+                    if show_availability:
+                        wished_here = date_wished.get(date_str, [])
+                        avail       = date_availability.get(date_str, [])
+                        avail_html  = ''
+                        if wished_here:
+                            avail_html += (
+                                f'<div style="font-size:9px; color:#854d0e; margin-top:4px;'
+                                f' border-top:1px dashed #fde68a; padding-top:3px; line-height:1.5;">'
+                                f'⭐ ביקשו:<br>{"<br>".join(wished_here)}</div>'
+                            )
+                        if avail:
+                            avail_html += (
+                                f'<div style="font-size:9px; color:#166534; margin-top:2px;'
+                                f' line-height:1.5;">'
+                                f'✅ זמינים:<br>{"<br>".join(avail)}</div>'
+                            )
+                        if not wished_here and not avail:
+                            avail_html = '<div style="font-size:9px; color:#991b1b; margin-top:4px; border-top:1px dashed #fca5a5; padding-top:3px;">⚠️ אין זמינים</div>'
+                        html += avail_html
+
                     st.markdown(html + "</div>", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2682,14 +2775,42 @@ elif role == "מנהל/ת":
             if st.button("🔄 הרץ סריקה עכשיו", use_container_width=True):
                 with st.spinner("סורק..."):
                     try:
-                        import subprocess, sys
-                        result = subprocess.run(
-                            [sys.executable, "daily_report.py"],
-                            capture_output=True, text=True,
-                            cwd="d:/Projects/New Folder"
+                        # Import the analysis functions directly from daily_report.py
+                        import importlib.util, sys as _sys
+                        _spec = importlib.util.spec_from_file_location(
+                            "daily_report",
+                            os.path.join(os.path.dirname(__file__), "daily_report.py")
+                            if hasattr(__file__, '__file__') else "daily_report.py"
                         )
+                        _dr = importlib.util.module_from_spec(_spec)
+                        _spec.loader.exec_module(_dr)
+
+                        _staff    = st.session_state.staff.copy()
+                        _requests = st.session_state.requests.copy()
+                        _month    = sel_month
+
+                        _problems = _dr.analyze_month(2026, _month, _staff, _requests)
+                        if not _problems:
+                            _problems = [{'severity': 'תקין', 'problem_type': 'ללא בעיות',
+                                          'description': f'לא נמצאו בעיות צפויות לחודש {_month}/2026', 'day': 0}]
+
+                        # Save to Google Sheets via gspread
+                        _now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+                        _month_str = f"2026-{_month:02d}"
+                        _gc = get_gspread_client()
+                        _sh = _gc.open_by_url(st.secrets["connections"]["gsheets"]["spreadsheet"])
+                        _header = [['generated_at', 'month', 'severity', 'problem_type', 'description']]
+                        _rows = [[_now_str, _month_str, p['severity'], p['problem_type'], p['description']]
+                                 for p in _problems]
+                        try:
+                            _ws = _sh.worksheet('daily_report')
+                            _ws.clear()
+                        except Exception:
+                            _ws = _sh.add_worksheet('daily_report', rows=500, cols=6)
+                        _ws.update('A1', _header + _rows)
+
                         _fetch_sheet_data_silently.clear()
-                        st.toast("סריקה הושלמה!" if result.returncode == 0 else f"שגיאה: {result.stderr[:200]}")
+                        st.toast(f"סריקה הושלמה — {len(_problems)} ממצאים")
                     except Exception as e:
                         st.error(f"שגיאה בהרצת הסריקה: {e}")
                 st.rerun()
