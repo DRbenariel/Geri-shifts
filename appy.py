@@ -404,6 +404,12 @@ if 'staff' not in st.session_state:
     # Initialize only_home_dept if missing
     if 'only_home_dept' not in st.session_state.staff.columns:
         st.session_state.staff['only_home_dept'] = False
+    else:
+        # Google Sheets returns booleans as strings "True"/"False".
+        # astype(bool) on a non-empty string always returns True, so we parse manually.
+        st.session_state.staff['only_home_dept'] = st.session_state.staff['only_home_dept'].apply(
+            lambda v: v if isinstance(v, bool) else str(v).strip().lower() == 'true'
+        )
 
 if 'schedule' not in st.session_state:
     st.session_state.schedule = get_db_data("schedule")
@@ -2858,12 +2864,13 @@ else:
                     st.session_state['show_update_success'] = True
                     st.rerun()
 
-            if st.session_state.get('show_update_success'):
-                st.success("✅ האילוצים עודכנו בהצלחה!")
-                st.session_state['show_update_success'] = False
-                
                 if st.button("❌ בטל", use_container_width=True):
                     st.session_state['confirm_request_save'] = False
                     st.rerun()
-    elif selected_nav == 'לוח שיבוץ':
+
+    if st.session_state.get('show_update_success'):
+        st.success("✅ האילוצים עודכנו בהצלחה!")
+        st.session_state['show_update_success'] = False
+
+    if selected_nav == 'לוח שיבוץ':
         draw_calendar_view(2026, sel_month, "עובד/ת", user_name)
