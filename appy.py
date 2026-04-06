@@ -2671,7 +2671,64 @@ elif role == "מנהל/ת":
             # פירוט לפי חודשים הוסר לבקשת המשתמש.
         else:
             st.info("הלוח עדיין ריק.")
-        
+
+    # --- דוח יומי אוטומטי ---
+    if selected_nav == 'דוחות וניהול':
+        st.divider()
+        st.subheader("🤖 דוח בעיות צפויות — סריקה אוטומטית")
+
+        col_rep1, col_rep2 = st.columns([3, 1])
+        with col_rep2:
+            if st.button("🔄 הרץ סריקה עכשיו", use_container_width=True):
+                with st.spinner("סורק..."):
+                    try:
+                        import subprocess, sys
+                        result = subprocess.run(
+                            [sys.executable, "daily_report.py"],
+                            capture_output=True, text=True,
+                            cwd="d:/Projects/New Folder"
+                        )
+                        _fetch_sheet_data_silently.clear()
+                        st.toast("סריקה הושלמה!" if result.returncode == 0 else f"שגיאה: {result.stderr[:200]}")
+                    except Exception as e:
+                        st.error(f"שגיאה בהרצת הסריקה: {e}")
+                st.rerun()
+
+        report_df = get_db_data("daily_report")
+
+        if report_df.empty:
+            st.info("טרם הופק דוח. לחץ 'הרץ סריקה עכשיו' או המתן להרצה האוטומטית היומית.")
+        else:
+            generated_at = report_df['generated_at'].iloc[0] if 'generated_at' in report_df.columns else "לא ידוע"
+            report_month = report_df['month'].iloc[0] if 'month' in report_df.columns else ""
+            with col_rep1:
+                st.caption(f"עודכן לאחרונה: {generated_at} | חודש: {report_month}")
+
+            severity_icon = {'קריטי': '🔴', 'אזהרה': '🟡', 'מידע': 'ℹ️', 'תקין': '✅'}
+            severity_order = {'קריטי': 0, 'אזהרה': 1, 'מידע': 2, 'תקין': 3}
+
+            report_df['_order'] = report_df['severity'].map(severity_order).fillna(9)
+            report_df = report_df.sort_values('_order')
+
+            current_type = None
+            for _, row in report_df.iterrows():
+                ptype = row.get('problem_type', '')
+                sev   = row.get('severity', '')
+                desc  = row.get('description', '')
+                icon  = severity_icon.get(sev, '•')
+
+                if ptype != current_type:
+                    current_type = ptype
+                    st.markdown(f"**{ptype}**")
+
+                if sev == 'קריטי':
+                    st.error(f"{icon} {desc}")
+                elif sev == 'אזהרה':
+                    st.warning(f"{icon} {desc}")
+                elif sev == 'תקין':
+                    st.success(f"{icon} {desc}")
+                else:
+                    st.info(f"{icon} {desc}")
 
 
 else:
