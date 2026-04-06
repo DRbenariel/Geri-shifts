@@ -2524,11 +2524,12 @@ elif role == "מנהל/ת":
         
         reqs_df = st.session_state.requests.copy()
         if not reqs_df.empty:
-             reqs_df['date'] = reqs_df['date'].astype(str)
+            reqs_df['date'] = reqs_df['date'].astype(str)
+            reqs_df['employee'] = reqs_df['employee'].astype(str).str.strip()
 
         for _, emp in relevant_staff.iterrows():
-            name = emp['name']
-            
+            name = str(emp['name']).strip()
+
             n_c, n_w = 0, 0
             if not reqs_df.empty:
                 user_reqs = reqs_df[(reqs_df['employee'] == name) & (reqs_df['date'].str.startswith(current_month_prefix))]
@@ -2539,7 +2540,7 @@ elif role == "מנהל/ת":
             if has_submitted: submitted_count += 1
             
             status_list.append({
-                "שם העובד": name,
+                "שם העובד": name.strip(),
                 "תפקיד": emp['type'],
                 "סטטוס": "✅ הוגש" if has_submitted else "❌ טרם הוגש",
                 "חסימות": n_c,
