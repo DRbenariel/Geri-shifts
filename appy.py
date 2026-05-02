@@ -2085,7 +2085,7 @@ if selected_nav == 'הגדרות':
     # --- Swap Search Section ---
     if role != "מנהל/ת":
         with st.expander("🔄 חיפוש החלפות", expanded=False):
-            st.caption("בחר/י משמרת שלך כדי לראות מי יכול להחליף איתך, תוך שמירה על אילוצי המערכת (מחלקה, סוג עובד, פערי מנוחה, אילוצים אישיים).")
+
 
             sched_df = st.session_state.schedule
             month_prefix = f"2026-{sel_month:02d}"
@@ -2139,7 +2139,7 @@ if selected_nav == 'הגדרות':
                                     st.markdown(f"**{cand['name']}**{wish_pill}  \n_{cand['type']} · {cand['dept']}_  \n⇄ מציע/ה: **{their_label}**")
                                 with c2:
                                     btn_key = f"swap_send_full_{cand['name']}_{swap_date}"
-                                    if st.button("📋 שלח לניהול", key=btn_key, use_container_width=True):
+                                    if st.button("🔄 בקש החלפה", key=btn_key, use_container_width=True):
                                         new_req = pd.DataFrame([{
                                             'requester': user_name,
                                             'requester_date': swap_date,
@@ -2170,7 +2170,7 @@ if selected_nav == 'הגדרות':
                                     st.markdown(f"**{cand['name']}**{wish_pill}  \n_{cand['type']} · {cand['dept']}_")
                                 with c2:
                                     btn_key = f"swap_send_partial_{cand['name']}_{swap_date}"
-                                    if st.button("📋 שלח לניהול", key=btn_key, use_container_width=True):
+                                    if st.button("🔄 בקש החלפה", key=btn_key, use_container_width=True):
                                         new_req = pd.DataFrame([{
                                             'requester': user_name,
                                             'requester_date': swap_date,
