@@ -399,6 +399,97 @@ def check_assignment_validity(schedule_data, person_name, check_date, target_dep
 
     return True, "Valid"
 
+def find_swap_candidates(schedule_df, requests_df, staff_df, user_name, swap_date, swap_dept, sel_month, year=2026):
+    """
+    For an employee wanting to swap their shift on (swap_date, swap_dept), find:
+    - 'full': candidates who can cover the user's shift AND have a shift the user can take in return
+    - 'partial': candidates who can cover the user's shift but no mutual shift was found
+
+    Hard constraints enforced via check_assignment_validity (ignore_quota=True, since a swap
+    doesn't change anyone's monthly count). The user's own shift is removed from the simulated
+    schedule before validating, so the 2-day rest gap recalculates correctly.
+    """
+    user_name_n = str(user_name).strip()
+
+    sched_minus_user = schedule_df[
+        ~((schedule_df['date'].astype(str) == swap_date) &
+          (schedule_df['employee'].astype(str).str.strip() == user_name_n) &
+          (schedule_df['dept'] == swap_dept))
+    ].copy()
+
+    def _safe_q(v):
+        try: return int(v)
+        except: return 6
+
+    active_staff = staff_df[
+        (staff_df['name'].astype(str).str.strip() != user_name_n) &
+        (staff_df['type'].astype(str).str.strip() != 'מנהל/ת')
+    ].copy()
+    active_staff = active_staff[active_staff['monthly_quota'].apply(_safe_q) > 0]
+
+    req_dates = requests_df['date'].astype(str)
+    req_emps = requests_df['employee'].astype(str).str.strip()
+    wished_set = set(req_emps[(req_dates == swap_date) & (requests_df['status'] == 'בקשה')])
+
+    month_prefix = f"{year}-{sel_month:02d}"
+    full, partial = [], []
+
+    for _, cand_row in active_staff.iterrows():
+        cand_name = str(cand_row['name']).strip()
+
+        ok, _ = check_assignment_validity(
+            sched_minus_user, cand_name, swap_date, swap_dept,
+            staff_df, requests_df,
+            ignore_quota=True, ignore_home_restrict=False, ignore_rest=False
+        )
+        if not ok:
+            continue
+
+        their_shifts = schedule_df[
+            (schedule_df['employee'].astype(str).str.strip() == cand_name) &
+            (schedule_df['date'].astype(str).str.startswith(month_prefix))
+        ]
+
+        mutual = None
+        for _, ts in their_shifts.iterrows():
+            ts_date = str(ts['date'])
+            ts_dept = ts['dept']
+
+            sched_sim = sched_minus_user[
+                ~((sched_minus_user['date'].astype(str) == ts_date) &
+                  (sched_minus_user['employee'].astype(str).str.strip() == cand_name) &
+                  (sched_minus_user['dept'] == ts_dept))
+            ]
+            sched_sim = pd.concat([sched_sim, pd.DataFrame([{
+                'date': swap_date, 'dept': swap_dept, 'employee': cand_name,
+                'is_manual': False, 'empty_reason': ''
+            }])], ignore_index=True)
+
+            ok_me, _ = check_assignment_validity(
+                sched_sim, user_name_n, ts_date, ts_dept,
+                staff_df, requests_df,
+                ignore_quota=True, ignore_home_restrict=False, ignore_rest=False
+            )
+            if ok_me:
+                mutual = {'date': ts_date, 'dept': ts_dept}
+                break
+
+        info = {
+            'name': cand_name,
+            'dept': str(cand_row.get('dept', '')),
+            'type': str(cand_row.get('type', '')),
+            'wished': cand_name in wished_set,
+            'their_shift': mutual,
+        }
+        if mutual:
+            full.append(info)
+        else:
+            partial.append(info)
+
+    full.sort(key=lambda x: (not x['wished'], x['name']))
+    partial.sort(key=lambda x: (not x['wished'], x['name']))
+    return {'full': full, 'partial': partial}
+
 # טעינת נתונים ממסד הנתונים ל-Session State
 if 'staff' not in st.session_state:
     st.session_state.staff = get_db_data("staff")
@@ -1990,6 +2081,115 @@ if selected_nav == 'הגדרות':
                         st.cache_data.clear()
                         
                         st.success("הסיסמה עודכנה בהצלחה!")
+
+    # --- Swap Search Section ---
+    if role != "מנהל/ת":
+        with st.expander("🔄 חיפוש החלפות", expanded=False):
+            st.caption("בחר/י משמרת שלך כדי לראות מי יכול להחליף איתך, תוך שמירה על אילוצי המערכת (מחלקה, סוג עובד, פערי מנוחה, אילוצים אישיים).")
+
+            sched_df = st.session_state.schedule
+            month_prefix = f"2026-{sel_month:02d}"
+            user_shifts = sched_df[
+                (sched_df['employee'].astype(str).str.strip() == str(user_name).strip()) &
+                (sched_df['date'].astype(str).str.startswith(month_prefix))
+            ].sort_values('date').reset_index(drop=True)
+
+            if user_shifts.empty:
+                st.info(f"אין לך משמרות משובצות בחודש {sel_month}/2026.")
+            else:
+                DAY_NAMES_HE = {0: 'שני', 1: 'שלישי', 2: 'רביעי', 3: 'חמישי', 4: 'שישי', 5: 'שבת', 6: 'ראשון'}
+
+                shift_options = []
+                for _, s in user_shifts.iterrows():
+                    d_obj = datetime.strptime(str(s['date']), '%Y-%m-%d').date()
+                    label = f"{d_obj.strftime('%d/%m')} ({DAY_NAMES_HE[d_obj.weekday()]}) — {s['dept']}"
+                    shift_options.append((label, str(s['date']), s['dept']))
+
+                labels = ["— בחר/י משמרת —"] + [opt[0] for opt in shift_options]
+                sel_label = st.selectbox("המשמרות שלי החודש:", labels, key=f"swap_search_select_{sel_month}")
+
+                if sel_label != "— בחר/י משמרת —":
+                    chosen = next(o for o in shift_options if o[0] == sel_label)
+                    swap_date, swap_dept = chosen[1], chosen[2]
+
+                    with st.spinner("מחפש החלפות..."):
+                        results = find_swap_candidates(
+                            st.session_state.schedule,
+                            st.session_state.requests,
+                            st.session_state.staff,
+                            user_name, swap_date, swap_dept, sel_month
+                        )
+
+                    full = results['full']
+                    partial = results['partial']
+
+                    if not full and not partial:
+                        st.warning("לא נמצאו אפשרויות החלפה תקפות למשמרת זו.")
+                    else:
+                        if full:
+                            st.markdown("##### ✅ החלפה מלאה")
+                            st.caption("יכולים לכסות את המשמרת שלך, ויש להם משמרת שתוכל/י לקחת בתמורה")
+                            for cand in full:
+                                ts_d_obj = datetime.strptime(cand['their_shift']['date'], '%Y-%m-%d').date()
+                                their_label = f"{ts_d_obj.strftime('%d/%m')} ({DAY_NAMES_HE[ts_d_obj.weekday()]}) — {cand['their_shift']['dept']}"
+                                wish_pill = " ⭐" if cand['wished'] else ""
+
+                                c1, c2 = st.columns([3, 1])
+                                with c1:
+                                    st.markdown(f"**{cand['name']}**{wish_pill}  \n_{cand['type']} · {cand['dept']}_  \n⇄ מציע/ה: **{their_label}**")
+                                with c2:
+                                    btn_key = f"swap_send_full_{cand['name']}_{swap_date}"
+                                    if st.button("📋 שלח לניהול", key=btn_key, use_container_width=True):
+                                        new_req = pd.DataFrame([{
+                                            'requester': user_name,
+                                            'requester_date': swap_date,
+                                            'requester_dept': swap_dept,
+                                            'candidate': cand['name'],
+                                            'candidate_date': cand['their_shift']['date'],
+                                            'candidate_dept': cand['their_shift']['dept'],
+                                            'swap_type': 'full',
+                                            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                                            'status': 'pending',
+                                        }])
+                                        existing = get_db_data("swap_requests")
+                                        if existing.empty:
+                                            combined = new_req
+                                        else:
+                                            combined = pd.concat([existing, new_req], ignore_index=True)
+                                        save_to_db("swap_requests", combined)
+                                        st.success("הבקשה נשלחה למנהל/ת לאישור.")
+                                st.divider()
+
+                        if partial:
+                            st.markdown("##### ⚠️ כיסוי חד-צדדי")
+                            st.caption("יכולים לכסות את המשמרת שלך, אך לא נמצאה משמרת הדדית מתאימה")
+                            for cand in partial:
+                                wish_pill = " ⭐" if cand['wished'] else ""
+                                c1, c2 = st.columns([3, 1])
+                                with c1:
+                                    st.markdown(f"**{cand['name']}**{wish_pill}  \n_{cand['type']} · {cand['dept']}_")
+                                with c2:
+                                    btn_key = f"swap_send_partial_{cand['name']}_{swap_date}"
+                                    if st.button("📋 שלח לניהול", key=btn_key, use_container_width=True):
+                                        new_req = pd.DataFrame([{
+                                            'requester': user_name,
+                                            'requester_date': swap_date,
+                                            'requester_dept': swap_dept,
+                                            'candidate': cand['name'],
+                                            'candidate_date': '',
+                                            'candidate_dept': '',
+                                            'swap_type': 'partial',
+                                            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                                            'status': 'pending',
+                                        }])
+                                        existing = get_db_data("swap_requests")
+                                        if existing.empty:
+                                            combined = new_req
+                                        else:
+                                            combined = pd.concat([existing, new_req], ignore_index=True)
+                                        save_to_db("swap_requests", combined)
+                                        st.success("הבקשה נשלחה למנהל/ת לאישור.")
+                                st.divider()
 
     # --- Manage Special Days Section (Admin Only) ---
     if role == "מנהל/ת":
