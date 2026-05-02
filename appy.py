@@ -2440,6 +2440,63 @@ elif role == "מנהל/ת":
         # ---------------------------------
 
         draw_calendar_view(2026, sel_month, "מנהל/ת")
+
+        # --- Swap Requests Panel ---
+        if st.session_state.pop('show_swap_approved', False):
+            st.success("✅ ההחלפה אושרה ובוצעה בלוח השיבוץ!")
+        if st.session_state.pop('show_swap_rejected', False):
+            st.info("הבקשה נדחתה.")
+
+        _swap_reqs = get_db_data("swap_requests")
+        if not _swap_reqs.empty and 'status' in _swap_reqs.columns:
+            _pending = _swap_reqs[_swap_reqs['status'].astype(str).str.strip() == 'pending']
+            if not _pending.empty:
+                st.divider()
+                st.markdown(f"### 🔄 בקשות החלפה ממתינות לאישור ({len(_pending)})")
+                for _idx, _req in _pending.iterrows():
+                    _requester  = str(_req.get('requester', ''))
+                    _r_date     = str(_req.get('requester_date', ''))
+                    _r_dept     = str(_req.get('requester_dept', ''))
+                    _candidate  = str(_req.get('candidate', ''))
+                    _c_date     = str(_req.get('candidate_date', ''))
+                    _c_dept     = str(_req.get('candidate_dept', ''))
+                    _stype      = str(_req.get('swap_type', 'partial'))
+                    _created    = str(_req.get('created_at', ''))
+
+                    with st.container(border=True):
+                        _ca, _cb = st.columns([4, 2])
+                        with _ca:
+                            if _stype == 'full':
+                                st.markdown(f"**✅ החלפה מלאה** | נשלח: {_created}")
+                                st.write(f"**{_requester}** מוותר/ת על: **{_r_date}** ({_r_dept})")
+                                st.write(f"← **{_candidate}** ייקח/תיקח אותה ויעביר/ת: **{_c_date}** ({_c_dept})")
+                            else:
+                                st.markdown(f"**⚠️ כיסוי חד-צדדי** | נשלח: {_created}")
+                                st.write(f"**{_requester}** מבקש/ת כיסוי: **{_r_date}** ({_r_dept})")
+                                st.write(f"← **{_candidate}** מוצע/ת כמחליף/ה (ללא משמרת הדדית)")
+
+                        with _cb:
+                            _col_a, _col_r = st.columns(2)
+                            if _col_a.button("✅ אשר", key=f"approve_swap_{_idx}", use_container_width=True):
+                                _sched = st.session_state.schedule
+                                _mask_req = (_sched['date'].astype(str) == _r_date) & (_sched['dept'] == _r_dept)
+                                st.session_state.schedule.loc[_mask_req, 'employee'] = _candidate
+                                st.session_state.schedule.loc[_mask_req, 'is_manual'] = True
+                                if _stype == 'full' and _c_date:
+                                    _mask_cand = (_sched['date'].astype(str) == _c_date) & (_sched['dept'] == _c_dept)
+                                    st.session_state.schedule.loc[_mask_cand, 'employee'] = _requester
+                                    st.session_state.schedule.loc[_mask_cand, 'is_manual'] = True
+                                save_to_db("schedule", st.session_state.schedule)
+                                _swap_reqs.loc[_idx, 'status'] = 'approved'
+                                save_to_db("swap_requests", _swap_reqs)
+                                st.session_state['show_swap_approved'] = True
+                                st.rerun()
+                            if _col_r.button("❌ דחה", key=f"reject_swap_{_idx}", use_container_width=True):
+                                _swap_reqs.loc[_idx, 'status'] = 'rejected'
+                                save_to_db("swap_requests", _swap_reqs)
+                                st.session_state['show_swap_rejected'] = True
+                                st.rerun()
+
     elif selected_nav == 'צוות':
         st.subheader("ניהול צוות עובדים")
         
@@ -2969,7 +3026,23 @@ elif role == "מנהל/ת":
     # --- דוח יומי אוטומטי ---
     if selected_nav == 'דוחות וניהול':
         st.divider()
-        st.subheader("🤖 דוח בעיות צפויות — סריקה אוטומטית")
+        st.subheader("🤖 דוח בעיות צפויות")
+
+        # Headline: heavily blocked days from last report
+        _report_preview = get_db_data("daily_report")
+        if not _report_preview.empty and 'problem_type' in _report_preview.columns:
+            _peak_days = _report_preview[_report_preview['problem_type'] == 'ימי שיא חסימה']
+            if not _peak_days.empty:
+                _critical_peaks = _peak_days[_peak_days['severity'] == 'קריטי']
+                _warn_peaks = _peak_days[_peak_days['severity'] == 'אזהרה']
+                _headline_parts = []
+                if not _critical_peaks.empty:
+                    _headline_parts.append(f"🔴 {len(_critical_peaks)} ימים קריטיים (50%+ חסמו)")
+                if not _warn_peaks.empty:
+                    _headline_parts.append(f"🟡 {len(_warn_peaks)} ימים בסיכון (30%+ חסמו)")
+                if _headline_parts:
+                    st.info("**ימים קשים לאיוש החודש:** " + " · ".join(_headline_parts) +
+                            " — ראה פירוט בדוח למטה")
 
         col_rep1, col_rep2 = st.columns([3, 1])
         with col_rep2:

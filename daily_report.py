@@ -239,6 +239,53 @@ def check_who_not_submitted(year, month, active_staff, requests_df):
     return problems
 
 
+def check_heavily_blocked_days(year, month, active_staff, blocked_map):
+    """Days where a high share of employees blocked simultaneously — the hardest to fill."""
+    problems = []
+    num_days = calendar.monthrange(year, month)[1]
+    n_active = len(active_staff)
+    if n_active == 0:
+        return problems
+
+    for day in range(1, num_days + 1):
+        d_str = f"{year}-{month:02d}-{day:02d}"
+        d_obj = date(year, month, day)
+        is_weekend = d_obj.weekday() in (4, 5)
+        day_label = f"{day}/{month} ({'סופ\"ש' if is_weekend else 'חול'})"
+
+        blockers = [
+            emp['name'] for _, emp in active_staff.iterrows()
+            if d_str in blocked_map.get(emp['name'], set())
+        ]
+        n_blocked = len(blockers)
+        if n_blocked < 2:
+            continue
+
+        block_pct = n_blocked / n_active
+        if block_pct >= 0.5:
+            severity = 'קריטי'
+        elif block_pct >= 0.3:
+            severity = 'אזהרה'
+        else:
+            continue
+
+        pct_str = f"{int(block_pct * 100)}%"
+        names_preview = ', '.join(blockers[:5])
+        if len(blockers) > 5:
+            names_preview += f' ועוד {len(blockers) - 5}'
+        problems.append({
+            'severity': severity,
+            'problem_type': 'ימי שיא חסימה',
+            'description': (
+                f"יום {day_label}: {n_blocked}/{n_active} עובדים חסמו ({pct_str}) — "
+                f"יהיה קשה לאיוש. חסמו: {names_preview}"
+            ),
+            'day': day
+        })
+
+    return problems
+
+
 def check_weekend_coverage(year, month, active_staff, blocked_map):
     """Weekends with dangerously few eligible staff (separate from empty_days for emphasis)."""
     problems = []
@@ -288,6 +335,7 @@ def analyze_month(year, month, staff_df, requests_df):
     blocked_map = build_blocked_map(requests_df, month_prefix)
 
     problems = []
+    problems += check_heavily_blocked_days(year, month, active_staff, blocked_map)
     problems += check_who_not_submitted(year, month, active_staff, requests_df)
     problems += check_quota_risk(year, month, active_staff, blocked_map)
     problems += check_empty_days(year, month, active_staff, blocked_map)
