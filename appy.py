@@ -38,6 +38,24 @@ def _fetch_sheet_data_silently(worksheet_name):
     except gspread.exceptions.WorksheetNotFound:
         return pd.DataFrame()
 
+def _fetch_live(worksheet_name):
+    """Direct Sheets read that bypasses the cache — use only immediately before a write."""
+    for attempt in range(3):
+        try:
+            gc = get_gspread_client()
+            url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+            sh = gc.open_by_url(url)
+            ws = sh.worksheet(worksheet_name)
+            return pd.DataFrame(ws.get_all_records())
+        except gspread.exceptions.WorksheetNotFound:
+            return pd.DataFrame()
+        except gspread.exceptions.APIError as e:
+            if e.response.status_code == 429:
+                time.sleep(2 ** attempt)
+            else:
+                raise
+    return pd.DataFrame()
+
 def get_db_data(worksheet_name):
     try:
         df = _fetch_sheet_data_silently(worksheet_name)
@@ -2735,27 +2753,26 @@ elif role == "מנהל/ת":
                     st.error(f"שגיאה: התאריכים הבאים מסומנים גם כחסימה וגם כבקשה: {', '.join(formatted_overlap)}")
                 else:
                     # הכל תקין - שמירה
-                    # משיכת נתונים עדכניים מהגיליון
-                    latest_requests = get_db_data("requests")
-                    if not latest_requests.empty:
-                        st.session_state.requests = latest_requests
-                        
+                    # משיכת נתונים חיים מהגיליון (עוקף cache למניעת דריסה הדדית)
+                    live = _fetch_live("requests")
+                    base = live if not live.empty else st.session_state.requests
+
                     # 1. מחיקת הישן לחודש זה
-                    mask_keep = ~((st.session_state.requests['employee'] == selected_emp_mgr) & 
-                                  (st.session_state.requests['date'].astype(str).str.startswith(current_month_prefix)))
-                    st.session_state.requests = st.session_state.requests[mask_keep]
-                    
+                    mask_keep = ~((base['employee'].astype(str).str.strip() == str(selected_emp_mgr).strip()) &
+                                  (base['date'].astype(str).str.startswith(current_month_prefix)))
+                    base = base[mask_keep]
+
                     # 2. הוספת החדש
                     new_records = []
                     for d in new_constraints:
                         new_records.append({'employee': selected_emp_mgr, 'date': d, 'status': 'אילוץ'})
                     for d in new_wishes:
                         new_records.append({'employee': selected_emp_mgr, 'date': d, 'status': 'בקשה'})
-                    
-                    if new_records:
-                        st.session_state.requests = pd.concat([st.session_state.requests, pd.DataFrame(new_records)], ignore_index=True)
-                    
-                    save_to_db("requests", st.session_state.requests)
+
+                    merged = pd.concat([base, pd.DataFrame(new_records)], ignore_index=True) if new_records else base
+                    save_to_db("requests", merged)
+                    st.session_state.requests = merged
+                    _fetch_sheet_data_silently.clear()
                     st.success(f"האילוצים של {selected_emp_mgr} עודכנו בהצלחה!")
                     st.session_state.pop(f"{mgr_key_prefix}_init_{sel_month}", None)
                     st.rerun()
@@ -3284,26 +3301,27 @@ else:
 
                 # Vertical Stack Design for Mobile Robustness
                 if st.button("✅ כן, עדכן", type="primary", use_container_width=True):
-                    # משיכת נתונים עדכניים מהגיליון כדי למנוע דריסת נתונים
-                    latest_requests = get_db_data("requests")
-                    if not latest_requests.empty:
-                        st.session_state.requests = latest_requests
+                    # משיכת נתונים חיים מהגיליון (עוקף cache למניעת דריסה הדדית בין משתמשים)
+                    live = _fetch_live("requests")
+                    base = live if not live.empty else st.session_state.requests
 
                     # הסרת כל האילוצים והבקשות הקודמים של המשתמש לחודש זה
                     current_month_prefix = f"2026-{sel_month:02d}"
-                    mask_keep = ~((st.session_state.requests['employee'] == user_name) & 
-                                  (st.session_state.requests['date'].astype(str).str.startswith(current_month_prefix)))
-                    st.session_state.requests = st.session_state.requests[mask_keep]
-                    
+                    mask_keep = ~((base['employee'].astype(str).str.strip() == str(user_name).strip()) &
+                                  (base['date'].astype(str).str.startswith(current_month_prefix)))
+                    base = base[mask_keep]
+
                     # הוספת הרשימה החדשה והמעודכנת
+                    new_rows = []
                     if selected:
-                        new_reqs = pd.DataFrame([{'employee': user_name, 'date': str(d), 'status': "אילוץ"} for d in selected])
-                        st.session_state.requests = pd.concat([st.session_state.requests, new_reqs], ignore_index=True)
+                        new_rows += [{'employee': user_name, 'date': str(d), 'status': "אילוץ"} for d in selected]
                     if wishes:
-                        new_wishes = pd.DataFrame([{'employee': user_name, 'date': str(d), 'status': "בקשה"} for d in wishes])
-                        st.session_state.requests = pd.concat([st.session_state.requests, new_wishes], ignore_index=True)
-                    
-                    save_to_db("requests", st.session_state.requests)
+                        new_rows += [{'employee': user_name, 'date': str(d), 'status': "בקשה"} for d in wishes]
+
+                    merged = pd.concat([base, pd.DataFrame(new_rows)], ignore_index=True) if new_rows else base
+                    save_to_db("requests", merged)
+                    st.session_state.requests = merged
+                    _fetch_sheet_data_silently.clear()
                     st.session_state['confirm_request_save'] = False
                     st.session_state.pop(f"user_cal_init_{sel_month}", None)
                     st.session_state['show_update_success'] = True
