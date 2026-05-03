@@ -441,7 +441,9 @@ def find_swap_candidates(schedule_df, requests_df, staff_df, user_name, swap_dat
     req_emps = requests_df['employee'].astype(str).str.strip()
     wished_set = set(req_emps[(req_dates == swap_date) & (requests_df['status'] == 'בקשה')])
 
-    month_prefix = f"{year}-{sel_month:02d}"
+    # Search candidate's mutual shifts in the same month as the swap (derived from swap_date,
+    # not the active month — handles swaps in any future month).
+    month_prefix = swap_date[:7]
     full, partial = [], []
 
     for _, cand_row in active_staff.iterrows():
@@ -2101,36 +2103,37 @@ if selected_nav == 'הגדרות':
 
 
             sched_df = st.session_state.schedule
-            month_prefix = f"2026-{sel_month:02d}"
+            today_str = date.today().strftime('%Y-%m-%d')
             user_shifts = sched_df[
                 (sched_df['employee'].astype(str).str.strip() == str(user_name).strip()) &
-                (sched_df['date'].astype(str).str.startswith(month_prefix))
+                (sched_df['date'].astype(str) >= today_str)
             ].sort_values('date').reset_index(drop=True)
 
             if user_shifts.empty:
-                st.info(f"אין לך משמרות משובצות בחודש {sel_month}/2026.")
+                st.info("אין לך משמרות עתידיות משובצות.")
             else:
                 DAY_NAMES_HE = {0: 'שני', 1: 'שלישי', 2: 'רביעי', 3: 'חמישי', 4: 'שישי', 5: 'שבת', 6: 'ראשון'}
 
                 shift_options = []
                 for _, s in user_shifts.iterrows():
                     d_obj = datetime.strptime(str(s['date']), '%Y-%m-%d').date()
-                    label = f"{d_obj.strftime('%d/%m')} ({DAY_NAMES_HE[d_obj.weekday()]}) — {s['dept']}"
+                    label = f"{d_obj.strftime('%d/%m/%Y')} ({DAY_NAMES_HE[d_obj.weekday()]}) — {s['dept']}"
                     shift_options.append((label, str(s['date']), s['dept']))
 
                 labels = ["— בחר/י משמרת —"] + [opt[0] for opt in shift_options]
-                sel_label = st.selectbox("המשמרות שלי החודש:", labels, key=f"swap_search_select_{sel_month}")
+                sel_label = st.selectbox("המשמרות הקרובות שלי:", labels, key=f"swap_search_select_upcoming")
 
                 if sel_label != "— בחר/י משמרת —":
                     chosen = next(o for o in shift_options if o[0] == sel_label)
                     swap_date, swap_dept = chosen[1], chosen[2]
+                    swap_month_int = int(swap_date.split('-')[1])
 
                     with st.spinner("מחפש החלפות..."):
                         results = find_swap_candidates(
                             st.session_state.schedule,
                             st.session_state.requests,
                             st.session_state.staff,
-                            user_name, swap_date, swap_dept, sel_month
+                            user_name, swap_date, swap_dept, swap_month_int
                         )
 
                     full = results['full']
