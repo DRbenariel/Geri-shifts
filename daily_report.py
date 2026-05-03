@@ -127,7 +127,8 @@ def check_empty_days(year, month, active_staff, blocked_map):
                 if is_eligible(emp, dept, d_str, blocked_map)
             ]
             n = len(eligible)
-            day_label = f"{day}/{month} ({'סופ\"ש' if is_weekend else 'חול'})"
+            weekend_label = 'סופ"ש'
+            day_label = f"{day}/{month} ({weekend_label if is_weekend else 'חול'})"
 
             if n == 0:
                 problems.append({
@@ -251,7 +252,8 @@ def check_heavily_blocked_days(year, month, active_staff, blocked_map):
         d_str = f"{year}-{month:02d}-{day:02d}"
         d_obj = date(year, month, day)
         is_weekend = d_obj.weekday() in (4, 5)
-        day_label = f"{day}/{month} ({'סופ\"ש' if is_weekend else 'חול'})"
+        weekend_label = 'סופ"ש'
+        day_label = f"{day}/{month} ({weekend_label if is_weekend else 'חול'})"
 
         blockers = [
             emp['name'] for _, emp in active_staff.iterrows()
