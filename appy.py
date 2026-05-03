@@ -61,59 +61,51 @@ def get_gspread_client():
     return gc
 
 def save_to_db(worksheet_name, df, is_rtl=False):
-    # שימוש ב-gspread ישירות כדי למנוע בעיות עם st-gsheets-connection
-    try:
-        gc = get_gspread_client()
-        url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-        sh = gc.open_by_url(url)
-        
+    """Write df to a Google Sheets worksheet. Retries up to 4 times on 429 rate-limit errors."""
+    url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+    df_str = df.astype(str).replace('nan', '', regex=True).replace('None', '', regex=True)
+    data = [df_str.columns.tolist()] + df_str.values.tolist()
+
+    last_err = None
+    for attempt in range(4):
         try:
-            ws = sh.worksheet(worksheet_name)
-        except:
-            # הגיליון לא קיים - נוסיף אותו
-            ws = sh.add_worksheet(title=worksheet_name, rows=100, cols=20)
-            
-        # עדכון הנתונים
-        # gspread update expects list of lists including header
-        # המרה של ה-DF לרשימה ועדכון
-        # הערה: update של gspread דורס תאים קיימים, זה מה שאנחנו רוצים.
-        
-        # המרה בטוחה של נתונים כך שיהיו serializable (למשל תאריכים ל-str)
-        df_str = df.astype(str)
-        # החלפת nan ב-String ריק
-        df_str = df_str.replace('nan', '', regex=True).replace('None', '', regex=True)
-        
-        data = [df_str.columns.tolist()] + df_str.values.tolist()
-        
-        # ניקוי הגיליון לפני כתיבה כדי למנוע שאריות במידה והטבלה החדשה קצרה יותר
-        ws.clear()
-        
-        ws.update(range_name='A1', values=data)
-        
-        # טיפול ביישור מימין לשמאל (RTL) במידת הצורך
-        if is_rtl:
+            gc = get_gspread_client()
+            sh = gc.open_by_url(url)
             try:
-                # שליחת בקשת batch_update לשינוי הגדרות הגיליון
-                requests = [{
-                    "updateSheetProperties": {
-                        "properties": {
-                            "sheetId": ws.id,
-                            "rightToLeft": True,
-                            "gridProperties": {"columnCount": 8}
-                        },
-                        "fields": "rightToLeft,gridProperties.columnCount"
-                    }
-                }]
-                sh.batch_update({"requests": requests})
-                
-                # עיצוב בסיסי
-                ws.format('A1:H1', {'textFormat': {'bold': True}, 'horizontalAlignment': 'CENTER'})
-                ws.format('A2:H100', {'horizontalAlignment': 'CENTER', 'verticalAlignment': 'MIDDLE'})
-            except Exception as e:
-                print(f"RTL/Format warning: {e}")
-                
-    except Exception as e:
-         st.error(f"שגיאה קריטית בשמירה לגיליון '{worksheet_name}': {e}")
+                ws = sh.worksheet(worksheet_name)
+            except gspread.exceptions.WorksheetNotFound:
+                ws = sh.add_worksheet(title=worksheet_name, rows=100, cols=20)
+
+            ws.clear()
+            ws.update(range_name='A1', values=data)
+
+            if is_rtl:
+                try:
+                    sh.batch_update({"requests": [{
+                        "updateSheetProperties": {
+                            "properties": {"sheetId": ws.id, "rightToLeft": True,
+                                           "gridProperties": {"columnCount": 8}},
+                            "fields": "rightToLeft,gridProperties.columnCount"
+                        }
+                    }]})
+                    ws.format('A1:H1', {'textFormat': {'bold': True}, 'horizontalAlignment': 'CENTER'})
+                    ws.format('A2:H100', {'horizontalAlignment': 'CENTER', 'verticalAlignment': 'MIDDLE'})
+                except Exception as e:
+                    print(f"RTL/Format warning: {e}")
+            return  # success
+
+        except gspread.exceptions.APIError as e:
+            last_err = e
+            if e.response.status_code == 429:
+                wait = 2 ** attempt  # 1s, 2s, 4s, 8s
+                time.sleep(wait)
+                continue
+            break  # non-429 API error — don't retry
+        except Exception as e:
+            last_err = e
+            break
+
+    st.error(f"שגיאה קריטית בשמירה לגיליון '{worksheet_name}': {last_err}")
 
 def init_db():
     # בדיקה האם יש נתונים בטבלת staff, אם לא - נאתחל
@@ -515,6 +507,9 @@ if 'special_days' not in st.session_state:
     except:
         st.session_state.special_days = pd.DataFrame(columns=['date', 'description', 'day_type'])
         save_to_db("special_days", st.session_state.special_days)
+
+if 'swap_requests' not in st.session_state:
+    st.session_state.swap_requests = get_db_data("swap_requests")
 
 # כלי שיבוץ ידני
 if 'manual_date' not in st.session_state:
@@ -2151,12 +2146,10 @@ if selected_nav == 'הגדרות':
                                             'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
                                             'status': 'pending',
                                         }])
-                                        existing = get_db_data("swap_requests")
-                                        if existing.empty:
-                                            combined = new_req
-                                        else:
-                                            combined = pd.concat([existing, new_req], ignore_index=True)
+                                        existing = st.session_state.swap_requests
+                                        combined = new_req if existing.empty else pd.concat([existing, new_req], ignore_index=True)
                                         save_to_db("swap_requests", combined)
+                                        st.session_state.swap_requests = combined
                                         st.success("הבקשה נשלחה למנהל/ת לאישור.")
                                 st.divider()
 
@@ -2182,12 +2175,10 @@ if selected_nav == 'הגדרות':
                                             'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
                                             'status': 'pending',
                                         }])
-                                        existing = get_db_data("swap_requests")
-                                        if existing.empty:
-                                            combined = new_req
-                                        else:
-                                            combined = pd.concat([existing, new_req], ignore_index=True)
+                                        existing = st.session_state.swap_requests
+                                        combined = new_req if existing.empty else pd.concat([existing, new_req], ignore_index=True)
                                         save_to_db("swap_requests", combined)
+                                        st.session_state.swap_requests = combined
                                         st.success("הבקשה נשלחה למנהל/ת לאישור.")
                                 st.divider()
 
@@ -2447,7 +2438,7 @@ elif role == "מנהל/ת":
         if st.session_state.pop('show_swap_rejected', False):
             st.info("הבקשה נדחתה.")
 
-        _swap_reqs = get_db_data("swap_requests")
+        _swap_reqs = st.session_state.swap_requests
         if not _swap_reqs.empty and 'status' in _swap_reqs.columns:
             _pending = _swap_reqs[_swap_reqs['status'].astype(str).str.strip() == 'pending']
             if not _pending.empty:
@@ -2489,11 +2480,13 @@ elif role == "מנהל/ת":
                                 save_to_db("schedule", st.session_state.schedule)
                                 _swap_reqs.loc[_idx, 'status'] = 'approved'
                                 save_to_db("swap_requests", _swap_reqs)
+                                st.session_state.swap_requests = _swap_reqs.copy()
                                 st.session_state['show_swap_approved'] = True
                                 st.rerun()
                             if _col_r.button("❌ דחה", key=f"reject_swap_{_idx}", use_container_width=True):
                                 _swap_reqs.loc[_idx, 'status'] = 'rejected'
                                 save_to_db("swap_requests", _swap_reqs)
+                                st.session_state.swap_requests = _swap_reqs.copy()
                                 st.session_state['show_swap_rejected'] = True
                                 st.rerun()
 
