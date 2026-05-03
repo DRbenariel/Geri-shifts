@@ -41,14 +41,19 @@ All reads/writes go through `get_db_data()` / `save_to_db()` — never access Sh
 | `settings` | key, value (active_month) |
 | `Schedule_Export` | wide-format export (תאריך, יום, פנימית גריאטרית, שיקום, שישי בוקר cols) |
 | `daily_report` | generated_at, month, severity, problem_type, description |
-| `swap_requests` | requester, requester_date, requester_dept, candidate, candidate_date, candidate_dept, swap_type, created_at, status |
+| `swap_requests` | requester, requester_date, requester_dept, candidate, candidate_date, candidate_dept, swap_type, chain_ext, chain_ext_dept, created_at, status |
+| `analytics_log` | event_id, session_id, timestamp, user_name, user_role, event_type, detail_1, detail_2, device_type, ua_string, viewport_width, active_month, day_of_month |
 
 ## Algorithm notes
 - `run_smart_scheduling()` — greedy, no backtracking. Scores candidates with hardcoded weights.
 - `check_assignment_validity()` — single source of truth for constraint checking. Always use it.
 - Swap suggestions in `draw_calendar_view()` bypass soft scheduling conditions (pacing, quotas) — only hard constraints apply.
 - Friday morning shifts are assigned in a separate post-pass after the main loop.
-- `find_swap_candidates()` — employee-facing swap search. Takes `(schedule_df, requests_df, staff_df, user_name, swap_date, swap_dept, sel_month)`. Temporarily removes the user's shift before validating candidates so the 2-day rest gap recalculates correctly. Uses `ignore_quota=True`. Returns `{'full': [...], 'partial': [...]}` — full = mutual swap found, partial = one-sided coverage only. Each item: `{name, dept, type, wished, their_shift}`.
+- `find_swap_candidates()` — employee-facing swap search. Takes `(schedule_df, requests_df, staff_df, user_name, swap_date, swap_dept, sel_month)`. Temporarily removes the user's shift before validating candidates so the 2-day rest gap recalculates correctly. Uses `ignore_quota=True`. Returns `{'full': [...], 'partial': [...], 'chain': [...]}`:
+  - `full` — mutual swap found. Each item: `{name, dept, type, wished, their_shift}`.
+  - `partial` — one-sided coverage only. Same shape, `their_shift=None`.
+  - `chain` — 3-way: מתמחה moves שיקום→פנימית, תורן חוץ covers שיקום. Only populated when `swap_dept=='פנימית גריאטרית'`. Each item: `{facilitator_name, facilitator_dept, facilitator_wished, external_name, external_wished}`.
+  - `their_shifts` filter excludes dates < today (past shifts cannot be offered as mutual exchange).
 
 ## daily_report.py checks (in order run by `analyze_month`)
 1. `check_heavily_blocked_days` — **headline metric**. Days where ≥50% of active staff submitted אילוץ → קריטי ("ימי שיא חסימה"); ≥30% → אזהרה. Run first so it sorts to the top.
@@ -70,10 +75,11 @@ All reads/writes go through `get_db_data()` / `save_to_db()` — never access Sh
 
 ## Feature: חיפוש החלפות (employee swap search)
 - Location: `הגדרות` tab, expander "🔄 חיפוש החלפות" — shown to non-admins only.
-- Employee selects one of their shifts → `find_swap_candidates()` runs → results in two tiers:
+- Employee selects one of their shifts → `find_swap_candidates()` runs → results in three tiers:
   - **✅ החלפה מלאה** — mutual swap: candidate covers user's shift AND user can cover one of theirs.
   - **⚠️ כיסוי חד-צדדי** — candidate can cover the user's shift but no mutual shift found.
-- ⭐ pill shown on candidates who submitted `בקשה` on the selected date.
+  - **🔗 החלפה משולשת** — 3-way chain (only for פנימית shifts): מתמחה moves שיקום→פנימית, תורן חוץ covers שיקום. Writes `swap_type='chain'` with `chain_ext` + `chain_ext_dept` columns.
+- ⭐ pill shown on candidates/facilitators who submitted `בקשה` on the selected date.
 - "🔄 בקש החלפה" button writes a row to `swap_requests` sheet with `status='pending'`.
 - No auto-execution — admin must approve.
 
@@ -84,6 +90,15 @@ All reads/writes go through `get_db_data()` / `save_to_db()` — never access Sh
 - **❌ דחה** — updates status to `rejected`, reruns.
 - Success/reject messages use the session-state flag pattern (shown on next render).
 - `swap_type='full'` swaps both directions; `swap_type='partial'` only reassigns the requester's shift.
+- `swap_type='chain'` does 3 mutations: (1) remove requester from פנימית, (2) move מתמחה (candidate) from שיקום→פנימית, (3) assign תורן חוץ (chain_ext) to שיקום.
+
+## Feature: ניתוח שימוש (user analytics)
+- `analytics_log` sheet — append-only event log (never cleared). Written via `log_event()` using `ws.append_row()`.
+- `log_event(event_type, detail_1, detail_2)` — defined right after `get_gspread_client()`. Entire body in `except Exception: pass` — never crashes the app.
+- Session init on first render after login: `analytics_session_id` (uuid4), `analytics_login_time`, `analytics_tab_enter`, `analytics_device_captured=False`.
+- Device capture: `st_javascript` keys `analytics_ua_cap` / `analytics_vp_cap` (frame 2 pattern). `login_success` fired only once per session when UA resolves.
+- Events tracked: `login_success`, `login_fail`, `logout`, `tab_view` (enter + seconds on exit), `constraint_submit` (block count / wish count), `swap_search`, `swap_request_sent` (full/partial/chain).
+- Admin analytics display: expander "📈 ניתוח שימוש במערכת" at bottom of `דוחות וניהול` tab. Sections A–I: KPI cards, per-user activity table, over-blocking bar chart (red >60%), tab usage, avg time-on-tab, login-by-hour heatmap, device breakdown, reload detection, submission timing.
 
 ## Feature: דוח בעיות צפויות headline
 - Top of `דוחות וניהול` tab shows a live banner counting "ימי שיא חסימה" from the last saved report (קריטי / אזהרה counts) before the manual run button.

@@ -5,6 +5,7 @@ import calendar
 import random
 import io
 import os
+import uuid
 import streamlit_shadcn_ui as ui
 import streamlit_antd_components as sac  # Added for Chips/Menu
 import hashlib
@@ -77,6 +78,47 @@ def get_gspread_client():
     # במידה ויש צורך ב-scopes ספציפיים, gspread מטפל בזה לרוב אוטומטית עם service_account_from_dict
     gc = gspread.service_account_from_dict(creds_dict)
     return gc
+
+def log_event(event_type, detail_1='', detail_2=''):
+    """
+    Append a single analytics event row to the 'analytics_log' Google Sheet.
+    Never clears the sheet — append-only. Entire body wrapped in bare except so it
+    NEVER crashes the main app. Dropped events are acceptable.
+    """
+    try:
+        now = datetime.now()
+        row = [
+            str(uuid.uuid4()),                                          # event_id
+            str(st.session_state.get('analytics_session_id', '')),     # session_id
+            now.strftime('%Y-%m-%d %H:%M:%S'),                         # timestamp
+            str(st.session_state.get('user_name', '')),                # user_name
+            str(st.session_state.get('user_role', '')),                # user_role
+            event_type,                                                 # event_type
+            str(detail_1),                                             # detail_1
+            str(detail_2),                                             # detail_2
+            str(st.session_state.get('analytics_device_type', 'unknown')),  # device_type
+            str(st.session_state.get('analytics_ua', ''))[:200],      # ua_string
+            str(st.session_state.get('analytics_vp_width', '')),      # viewport_width
+            str(st.session_state.get('active_month_int', '')),        # active_month
+            str(now.day),                                              # day_of_month
+        ]
+        gc = get_gspread_client()
+        url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+        sh = gc.open_by_url(url)
+        # Create sheet with header on first call if missing
+        try:
+            ws = sh.worksheet('analytics_log')
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet('analytics_log', rows=5000, cols=13)
+            ws.append_row([
+                'event_id', 'session_id', 'timestamp', 'user_name', 'user_role',
+                'event_type', 'detail_1', 'detail_2', 'device_type', 'ua_string',
+                'viewport_width', 'active_month', 'day_of_month'
+            ], value_input_option='USER_ENTERED')
+        ws.append_row(row, value_input_option='USER_ENTERED')
+    except Exception:
+        pass  # Analytics failure must never affect the main app
+
 
 def save_to_db(worksheet_name, df, is_rtl=False):
     """Write df to a Google Sheets worksheet. Retries up to 4 times on 429 rate-limit errors."""
@@ -225,8 +267,10 @@ def login_screen():
                 st.rerun()
             else:
                 st.error("סיסמה שגויה")
+                log_event('login_fail', username, 'סיסמה שגויה')
         else:
             st.error("שם המשתמש לא נמצא במערכת")
+            log_event('login_fail', username, 'משתמש לא קיים')
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -235,6 +279,33 @@ if not st.session_state.logged_in:
     login_screen()
     st.stop()
 else:
+    # --- אתחול סשן אנליטיקה (פעם אחת לכל כניסה) ---
+    if 'analytics_session_id' not in st.session_state:
+        st.session_state.analytics_session_id = str(uuid.uuid4())
+        st.session_state.analytics_login_time = datetime.now()
+        st.session_state.analytics_last_tab = None
+        st.session_state.analytics_tab_enter = datetime.now()
+        st.session_state.analytics_device_captured = False
+        st.session_state.analytics_device_type = 'unknown'
+        st.session_state.analytics_ua = ''
+        st.session_state.analytics_vp_width = ''
+
+    # --- זיהוי מכשיר ב-JS (frame 2: ה-JS מחזיר None בפריים 1, ערך בפריים 2) ---
+    try:
+        from streamlit_javascript import st_javascript
+        _ua_cap  = st_javascript("window.navigator.userAgent", key="analytics_ua_cap")
+        _vp_cap  = st_javascript("window.innerWidth",          key="analytics_vp_cap")
+        if _ua_cap and isinstance(_ua_cap, str) and not st.session_state.analytics_device_captured:
+            st.session_state.analytics_ua = _ua_cap
+            st.session_state.analytics_vp_width = str(_vp_cap) if _vp_cap else ''
+            _is_mobile = any(x in _ua_cap for x in ["Android", "iPhone", "iPad", "Mobile", "webOS"])
+            _is_mobile = _is_mobile or (isinstance(_vp_cap, (int, float)) and 0 < _vp_cap < 768)
+            st.session_state.analytics_device_type = 'mobile' if _is_mobile else 'desktop'
+            st.session_state.analytics_device_captured = True
+            log_event('login_success', st.session_state.analytics_device_type, str(_vp_cap))
+    except Exception:
+        pass
+
     # --- הזרקת CSS ייעודי למובייל (רק למשתמש מחובר) ---
     # מונע את עיוות מסך הכניסה
     st.markdown("""
@@ -457,9 +528,11 @@ def find_swap_candidates(schedule_df, requests_df, staff_df, user_name, swap_dat
         if not ok:
             continue
 
+        _today_str = date.today().strftime('%Y-%m-%d')
         their_shifts = schedule_df[
             (schedule_df['employee'].astype(str).str.strip() == cand_name) &
-            (schedule_df['date'].astype(str).str.startswith(month_prefix))
+            (schedule_df['date'].astype(str).str.startswith(month_prefix)) &
+            (schedule_df['date'].astype(str) >= _today_str)   # exclude past shifts
         ]
 
         mutual = None
@@ -500,7 +573,71 @@ def find_swap_candidates(schedule_df, requests_df, staff_df, user_name, swap_dat
 
     full.sort(key=lambda x: (not x['wished'], x['name']))
     partial.sort(key=lambda x: (not x['wished'], x['name']))
-    return {'full': full, 'partial': partial}
+
+    # ── 3-way chain swap (only relevant when user's shift is in פנימית גריאטרית) ─
+    # Logic: find a מתמחה currently on שיקום on swap_date who CAN work פנימית,
+    # then simulate them moving to פנימית and check if any תורן חוץ can fill the
+    # now-vacant שיקום slot. Result is a list of chain dicts.
+    chain = []
+    if swap_dept == 'פנימית גריאטרית':
+        # Candidates for facilitator role: מתמחה assigned to שיקום on swap_date
+        _facilitators_sched = sched_minus_user[
+            (sched_minus_user['date'].astype(str) == swap_date) &
+            (sched_minus_user['dept'] == 'שיקום') &
+            (sched_minus_user['employee'].astype(str).str.strip() != user_name_n)
+        ]
+        _externals = staff_df[
+            (staff_df['type'].astype(str).str.strip() == 'תורן חוץ') &
+            (staff_df['name'].astype(str).str.strip() != user_name_n)
+        ].copy()
+
+        for _, _fac_row in _facilitators_sched.iterrows():
+            _fac_name = str(_fac_row['employee']).strip()
+            _fac_staff = staff_df[staff_df['name'].astype(str).str.strip() == _fac_name]
+            if _fac_staff.empty:
+                continue
+            if str(_fac_staff.iloc[0].get('type', '')).strip() != 'מתמחה':
+                continue  # must be מתמחה to work פנימית
+
+            # Check if facilitator can work פנימית on swap_date
+            _ok_fac, _ = check_assignment_validity(
+                sched_minus_user, _fac_name, swap_date, 'פנימית גריאטרית',
+                staff_df, requests_df, ignore_quota=True
+            )
+            if not _ok_fac:
+                continue
+
+            # Simulate: remove facilitator from שיקום, add them to פנימית
+            _sched_sim = sched_minus_user[
+                ~((sched_minus_user['date'].astype(str) == swap_date) &
+                  (sched_minus_user['employee'].astype(str).str.strip() == _fac_name) &
+                  (sched_minus_user['dept'] == 'שיקום'))
+            ].copy()
+            _sched_sim = pd.concat([_sched_sim, pd.DataFrame([{
+                'date': swap_date, 'dept': 'פנימית גריאטרית', 'employee': _fac_name,
+                'is_manual': False, 'empty_reason': ''
+            }])], ignore_index=True)
+
+            # Find a תורן חוץ who can now cover the vacant שיקום slot
+            _fac_wished = _fac_name in wished_set
+            for _, _ext_row in _externals.iterrows():
+                _ext_name = str(_ext_row['name']).strip()
+                _ok_ext, _ = check_assignment_validity(
+                    _sched_sim, _ext_name, swap_date, 'שיקום',
+                    staff_df, requests_df, ignore_quota=True
+                )
+                if _ok_ext:
+                    chain.append({
+                        'facilitator_name': _fac_name,
+                        'facilitator_dept': str(_fac_staff.iloc[0].get('dept', '')),
+                        'facilitator_wished': _fac_wished,
+                        'external_name': _ext_name,
+                        'external_wished': _ext_name in wished_set,
+                    })
+                    break  # one valid external per facilitator is enough
+
+    chain.sort(key=lambda x: (not x['facilitator_wished'], not x['external_wished'], x['facilitator_name']))
+    return {'full': full, 'partial': partial, 'chain': chain}
 
 # טעינת נתונים ממסד הנתונים ל-Session State
 if 'staff' not in st.session_state:
@@ -2020,6 +2157,9 @@ st.title("מערכת תורנויות")
 
 # Logout button centered under title for mobile robustness
 if st.button("התנתק", key="logout_top", use_container_width=False):
+    _login_time = st.session_state.get('analytics_login_time', datetime.now())
+    _session_dur = int((datetime.now() - _login_time).total_seconds())
+    log_event('logout', str(_session_dur), 'explicit')
     st.session_state.logged_in = False
     st.rerun()
 st.markdown('</div>', unsafe_allow_html=True)
@@ -2045,6 +2185,17 @@ except:
 
 # Render Navigation Bar
 selected_nav = ui_components.render_navbar(role)
+
+# --- אנליטיקת טאב: רישום כניסה ויציאה מטאבים ---
+_prev_tab = st.session_state.get('analytics_last_tab', None)
+if selected_nav != _prev_tab:
+    _now_tab = datetime.now()
+    if _prev_tab is not None:
+        _secs_on_prev = int((_now_tab - st.session_state.get('analytics_tab_enter', _now_tab)).total_seconds())
+        log_event('tab_view', _prev_tab, str(_secs_on_prev))
+    log_event('tab_view', selected_nav, 'enter')
+    st.session_state.analytics_last_tab = selected_nav
+    st.session_state.analytics_tab_enter = _now_tab
 
 # Month Selection Logic - MOVED TO SCHEDULE TAB ONLY (as requested)
 # sel_month defaults to active month, but admins can override it LOCALLY in the schedule tab
@@ -2127,6 +2278,7 @@ if selected_nav == 'הגדרות':
                     chosen = next(o for o in shift_options if o[0] == sel_label)
                     swap_date, swap_dept = chosen[1], chosen[2]
                     swap_month_int = int(swap_date.split('-')[1])
+                    log_event('swap_search', swap_date, swap_dept)
 
                     with st.spinner("מחפש החלפות..."):
                         results = find_swap_candidates(
@@ -2138,8 +2290,9 @@ if selected_nav == 'הגדרות':
 
                     full = results['full']
                     partial = results['partial']
+                    chain = results.get('chain', [])
 
-                    if not full and not partial:
+                    if not full and not partial and not chain:
                         st.warning("לא נמצאו אפשרויות החלפה תקפות למשמרת זו.")
                     else:
                         if full:
@@ -2170,6 +2323,7 @@ if selected_nav == 'הגדרות':
                                         existing = st.session_state.swap_requests
                                         combined = new_req if existing.empty else pd.concat([existing, new_req], ignore_index=True)
                                         save_to_db("swap_requests", combined)
+                                        log_event('swap_request_sent', swap_date, 'full')
                                         st.session_state.swap_requests = combined
                                         st.success("הבקשה נשלחה למנהל/ת לאישור.")
                                 st.divider()
@@ -2199,6 +2353,43 @@ if selected_nav == 'הגדרות':
                                         existing = st.session_state.swap_requests
                                         combined = new_req if existing.empty else pd.concat([existing, new_req], ignore_index=True)
                                         save_to_db("swap_requests", combined)
+                                        log_event('swap_request_sent', swap_date, 'partial')
+                                        st.session_state.swap_requests = combined
+                                        st.success("הבקשה נשלחה למנהל/ת לאישור.")
+                                st.divider()
+
+                        if chain:
+                            st.markdown("##### 🔗 החלפה משולשת")
+                            st.caption("מתמחה עובר/ת מ-שיקום ל-פנימית, תורן חוץ מכסה שיקום")
+                            for ch in chain:
+                                fac_pill = " ⭐" if ch['facilitator_wished'] else ""
+                                ext_pill = " ⭐" if ch['external_wished'] else ""
+                                c1, c2 = st.columns([3, 1])
+                                with c1:
+                                    st.markdown(
+                                        f"**{ch['facilitator_name']}**{fac_pill} ⇄ פנימית  +  "
+                                        f"**{ch['external_name']}**{ext_pill} → שיקום"
+                                    )
+                                with c2:
+                                    btn_key = f"swap_send_chain_{ch['facilitator_name']}_{ch['external_name']}_{swap_date}"
+                                    if st.button("🔄 בקש החלפה", key=btn_key, use_container_width=True):
+                                        new_req = pd.DataFrame([{
+                                            'requester': user_name,
+                                            'requester_date': swap_date,
+                                            'requester_dept': swap_dept,
+                                            'candidate': ch['facilitator_name'],
+                                            'candidate_date': swap_date,
+                                            'candidate_dept': 'פנימית גריאטרית',
+                                            'swap_type': 'chain',
+                                            'chain_ext': ch['external_name'],
+                                            'chain_ext_dept': 'שיקום',
+                                            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                                            'status': 'pending',
+                                        }])
+                                        existing = st.session_state.swap_requests
+                                        combined = new_req if existing.empty else pd.concat([existing, new_req], ignore_index=True)
+                                        save_to_db("swap_requests", combined)
+                                        log_event('swap_request_sent', swap_date, 'chain')
                                         st.session_state.swap_requests = combined
                                         st.success("הבקשה נשלחה למנהל/ת לאישור.")
                                 st.divider()
@@ -2475,6 +2666,9 @@ elif role == "מנהל/ת":
                     _stype      = str(_req.get('swap_type', 'partial'))
                     _created    = str(_req.get('created_at', ''))
 
+                    _chain_ext      = str(_req.get('chain_ext', ''))
+                    _chain_ext_dept = str(_req.get('chain_ext_dept', ''))
+
                     with st.container(border=True):
                         _ca, _cb = st.columns([4, 2])
                         with _ca:
@@ -2482,6 +2676,11 @@ elif role == "מנהל/ת":
                                 st.markdown(f"**✅ החלפה מלאה** | נשלח: {_created}")
                                 st.write(f"**{_requester}** מוותר/ת על: **{_r_date}** ({_r_dept})")
                                 st.write(f"← **{_candidate}** ייקח/תיקח אותה ויעביר/ת: **{_c_date}** ({_c_dept})")
+                            elif _stype == 'chain':
+                                st.markdown(f"**🔗 החלפה משולשת** | נשלח: {_created}")
+                                st.write(f"**{_requester}** מסיר/ה: **{_r_date}** ({_r_dept})")
+                                st.write(f"← **{_candidate}** עובר/ת מ-שיקום ל-פנימית")
+                                st.write(f"← **{_chain_ext}** מכסה שיקום")
                             else:
                                 st.markdown(f"**⚠️ כיסוי חד-צדדי** | נשלח: {_created}")
                                 st.write(f"**{_requester}** מבקש/ת כיסוי: **{_r_date}** ({_r_dept})")
@@ -2491,13 +2690,39 @@ elif role == "מנהל/ת":
                             _col_a, _col_r = st.columns(2)
                             if _col_a.button("✅ אשר", key=f"approve_swap_{_idx}", use_container_width=True):
                                 _sched = st.session_state.schedule
+                                # Mutation 1: requester's shift → candidate (or remove requester from פנימית for chain)
                                 _mask_req = (_sched['date'].astype(str) == _r_date) & (_sched['dept'] == _r_dept)
-                                st.session_state.schedule.loc[_mask_req, 'employee'] = _candidate
-                                st.session_state.schedule.loc[_mask_req, 'is_manual'] = True
-                                if _stype == 'full' and _c_date:
-                                    _mask_cand = (_sched['date'].astype(str) == _c_date) & (_sched['dept'] == _c_dept)
-                                    st.session_state.schedule.loc[_mask_cand, 'employee'] = _requester
-                                    st.session_state.schedule.loc[_mask_cand, 'is_manual'] = True
+                                if _stype == 'chain':
+                                    # Remove requester from פנימית
+                                    st.session_state.schedule.loc[_mask_req, 'employee'] = '---'
+                                    st.session_state.schedule.loc[_mask_req, 'is_manual'] = True
+                                    # Mutation 2: move facilitator (מתמחה) from שיקום → פנימית
+                                    _mask_fac = (_sched['date'].astype(str) == _r_date) & (_sched['dept'] == 'שיקום') & \
+                                                (_sched['employee'].astype(str).str.strip() == _candidate)
+                                    st.session_state.schedule.loc[_mask_fac, 'employee'] = '---'
+                                    st.session_state.schedule.loc[_mask_fac, 'is_manual'] = True
+                                    st.session_state.schedule.loc[_mask_req, 'employee'] = _candidate
+                                    # Mutation 3: assign תורן חוץ to שיקום (add new row if needed)
+                                    _mask_sha = (_sched['date'].astype(str) == _r_date) & (_sched['dept'] == 'שיקום') & \
+                                                (_sched['employee'].astype(str).str.strip().isin(['---', '']))
+                                    if _mask_sha.any():
+                                        st.session_state.schedule.loc[_mask_sha, 'employee'] = _chain_ext
+                                        st.session_state.schedule.loc[_mask_sha, 'is_manual'] = True
+                                    else:
+                                        _new_row = pd.DataFrame([{
+                                            'date': _r_date, 'dept': 'שיקום',
+                                            'employee': _chain_ext, 'is_manual': True, 'empty_reason': ''
+                                        }])
+                                        st.session_state.schedule = pd.concat(
+                                            [st.session_state.schedule, _new_row], ignore_index=True
+                                        )
+                                else:
+                                    st.session_state.schedule.loc[_mask_req, 'employee'] = _candidate
+                                    st.session_state.schedule.loc[_mask_req, 'is_manual'] = True
+                                    if _stype == 'full' and _c_date:
+                                        _mask_cand = (_sched['date'].astype(str) == _c_date) & (_sched['dept'] == _c_dept)
+                                        st.session_state.schedule.loc[_mask_cand, 'employee'] = _requester
+                                        st.session_state.schedule.loc[_mask_cand, 'is_manual'] = True
                                 save_to_db("schedule", st.session_state.schedule)
                                 _swap_reqs.loc[_idx, 'status'] = 'approved'
                                 save_to_db("swap_requests", _swap_reqs)
@@ -3138,6 +3363,178 @@ elif role == "מנהל/ת":
                 else:
                     st.info(f"{icon} {desc}")
 
+    # --- ניתוח שימוש במערכת ---
+    if selected_nav == 'דוחות וניהול':
+        st.divider()
+        with st.expander("📈 ניתוח שימוש במערכת", expanded=False):
+            _alog = get_db_data("analytics_log")
+            if _alog.empty or 'event_type' not in _alog.columns:
+                st.info("אין נתוני שימוש עדיין. הנתונים יצטברו אוטומטית ככל שמשתמשים נכנסים.")
+            else:
+                # ─── A. סיכום כללי ───────────────────────────────────────────────
+                st.markdown("#### A. סיכום כללי")
+                _logins = _alog[_alog['event_type'] == 'login_success']
+                _submits = _alog[_alog['event_type'] == 'constraint_submit']
+                _unique_users = _alog['user_name'].nunique()
+                _mobile_pct = (
+                    int((_logins['device_type'] == 'mobile').sum() / len(_logins) * 100)
+                    if not _logins.empty else 0
+                )
+                _avg_submits = (
+                    _submits.groupby('active_month').size().mean()
+                    if not _submits.empty else 0
+                )
+                _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                _mc1.metric("סה\"כ התחברויות", len(_logins))
+                _mc2.metric("משתמשים ייחודיים", _unique_users)
+                _mc3.metric("שיעור מובייל", f"{_mobile_pct}%")
+                _mc4.metric("ממוצע הגשות/חודש", f"{_avg_submits:.1f}")
+
+                st.divider()
+
+                # ─── B. פעילות לפי משתמש ─────────────────────────────────────────
+                st.markdown("#### B. פעילות לפי משתמש")
+                _by_user = pd.DataFrame()
+                if not _alog.empty:
+                    _grp = _alog.groupby('user_name')
+                    _b_logins  = _grp.apply(lambda g: (g['event_type'] == 'login_success').sum())
+                    _b_submits = _grp.apply(lambda g: (g['event_type'] == 'constraint_submit').sum())
+                    _b_searches= _grp.apply(lambda g: (g['event_type'] == 'swap_search').sum())
+                    _b_swaps   = _grp.apply(lambda g: (g['event_type'] == 'swap_request_sent').sum())
+                    _b_device  = _alog[_alog['event_type'] == 'login_success'].groupby('user_name')['device_type'].agg(
+                        lambda x: x.value_counts().index[0] if len(x) > 0 else 'unknown'
+                    )
+                    _by_user = pd.DataFrame({
+                        'שם': _b_logins.index,
+                        'התחברויות': _b_logins.values,
+                        'הגשות': _b_submits.reindex(_b_logins.index, fill_value=0).values,
+                        'חיפושי החלפה': _b_searches.reindex(_b_logins.index, fill_value=0).values,
+                        'בקשות החלפה': _b_swaps.reindex(_b_logins.index, fill_value=0).values,
+                        'מכשיר נפוץ': _b_device.reindex(_b_logins.index, fill_value='unknown').values,
+                    })
+                    st.dataframe(_by_user[_by_user.columns[::-1]], use_container_width=True, hide_index=True)
+
+                st.divider()
+
+                # ─── C. שיעור חסימה לעובד ────────────────────────────────────────
+                st.markdown("#### C. שיעור חסימה לעובד (חודש פעיל)")
+                _reqs_df = get_db_data("requests")
+                if not _reqs_df.empty:
+                    _month_prefix_a = f"2026-{sel_month:02d}"
+                    _days_in_month = calendar.monthrange(2026, sel_month)[1]
+                    _blocks = _reqs_df[
+                        (_reqs_df['status'] == 'אילוץ') &
+                        (_reqs_df['date'].astype(str).str.startswith(_month_prefix_a))
+                    ].groupby('employee').size().reset_index(name='חסימות')
+                    _blocks['חסימות'] = _blocks['חסימות'].astype(int)
+                    _blocks['% חסימה'] = (_blocks['חסימות'] / _days_in_month * 100).round(1)
+                    _blocks = _blocks.sort_values('% חסימה', ascending=False)
+
+                    def _block_color(pct):
+                        if pct > 60: return '🔴'
+                        if pct > 40: return '🟡'
+                        return '🟢'
+
+                    _blocks['סטטוס'] = _blocks['% חסימה'].apply(_block_color)
+                    _risk = _blocks[_blocks['% חסימה'] > 60]['employee'].tolist()
+                    if _risk:
+                        st.warning(f"⚠️ סיכון שיבוץ — חסימה מעל 60%: {', '.join(_risk)}")
+                    st.dataframe(_blocks[['employee', 'חסימות', '% חסימה', 'סטטוס']].rename(
+                        columns={'employee': 'עובד/ת'}
+                    )[['סטטוס', '% חסימה', 'חסימות', 'עובד/ת']], use_container_width=True, hide_index=True)
+                else:
+                    st.info("אין נתוני בקשות לחודש זה.")
+
+                st.divider()
+
+                # ─── D. שימוש בטאבים ─────────────────────────────────────────────
+                st.markdown("#### D. שימוש בטאבים")
+                _tab_entries = _alog[(_alog['event_type'] == 'tab_view') & (_alog['detail_2'] == 'enter')]
+                if not _tab_entries.empty:
+                    _tab_counts = _tab_entries.groupby('detail_1').size().reset_index(name='כניסות')
+                    _tab_counts = _tab_counts.rename(columns={'detail_1': 'טאב'})
+                    st.bar_chart(_tab_counts.set_index('טאב')['כניסות'])
+                else:
+                    st.info("אין נתוני טאב עדיין.")
+
+                st.divider()
+
+                # ─── E. זמן ממוצע בטאב ────────────────────────────────────────────
+                st.markdown("#### E. זמן ממוצע בטאב (שניות)")
+                _tab_exit = _alog[(_alog['event_type'] == 'tab_view') & (_alog['detail_2'] != 'enter')].copy()
+                if not _tab_exit.empty:
+                    _tab_exit['שניות'] = pd.to_numeric(_tab_exit['detail_2'], errors='coerce')
+                    _tab_exit = _tab_exit.dropna(subset=['שניות'])
+                    if not _tab_exit.empty:
+                        _avg_time = _tab_exit.groupby('detail_1')['שניות'].mean().round(1).reset_index()
+                        _avg_time = _avg_time.rename(columns={'detail_1': 'טאב', 'שניות': 'ממוצע שניות'})
+                        st.bar_chart(_avg_time.set_index('טאב')['ממוצע שניות'])
+                    else:
+                        st.info("אין נתוני זמן בטאב עדיין.")
+                else:
+                    st.info("אין נתוני זמן בטאב עדיין.")
+
+                st.divider()
+
+                # ─── F. התחברויות לפי שעה ─────────────────────────────────────────
+                st.markdown("#### F. התחברויות לפי שעה ביום")
+                if not _logins.empty:
+                    _logins_ts = _logins.copy()
+                    _logins_ts['שעה'] = pd.to_datetime(_logins_ts['timestamp'], errors='coerce').dt.hour
+                    _hour_counts = _logins_ts.groupby('שעה').size().reindex(range(24), fill_value=0).reset_index(name='כניסות')
+                    st.bar_chart(_hour_counts.set_index('שעה')['כניסות'])
+                else:
+                    st.info("אין נתוני כניסה עדיין.")
+
+                st.divider()
+
+                # ─── G. סוג מכשיר ─────────────────────────────────────────────────
+                st.markdown("#### G. סוג מכשיר")
+                if not _logins.empty:
+                    _dev_counts = _logins['device_type'].value_counts().reset_index()
+                    _dev_counts.columns = ['מכשיר', 'כניסות']
+                    _gc1, _gc2 = st.columns(2)
+                    with _gc1:
+                        st.dataframe(_dev_counts[['כניסות', 'מכשיר']], use_container_width=True, hide_index=True)
+                    with _gc2:
+                        _user_dev = _logins.groupby('user_name')['device_type'].agg(
+                            lambda x: x.value_counts().index[0] if len(x) > 0 else 'unknown'
+                        ).reset_index().rename(columns={'user_name': 'שם', 'device_type': 'מכשיר נפוץ'})
+                        st.dataframe(_user_dev[['מכשיר נפוץ', 'שם']], use_container_width=True, hide_index=True)
+                else:
+                    st.info("אין נתוני מכשיר עדיין.")
+
+                st.divider()
+
+                # ─── H. זיהוי רענון דף ────────────────────────────────────────────
+                st.markdown("#### H. זיהוי רענון דף")
+                if not _logins.empty:
+                    _logins_ts2 = _logins.copy()
+                    _logins_ts2['ts'] = pd.to_datetime(_logins_ts2['timestamp'], errors='coerce')
+                    _logins_ts2 = _logins_ts2.sort_values(['user_name', 'ts'])
+                    _logins_ts2['prev_ts'] = _logins_ts2.groupby('user_name')['ts'].shift(1)
+                    _logins_ts2['gap_min'] = (_logins_ts2['ts'] - _logins_ts2['prev_ts']).dt.total_seconds() / 60
+                    _reloads = _logins_ts2[_logins_ts2['gap_min'] < 5]['user_name'].unique().tolist()
+                    if _reloads:
+                        st.warning(f"⚠️ משתמשים עם כניסות כפולות תוך 5 דקות (ייתכן רענון דף): {', '.join(_reloads)}")
+                    else:
+                        st.success("לא זוהו רענונים חשודים.")
+                else:
+                    st.info("אין נתונים.")
+
+                st.divider()
+
+                # ─── I. תזמון הגשות ───────────────────────────────────────────────
+                st.markdown("#### I. תזמון הגשות (יום בחודש)")
+                if not _submits.empty:
+                    _sub_day = _submits['day_of_month'].astype(str).str.extract(r'(\d+)')[0]
+                    _sub_day = pd.to_numeric(_sub_day, errors='coerce').dropna().astype(int)
+                    _day_counts = _sub_day.value_counts().reindex(range(1, 32), fill_value=0).reset_index()
+                    _day_counts.columns = ['יום בחודש', 'הגשות']
+                    st.bar_chart(_day_counts.set_index('יום בחודש')['הגשות'])
+                else:
+                    st.info("אין נתוני הגשות עדיין.")
+
 
 else:
     user_name = st.session_state.user_name
@@ -3323,6 +3720,7 @@ else:
 
                     merged = pd.concat([base, pd.DataFrame(new_rows)], ignore_index=True) if new_rows else base
                     save_to_db("requests", merged)
+                    log_event('constraint_submit', str(len(selected)), str(len(wishes)))
                     st.session_state.requests = merged
                     _fetch_sheet_data_silently.clear()
                     st.session_state['confirm_request_save'] = False
