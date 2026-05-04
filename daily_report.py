@@ -524,48 +524,57 @@ def run_scheduling_simulation(year, month, data, day_ordering):
         fri_str = fri_date.strftime('%Y-%m-%d')
         sat_str = (fri_date + timedelta(days=1)).strftime('%Y-%m-%d')
 
+        # Helper: does sim_schedule already have a row for (date, dept)?
+        def _already_has(d, dept_name):
+            return any(s for s in sim_schedule
+                       if s.get('date') == d and s.get('dept') == dept_name)
+
         # ── פנימית morning: derived from who works פנימית on Friday and Saturday ──
         fri_pnimia = next(
-            (s['employee'] for s in sim_schedule
+            (str(s['employee']).strip() for s in sim_schedule
              if s['date'] == fri_str and s['dept'] == 'פנימית גריאטרית'
              and str(s.get('employee', '')).strip() not in ('', '---')),
             None
         )
         sat_pnimia = next(
-            (s['employee'] for s in sim_schedule
+            (str(s['employee']).strip() for s in sim_schedule
              if s['date'] == sat_str and s['dept'] == 'פנימית גריאטרית'
              and str(s.get('employee', '')).strip() not in ('', '---')),
             None
         )
-        if fri_pnimia:
-            sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)',
-                                  'employee': fri_pnimia, 'is_manual': False,
-                                  'empty_reason': 'נגזר אוטומטית משישי'})
-            fri_morning_counts[fri_pnimia] = fri_morning_counts.get(fri_pnimia, 0) + 1
-        else:
-            sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)',
-                                  'employee': '---', 'is_manual': False,
-                                  'empty_reason': 'לא שובץ פנימית בשישי'})
-            empty_slots.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)'})
+        if not _already_has(fri_str, 'שישי בוקר - פנימית (1)'):
+            if fri_pnimia:
+                sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)',
+                                      'employee': fri_pnimia, 'is_manual': False,
+                                      'empty_reason': 'נגזר אוטומטית משישי'})
+                fri_morning_counts[fri_pnimia] = fri_morning_counts.get(fri_pnimia, 0) + 1
+            else:
+                sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)',
+                                      'employee': '---', 'is_manual': False,
+                                      'empty_reason': 'לא שובץ פנימית בשישי'})
+                empty_slots.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)'})
 
-        if sat_pnimia:
-            sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)',
-                                  'employee': sat_pnimia, 'is_manual': False,
-                                  'empty_reason': 'נגזר אוטומטית משבת'})
-            fri_morning_counts[sat_pnimia] = fri_morning_counts.get(sat_pnimia, 0) + 1
-        else:
-            sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)',
-                                  'employee': '---', 'is_manual': False,
-                                  'empty_reason': 'לא שובץ פנימית בשבת'})
-            empty_slots.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)'})
+        if not _already_has(fri_str, 'שישי בוקר - פנימית (2)'):
+            if sat_pnimia:
+                sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)',
+                                      'employee': sat_pnimia, 'is_manual': False,
+                                      'empty_reason': 'נגזר אוטומטית משבת'})
+                fri_morning_counts[sat_pnimia] = fri_morning_counts.get(sat_pnimia, 0) + 1
+            else:
+                sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)',
+                                      'employee': '---', 'is_manual': False,
+                                      'empty_reason': 'לא שובץ פנימית בשבת'})
+                empty_slots.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)'})
 
         # ── שיקום morning: derived or via replacement מתמחה ──
         for slot_num, source_date_str, source_label in [
             ('1', fri_str, 'שישי'), ('2', sat_str, 'שבת')
         ]:
             target_dept   = f'שישי בוקר - שיקום ({slot_num})'
+            if _already_has(fri_str, target_dept):
+                continue
             rehab_worker  = next(
-                (s['employee'] for s in sim_schedule
+                (str(s['employee']).strip() for s in sim_schedule
                  if s['date'] == source_date_str and s['dept'] == 'שיקום'
                  and str(s.get('employee', '')).strip() not in ('', '---')),
                 None
@@ -735,15 +744,6 @@ def check_scheduling_feasibility(year, month, data):
             'day':          day_n,
         })
 
-    # ── Note if everything was filled cleanly ──
-    if not best_result['empty_slots'] and not best_result['fallback_slots']:
-        problems.append({
-            'severity':     'מידע',
-            'problem_type': '[שיבוץ] סטטוס שיבוץ',
-            'description':  'כל המשמרות אויישו בהצלחה ללא הגמשת חוקים',
-            'day':          0,
-        })
-
     # ── 3. Fallback slots (filled only by relaxing rest-gap/soft-quota) ──
     for fb in sorted(best_result['fallback_slots'], key=lambda s: (s['date'], s['dept'])):
         d_str = fb['date']
@@ -763,6 +763,54 @@ def check_scheduling_feasibility(year, month, data):
             'description':  f"יום {d_disp} — {dept}: שובץ {emp} רק בהגמשת חוקים (ניצול מכסה / מנוחה)",
             'day':          day_n,
         })
+
+    # ── Always-present summary row: total/filled counts for the admin at a glance ──
+    fridays_count       = sum(
+        1 for d in range(1, num_days + 1)
+        if date(year, month, d).weekday() == 4
+    )
+    total_regular_slots = num_days * len(DEPTS)
+    fri_morning_total   = fridays_count * 4   # 4 שישי בוקר slots per Friday
+
+    filled_regular  = 0
+    filled_fri_morn = 0
+    for s in sim_sched:
+        d_str = str(s.get('date', ''))
+        if not d_str.startswith(month_prefix):
+            continue
+        emp = str(s.get('employee', '')).strip()
+        if emp in ('', '---'):
+            continue
+        dept = str(s.get('dept', ''))
+        if 'שישי בוקר' in dept:
+            filled_fri_morn += 1
+        else:
+            filled_regular += 1
+
+    empty_count    = len(best_result['empty_slots'])
+    fallback_count = len(best_result['fallback_slots'])
+
+    # Critical days: any day already flagged קריטי (from this function or earlier checks)
+    critical_days = sorted(set(
+        p['day'] for p in problems
+        if p['severity'] == 'קריטי' and p.get('day', 0) > 0
+    ))
+
+    summary_desc = (
+        f"אסטרטגיה הטובה ביותר: {best_strat} | "
+        f"משמרות רגילות: {filled_regular}/{total_regular_slots} שובצו | "
+        f"שישי בוקר: {filled_fri_morn}/{fri_morning_total} שובצו | "
+        f"ימים ריקים: {empty_count} | "
+        f"שיבוצי גיבוי: {fallback_count} | "
+        f"ימים קריטיים: {len(critical_days)}"
+        + (f" ({', '.join(str(d) + '/' + str(month) for d in critical_days)})" if critical_days else "")
+    )
+    problems.append({
+        'severity':     'מידע',
+        'problem_type': '[שיבוץ] סיכום שיבוץ',
+        'description':  summary_desc,
+        'day':          0,
+    })
 
     return problems
 
