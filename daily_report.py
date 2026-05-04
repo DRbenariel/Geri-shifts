@@ -108,6 +108,562 @@ def get_active_month(settings_df):
 
 
 # ---------------------------------------------------------------------------
+# Scheduling Agent helpers (pure Python — no Streamlit)
+# ---------------------------------------------------------------------------
+
+def load_all_data(sh):
+    """Load staff, requests, schedule, special_days, settings from Google Sheets."""
+    def _load(name):
+        try:
+            ws = sh.worksheet(name)
+            data = ws.get_all_records()
+            return pd.DataFrame(data)
+        except gspread.exceptions.WorksheetNotFound:
+            return pd.DataFrame()
+
+    staff_df       = _load('staff')
+    requests_df    = _load('requests')
+    schedule_df    = _load('schedule')
+    special_days_df= _load('special_days')
+    settings_df    = _load('settings')
+
+    # Normalise only_home_dept (stored as string "True"/"False")
+    if not staff_df.empty and 'only_home_dept' in staff_df.columns:
+        staff_df['only_home_dept'] = staff_df['only_home_dept'].apply(
+            lambda v: v if isinstance(v, bool) else str(v).strip().lower() == 'true'
+        )
+
+    active_month = get_active_month(settings_df)
+    return {
+        'staff_df':        staff_df,
+        'requests_df':     requests_df,
+        'schedule_df':     schedule_df,
+        'special_days_df': special_days_df,
+        'active_month':    active_month,
+    }
+
+
+def is_functional_weekend_standalone(date_obj, special_days_df):
+    """Pure-Python replica of is_functional_weekend() — no Streamlit required."""
+    if isinstance(date_obj, str):
+        date_obj = datetime.strptime(date_obj, '%Y-%m-%d').date()
+    if date_obj.weekday() in (4, 5):  # Friday / Saturday
+        return True
+    # Check special day type
+    d_str = date_obj.strftime('%Y-%m-%d')
+    if not special_days_df.empty and 'day_type' in special_days_df.columns:
+        match = special_days_df[special_days_df['date'] == d_str]
+        if not match.empty:
+            day_type = match.iloc[0]['day_type']
+            if day_type in ('כמו שישי (ערב חג)', 'כמו שבת (חג)'):
+                return True
+    # Also check tomorrow's day_type (day-before-erev-chag is treated as weekend)
+    tomorrow = date_obj + timedelta(days=1)
+    tom_str = tomorrow.strftime('%Y-%m-%d')
+    if not special_days_df.empty and 'day_type' in special_days_df.columns:
+        match2 = special_days_df[special_days_df['date'] == tom_str]
+        if not match2.empty and match2.iloc[0]['day_type'] == 'כמו שישי (ערב חג)':
+            return True
+    return False
+
+
+def count_eligible_for_slot(date_str, dept, staff_df, requests_df, schedule_df):
+    """
+    Count how many employees COULD work (date_str, dept) in principle.
+    Only checks: type restriction, hard block (אילוץ), already assigned on that date.
+    Does NOT apply quota/rest-gap (those depend on scheduling order).
+    Returns (count, [name, ...]) tuple.
+    """
+    already_assigned = set(
+        str(r['employee']).strip()
+        for r in schedule_df.to_dict('records')
+        if str(r.get('date', '')) == date_str and str(r.get('employee', '')).strip() not in ('', '---')
+    ) if not schedule_df.empty else set()
+
+    blocked_on_date = set()
+    if not requests_df.empty:
+        mask = (
+            (requests_df['date'].astype(str) == date_str) &
+            (requests_df['status'].astype(str) == 'אילוץ')
+        )
+        blocked_on_date = set(requests_df[mask]['employee'].astype(str).str.strip().tolist())
+
+    eligible = []
+    for _, emp in staff_df.iterrows():
+        name = str(emp.get('name', '')).strip()
+        if not name or name in ('---', 'ADMIN'):
+            continue
+        emp_type = str(emp.get('type', '')).strip()
+        if emp_type == 'מנהל/ת':
+            continue
+        # Type restriction: external can't work פנימית
+        if emp_type == 'תורן חוץ' and dept == 'פנימית גריאטרית':
+            continue
+        # Home dept restriction
+        if emp.get('only_home_dept', False):
+            home = str(emp.get('dept', '')).strip()
+            if home not in ('כללי', dept):
+                continue
+        # Already assigned elsewhere this day
+        if name in already_assigned:
+            continue
+        # Hard block
+        if name in blocked_on_date:
+            continue
+        eligible.append(name)
+
+    return len(eligible), eligible
+
+
+def build_ordering(year, month, data, strategy):
+    """
+    Build a list of (date_obj, dept) tuples in the order the simulation should fill them.
+    Strategies:
+      'tier'             — critical (≤1 eligible) first, then weekends, then weekdays; within
+                           each tier sorted by fewest eligible ascending
+      'weekend_first'    — weekends first then weekdays (mirrors current app behaviour)
+      'constraint_first' — all slots sorted purely by fewest eligible ascending
+    """
+    staff_df        = data['staff_df']
+    requests_df     = data['requests_df']
+    schedule_df     = data['schedule_df']
+    special_days_df = data['special_days_df']
+
+    num_days  = calendar.monthrange(year, month)[1]
+    all_dates = [date(year, month, d) for d in range(1, num_days + 1)]
+    depts     = ['פנימית גריאטרית', 'שיקום']
+
+    # Build slot list with metadata
+    slots = []
+    for d_obj in all_dates:
+        d_str = d_obj.strftime('%Y-%m-%d')
+        is_we = is_functional_weekend_standalone(d_obj, special_days_df)
+        for dept in depts:
+            count, _ = count_eligible_for_slot(d_str, dept, staff_df, requests_df, schedule_df)
+            slots.append({
+                'date_obj': d_obj,
+                'dept':     dept,
+                'eligible': count,
+                'is_we':    is_we,
+                'day':      d_obj.day,
+            })
+
+    if strategy == 'tier':
+        def tier(s):
+            if s['eligible'] <= 1:
+                return 0
+            if s['is_we']:
+                return 1
+            return 2
+        slots.sort(key=lambda s: (tier(s), s['eligible'], s['day']))
+
+    elif strategy == 'weekend_first':
+        slots.sort(key=lambda s: (0 if s['is_we'] else 1, s['day']))
+
+    elif strategy == 'constraint_first':
+        slots.sort(key=lambda s: (s['eligible'], s['day']))
+
+    return [(s['date_obj'], s['dept']) for s in slots]
+
+
+def run_scheduling_simulation(year, month, data, day_ordering):
+    """
+    Greedy scheduling simulation — standalone (no Streamlit).
+    Returns dict: {schedule, empty_slots, fallback_slots, score}
+
+    Improvements over run_smart_scheduling():
+    - Wish priority = +1000 score bonus (not pool restriction)
+    - Day ordering provided by caller
+    - All state is local (no st.session_state)
+    """
+    staff_df        = data['staff_df']
+    requests_df     = data['requests_df']
+    schedule_df     = data['schedule_df']
+    special_days_df = data['special_days_df']
+    month_prefix    = f"{year}-{month:02d}"
+
+    # ── Start from existing schedule (preserve manual + real assignments) ──
+    sim_schedule = []
+    if not schedule_df.empty:
+        for r in schedule_df.to_dict('records'):
+            if not str(r.get('date', '')).startswith(month_prefix):
+                sim_schedule.append(r)  # keep other months
+            elif str(r.get('employee', '')).strip() not in ('', '---'):
+                sim_schedule.append(r)  # keep real assignments in active month
+
+    def safe_int(v, default=0):
+        try:
+            if pd.isna(v) or str(v).strip() == '':
+                return default
+            return int(float(v))
+        except (ValueError, TypeError):
+            return default
+
+    # Initialise counters
+    work_load         = {}
+    weekends_worked   = {}
+    last_assignment   = {}
+    wed_counts        = {}
+    thu_counts        = {}
+
+    for _, p in staff_df.iterrows():
+        n = str(p['name']).strip()
+        work_load[n]       = 0
+        weekends_worked[n] = set()
+        last_assignment[n] = -999
+        wed_counts[n]      = 0
+        thu_counts[n]      = 0
+
+    num_days = calendar.monthrange(year, month)[1]
+    for s in sim_schedule:
+        emp = str(s.get('employee', '')).strip()
+        if emp not in work_load or emp in ('', '---'):
+            continue
+        try:
+            dt = datetime.strptime(str(s['date']), '%Y-%m-%d')
+        except ValueError:
+            continue
+        if dt.weekday() == 2: wed_counts[emp] = wed_counts.get(emp, 0) + 1
+        if dt.weekday() == 3: thu_counts[emp] = thu_counts.get(emp, 0) + 1
+        if dt.toordinal() > last_assignment.get(emp, -999):
+            last_assignment[emp] = dt.toordinal()
+        if str(s['date']).startswith(month_prefix):
+            work_load[emp] = work_load.get(emp, 0) + 1
+            if is_functional_weekend_standalone(dt.date(), special_days_df) and 'שישי בוקר' not in str(s.get('dept', '')):
+                weekends_worked[emp].add(dt.isocalendar()[1])
+
+    # Pre-build wish set per date
+    wish_map = {}  # date_str -> set of names
+    if not requests_df.empty:
+        for _, r in requests_df.iterrows():
+            if str(r.get('status', '')) == 'בקשה':
+                d = str(r.get('date', ''))[:10]
+                wish_map.setdefault(d, set()).add(str(r.get('employee', '')).strip())
+
+    # Pre-build block set per date
+    block_map = {}  # date_str -> set of names
+    if not requests_df.empty:
+        for _, r in requests_df.iterrows():
+            if str(r.get('status', '')) == 'אילוץ':
+                d = str(r.get('date', ''))[:10]
+                block_map.setdefault(d, set()).add(str(r.get('employee', '')).strip())
+
+    empty_slots    = []
+    fallback_slots = []
+
+    for d_obj, dept in day_ordering:
+        d_str    = d_obj.strftime('%Y-%m-%d')
+        week_num = d_obj.isocalendar()[1]
+
+        # Already filled?
+        if any(s for s in sim_schedule if str(s.get('date', '')) == d_str and s.get('dept') == dept and str(s.get('employee', '')).strip() not in ('', '---')):
+            continue
+
+        candidates = []
+        failure_reasons = []
+
+        for _, person in staff_df.iterrows():
+            name     = str(person['name']).strip()
+            emp_type = str(person.get('type', '')).strip()
+
+            if not name or name in ('---', 'ADMIN') or emp_type == 'מנהל/ת':
+                continue
+            if emp_type == 'תורן חוץ' and dept == 'פנימית גריאטרית':
+                continue
+            # Already assigned another dept today
+            if any(s for s in sim_schedule if str(s.get('date', '')) == d_str and str(s.get('employee', '')).strip() == name):
+                continue
+            # Home dept restriction
+            if person.get('only_home_dept', False):
+                home = str(person.get('dept', '')).strip()
+                if home not in ('כללי', dept):
+                    continue
+            # Hard quota
+            monthly_quota = safe_int(person.get('monthly_quota', 0))
+            if work_load.get(name, 0) >= monthly_quota:
+                failure_reasons.append(f"{name}: מכסה")
+                continue
+            # Soft quota reservation (first half of month)
+            if d_obj.day < 15 and monthly_quota > 0 and work_load.get(name, 0) >= monthly_quota * 0.5:
+                failure_reasons.append(f"{name}: שמירת מכסה")
+                continue
+            # Weekend quota
+            weekend_quota = safe_int(person.get('weekend_quota', 0))
+            if is_functional_weekend_standalone(d_obj, special_days_df):
+                if len(weekends_worked.get(name, set())) >= weekend_quota and week_num not in weekends_worked.get(name, set()):
+                    failure_reasons.append(f"{name}: מכסת סופ\"ש")
+                    continue
+            # Rest gap ±2 days
+            has_rest_conflict = False
+            for offset in (-2, -1, 1, 2):
+                check_d = (d_obj + timedelta(days=offset)).strftime('%Y-%m-%d')
+                if any(s for s in sim_schedule if str(s.get('date', '')) == check_d and str(s.get('employee', '')).strip() == name):
+                    has_rest_conflict = True
+                    break
+            if has_rest_conflict:
+                failure_reasons.append(f"{name}: מנוחה")
+                continue
+            # Wed-Sat rule for מתמחה
+            if emp_type == 'מתמחה':
+                if d_obj.weekday() == 5:  # Saturday
+                    wed_check = (d_obj - timedelta(days=3)).strftime('%Y-%m-%d')
+                    if any(s for s in sim_schedule if str(s.get('date', '')) == wed_check and str(s.get('employee', '')).strip() == name):
+                        failure_reasons.append(f"{name}: שובץ ברביעי")
+                        continue
+                if d_obj.weekday() == 2:  # Wednesday
+                    sat_check = (d_obj + timedelta(days=3)).strftime('%Y-%m-%d')
+                    if any(s for s in sim_schedule if str(s.get('date', '')) == sat_check and str(s.get('employee', '')).strip() == name):
+                        failure_reasons.append(f"{name}: משובץ בשבת")
+                        continue
+                    fri_check = (d_obj + timedelta(days=2)).strftime('%Y-%m-%d')
+                    if any(s for s in sim_schedule if str(s.get('date', '')) == fri_check and str(s.get('employee', '')).strip() == name):
+                        failure_reasons.append(f"{name}: משובץ בשישי")
+                        continue
+            # Hard block
+            if name in block_map.get(d_str, set()):
+                failure_reasons.append(f"{name}: אילוץ")
+                continue
+
+            candidates.append(person)
+
+        if candidates:
+            # Score each candidate — WISH BONUS (+1000) instead of pool restriction
+            wishers_today = wish_map.get(d_str, set())
+
+            def calc_score(cand):
+                n      = str(cand['name']).strip()
+                quota  = safe_int(cand.get('monthly_quota', 1), 1)
+                usage  = work_load.get(n, 0) / quota if quota > 0 else 1.0
+                score  = -usage * 100
+
+                last_d     = last_assignment.get(n, -999)
+                days_diff  = d_obj.toordinal() - last_d
+                score     += days_diff * 2
+
+                month_prog    = d_obj.day / num_days
+                expected      = quota * month_prog
+                pacing        = (expected - work_load.get(n, 0)) * 500
+                score        += pacing
+
+                if dept == 'שיקום' and str(cand.get('type', '')).strip() == 'תורן חוץ':
+                    if d_obj.weekday() in (3, 4, 5) or is_functional_weekend_standalone(d_obj, special_days_df):
+                        score += 2000
+
+                emp_type_c = str(cand.get('type', '')).strip()
+                if emp_type_c == 'מתמחה':
+                    if d_obj.weekday() == 2: score -= wed_counts.get(n, 0) * 200
+                    if d_obj.weekday() == 3: score -= thu_counts.get(n, 0) * 200
+
+                cand_dept = str(cand.get('dept', '')).strip()
+                if cand_dept in (dept, 'כללי'):
+                    score += 500
+                else:
+                    score -= 5000
+
+                # IMPROVEMENT: wish bonus instead of pool restriction
+                if n in wishers_today:
+                    score += 1000
+
+                return score
+
+            chosen = max(candidates, key=calc_score)
+            chosen_name = str(chosen['name']).strip()
+            sim_schedule.append({'date': d_str, 'dept': dept, 'employee': chosen_name,
+                                  'is_manual': False, 'empty_reason': ''})
+            work_load[chosen_name]       = work_load.get(chosen_name, 0) + 1
+            last_assignment[chosen_name] = d_obj.toordinal()
+            if d_obj.weekday() == 2: wed_counts[chosen_name] = wed_counts.get(chosen_name, 0) + 1
+            if d_obj.weekday() == 3: thu_counts[chosen_name] = thu_counts.get(chosen_name, 0) + 1
+            if is_functional_weekend_standalone(d_obj, special_days_df):
+                weekends_worked.setdefault(chosen_name, set()).add(week_num)
+
+        else:
+            # Fallback: relax rest-gap and soft quota, keep hard quota + blocks
+            fallback_pool = []
+            for _, cand in staff_df.iterrows():
+                fn      = str(cand['name']).strip()
+                ft      = str(cand.get('type', '')).strip()
+                if not fn or fn in ('---', 'ADMIN') or ft == 'מנהל/ת':
+                    continue
+                if ft == 'תורן חוץ' and dept == 'פנימית גריאטרית':
+                    continue
+                if any(s for s in sim_schedule if str(s.get('date', '')) == d_str and str(s.get('employee', '')).strip() == fn):
+                    continue
+                if fn in block_map.get(d_str, set()):
+                    continue
+                fq = safe_int(cand.get('monthly_quota', 0))
+                if work_load.get(fn, 0) >= fq:
+                    continue
+                fallback_pool.append(fn)
+
+            if fallback_pool:
+                fb_choice = min(fallback_pool, key=lambda x: work_load.get(x, 0))
+                sim_schedule.append({'date': d_str, 'dept': dept, 'employee': fb_choice,
+                                      'is_manual': False, 'empty_reason': 'גיבוי (הגמשת חוקים)'})
+                fallback_slots.append({'date': d_str, 'dept': dept, 'employee': fb_choice})
+                work_load[fb_choice] = work_load.get(fb_choice, 0) + 1
+                last_assignment[fb_choice] = d_obj.toordinal()
+                if is_functional_weekend_standalone(d_obj, special_days_df):
+                    weekends_worked.setdefault(fb_choice, set()).add(week_num)
+            else:
+                sim_schedule.append({'date': d_str, 'dept': dept, 'employee': '---',
+                                      'is_manual': False, 'empty_reason': 'לא נמצא עובד'})
+                empty_slots.append({'date': d_str, 'dept': dept})
+
+    score = len(empty_slots) * 100 + len(fallback_slots) * 10
+    return {
+        'schedule':       sim_schedule,
+        'empty_slots':    empty_slots,
+        'fallback_slots': fallback_slots,
+        'score':          score,
+    }
+
+
+def check_scheduling_feasibility(year, month, data):
+    """
+    Run 3 scheduling strategies, compare results, and generate problem reports.
+    Returns list of problem dicts in the standard {severity, problem_type, description, day} format.
+    Called from analyze_month() only when today.day is in [3..8].
+    """
+    staff_df        = data['staff_df']
+    requests_df     = data['requests_df']
+    schedule_df     = data['schedule_df']
+    special_days_df = data['special_days_df']
+    month_prefix    = f"{year}-{month:02d}"
+    num_days        = calendar.monthrange(year, month)[1]
+    all_dates       = [date(year, month, d) for d in range(1, num_days + 1)]
+    depts           = ['פנימית גריאטרית', 'שיקום']
+
+    problems = []
+
+    # ── Pre-simulation: count eligible per slot (no ordering dependency) ──
+    slot_eligible = {}  # (date_str, dept) -> (count, [names])
+    for d_obj in all_dates:
+        d_str = d_obj.strftime('%Y-%m-%d')
+        for dept in depts:
+            count, names = count_eligible_for_slot(d_str, dept, staff_df, requests_df, schedule_df)
+            slot_eligible[(d_str, dept)] = (count, names)
+
+    # Flag critically constrained slots BEFORE simulation
+    day_names_he = {0: 'שני', 1: 'שלישי', 2: 'רביעי', 3: 'חמישי', 4: 'שישי', 5: 'שבת', 6: 'ראשון'}
+    for d_obj in all_dates:
+        d_str  = d_obj.strftime('%Y-%m-%d')
+        d_disp = f"{d_obj.day}/{month} ({day_names_he[d_obj.weekday()]})"
+        for dept in depts:
+            count, names = slot_eligible[(d_str, dept)]
+            # Skip slots already filled by existing schedule
+            if not schedule_df.empty:
+                already = any(
+                    str(r.get('date', '')) == d_str and r.get('dept') == dept and
+                    str(r.get('employee', '')).strip() not in ('', '---')
+                    for r in schedule_df.to_dict('records')
+                )
+                if already:
+                    continue
+
+            if count == 0:
+                problems.append({
+                    'severity':     'קריטי',
+                    'problem_type': '[שיבוץ] יום קריטי לאיוש',
+                    'description':  f"יום {d_disp} — {dept}: אפס עובדים כשירים (בלי מנוחה/מכסה). אי אפשר לאייש!",
+                    'day':          d_obj.day,
+                })
+            elif count == 1:
+                problems.append({
+                    'severity':     'קריטי',
+                    'problem_type': '[שיבוץ] יום קריטי לאיוש',
+                    'description':  f"יום {d_disp} — {dept}: עובד כשיר יחיד: {names[0]}. כל חסימה תיצור יום ריק!",
+                    'day':          d_obj.day,
+                })
+            elif count == 2:
+                problems.append({
+                    'severity':     'אזהרה',
+                    'problem_type': '[שיבוץ] משמרת מסוכנת',
+                    'description':  f"יום {d_disp} — {dept}: רק {count} עובדים כשירים ({', '.join(names)}). אין גמישות.",
+                    'day':          d_obj.day,
+                })
+
+    # ── Run 3 strategies ──
+    strategies  = ['tier', 'weekend_first', 'constraint_first']
+    strategy_he = {'tier': 'טייר (קריטי→סופ"ש→חול)', 'weekend_first': 'סופ"ש ראשון (נוכחי)', 'constraint_first': 'אילוץ-ראשון'}
+    results     = {}
+
+    for strat in strategies:
+        ordering = build_ordering(year, month, data, strat)
+        results[strat] = run_scheduling_simulation(year, month, data, ordering)
+
+    # Pick best strategy (lowest score)
+    best_strat  = min(results, key=lambda s: results[s]['score'])
+    best_result = results[best_strat]
+
+    # ── Summary problem ──
+    all_scores = ', '.join(f"{strategy_he[s]}={results[s]['score']}" for s in strategies)
+    problems.append({
+        'severity':     'מידע',
+        'problem_type': '[שיבוץ] סיכום סימולציה',
+        'description':  (
+            f"אסטרטגיה הטובה ביותר: {strategy_he[best_strat]} "
+            f"({len(best_result['empty_slots'])} ריקים, {len(best_result['fallback_slots'])} גיבויים). "
+            f"ניקוד כל האסטרטגיות: {all_scores}."
+        ),
+        'day': 0,
+    })
+
+    # ── Empty slots that persisted in ALL 3 strategies ──
+    all_empty_keys  = [set((s['date'], s['dept']) for s in results[strat]['empty_slots']) for strat in strategies]
+    empty_all       = all_empty_keys[0] & all_empty_keys[1] & all_empty_keys[2]
+    empty_some      = (all_empty_keys[0] | all_empty_keys[1] | all_empty_keys[2]) - empty_all
+
+    for d_str, dept in sorted(empty_all):
+        try:
+            d_obj  = datetime.strptime(d_str, '%Y-%m-%d').date()
+            d_disp = f"{d_obj.day}/{month} ({day_names_he[d_obj.weekday()]})"
+        except ValueError:
+            d_disp = d_str
+            d_obj  = None
+        problems.append({
+            'severity':     'קריטי',
+            'problem_type': '[שיבוץ] יום ריק (סימולציה)',
+            'description':  f"יום {d_disp} — {dept}: נשאר ריק בכל 3 האסטרטגיות. נדרש טיפול ידני דחוף.",
+            'day':          d_obj.day if d_obj else 0,
+        })
+
+    for d_str, dept in sorted(empty_some):
+        try:
+            d_obj  = datetime.strptime(d_str, '%Y-%m-%d').date()
+            d_disp = f"{d_obj.day}/{month} ({day_names_he[d_obj.weekday()]})"
+        except ValueError:
+            d_disp = d_str
+            d_obj  = None
+        problems.append({
+            'severity':     'אזהרה',
+            'problem_type': '[שיבוץ] יום ריק בחלק מהאסטרטגיות',
+            'description':  f"יום {d_disp} — {dept}: נשאר ריק בחלק מהאסטרטגיות — ניתן לשיפור בסדר העדיפויות.",
+            'day':          d_obj.day if d_obj else 0,
+        })
+
+    # ── Fallback-only slots in best run ──
+    for fb in best_result['fallback_slots']:
+        try:
+            d_obj  = datetime.strptime(fb['date'], '%Y-%m-%d').date()
+            d_disp = f"{d_obj.day}/{month} ({day_names_he[d_obj.weekday()]})"
+        except ValueError:
+            d_disp = fb['date']
+            d_obj  = None
+        problems.append({
+            'severity':     'מידע',
+            'problem_type': '[שיבוץ] שיבוץ גיבוי בלבד',
+            'description':  (
+                f"יום {d_disp} — {fb['dept']}: שובץ {fb['employee']} בשיטת גיבוי "
+                f"(הגמשת חוקי מנוחה/מכסה). יש לאשר ידנית."
+            ),
+            'day':          d_obj.day if d_obj else 0,
+        })
+
+    return problems
+
+
+# ---------------------------------------------------------------------------
 # Problem detectors
 # ---------------------------------------------------------------------------
 
@@ -324,8 +880,13 @@ def check_weekend_coverage(year, month, active_staff, blocked_map):
 # Main
 # ---------------------------------------------------------------------------
 
-def analyze_month(year, month, staff_df, requests_df):
+def analyze_month(year, month, staff_df, requests_df, schedule_df=None, special_days_df=None):
     month_prefix = f"{year}-{month:02d}"
+
+    if schedule_df is None:
+        schedule_df = pd.DataFrame()
+    if special_days_df is None:
+        special_days_df = pd.DataFrame()
 
     # Active scheduling employees only
     active_staff = staff_df[
@@ -342,6 +903,25 @@ def analyze_month(year, month, staff_df, requests_df):
     problems += check_quota_risk(year, month, active_staff, blocked_map)
     problems += check_empty_days(year, month, active_staff, blocked_map)
     problems += check_weekend_coverage(year, month, active_staff, blocked_map)
+
+    # Scheduling simulation: runs only on days 3–8 of the month
+    today = date.today()
+    if 3 <= today.day <= 8:
+        sched_data = {
+            'staff_df':        staff_df,
+            'requests_df':     requests_df,
+            'schedule_df':     schedule_df,
+            'special_days_df': special_days_df,
+        }
+        try:
+            problems += check_scheduling_feasibility(year, month, sched_data)
+        except Exception as e:
+            problems.append({
+                'severity':     'מידע',
+                'problem_type': '[שיבוץ] שגיאת סימולציה',
+                'description':  f"הסימולציה לא הושלמה: {e}",
+                'day':          0,
+            })
 
     # Sort: critical first, then warnings, then info, then by day
     severity_order = {'קריטי': 0, 'אזהרה': 1, 'מידע': 2, 'תקין': 3}
@@ -366,8 +946,13 @@ def save_report(sh, problems, year, month):
     ws.update('A1', header + rows)
     print(f"[{now_str}] Report saved: {len(rows)} issues for {month_str}")
     for p in problems:
-        icon = '🔴' if p['severity'] == 'קריטי' else '🟡' if p['severity'] == 'אזהרה' else 'ℹ️'
-        print(f"  {icon} [{p['problem_type']}] {p['description']}")
+        sev  = p['severity']
+        icon = '[CRITICAL]' if sev == 'קריטי' else '[WARN]' if sev == 'אזהרה' else '[INFO]'
+        line = f"  {icon} day={p.get('day', 0)} type={p['problem_type'][:30]}"
+        try:
+            print(line)
+        except Exception:
+            pass  # Hebrew terminal encoding issues on Windows — safe to ignore
 
 
 def main():
@@ -375,14 +960,17 @@ def main():
     gc = get_client()
     sh = gc.open_by_url(SPREADSHEET_URL)
 
-    staff_df    = load_sheet(sh, 'staff')
-    requests_df = load_sheet(sh, 'requests')
-    settings_df = load_sheet(sh, 'settings')
+    staff_df        = load_sheet(sh, 'staff')
+    requests_df     = load_sheet(sh, 'requests')
+    settings_df     = load_sheet(sh, 'settings')
+    schedule_df     = load_sheet(sh, 'schedule')
+    special_days_df = load_sheet(sh, 'special_days')
 
     month = get_active_month(settings_df)
-    print(f"Active month: {YEAR}-{month:02d}")
+    today = date.today()
+    print(f"Active month: {YEAR}-{month:02d} | Today: {today} | Simulation: {'YES' if 3 <= today.day <= 8 else 'no'}")
 
-    problems = analyze_month(YEAR, month, staff_df, requests_df)
+    problems = analyze_month(YEAR, month, staff_df, requests_df, schedule_df, special_days_df)
 
     if not problems:
         problems = [{

@@ -61,6 +61,33 @@ All reads/writes go through `get_db_data()` / `save_to_db()` — never access Sh
 3. `check_quota_risk` — employees whose available days can't meet their quota.
 4. `check_empty_days` — dates with 0 or 1 eligible employee per dept.
 5. `check_weekend_coverage` — Fri/Sat with exactly 2 eligible employees.
+6. `check_scheduling_feasibility` — **scheduling simulation agent** (runs only on days 3–8 of month). Runs 3 scheduling strategies, picks best, reports:
+   - `[שיבוץ] יום קריטי לאיוש` — slot with 0–1 eligible employees (pre-simulation) → קריטי
+   - `[שיבוץ] משמרת מסוכנת` — slot with exactly 2 eligible → אזהרה
+   - `[שיבוץ] יום ריק (סימולציה)` — empty in all 3 strategies → קריטי
+   - `[שיבוץ] יום ריק בחלק מהאסטרטגיות` — empty in some strategies → אזהרה
+   - `[שיבוץ] שיבוץ גיבוי בלבד` — filled only via fallback rules → מידע
+   - `[שיבוץ] סיכום סימולציה` — best strategy name + scores for all 3 → מידע
+
+## Scheduling simulation — 3 strategies
+- **tier** — critical slots (≤1 eligible) first, then weekends, then weekdays; within each tier sorted by fewest eligible ascending.
+- **weekend_first** — weekends first then weekdays (mirrors current app `run_smart_scheduling`).
+- **constraint_first** — all slots sorted purely by fewest eligible ascending.
+Score = `empty_slots * 100 + fallback_slots * 10`. Lowest score wins.
+
+## Scheduling simulation — 4 improvements vs `run_smart_scheduling()`
+1. Three-tier day ordering (critical → weekend → weekday) instead of weekend-first only.
+2. Constraint-first within each tier (fewest eligible first).
+3. Multiple runs (3 strategies) — picks best by score.
+4. Wish priority = +1000 score bonus instead of pool restriction (non-wishers still fill slot if wisher blocked).
+
+## Scheduling simulation — standalone helpers in `daily_report.py`
+- `load_all_data(sh)` — loads all 5 sheets into a dict.
+- `is_functional_weekend_standalone(date_obj, special_days_df)` — pure-Python replica of `is_functional_weekend()`.
+- `count_eligible_for_slot(date_str, dept, staff_df, requests_df, schedule_df)` — counts candidates by type+block+assigned (no quota/rest-gap).
+- `build_ordering(year, month, data, strategy)` — returns `[(date_obj, dept), ...]` for a given strategy.
+- `run_scheduling_simulation(year, month, data, day_ordering)` — greedy simulation, returns `{schedule, empty_slots, fallback_slots, score}`.
+- `check_scheduling_feasibility(year, month, data)` — orchestrates 3 runs, returns problem list.
 
 ## UI notes
 - `render_modern_calendar()` is the unified calendar component for constraint/wish selection.
