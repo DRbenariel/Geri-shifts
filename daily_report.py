@@ -21,6 +21,7 @@ SCOPES = [
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1fmjfqA04VMfbBYHw2OXqoY08X7heazlx0Cr2Uaa2LkY/edit?usp=sharing"
 YEAR = 2026
 DEPTS = ['פנימית גריאטרית', 'שיקום']
+FRI_MORNING_DEPTS = ['שישי בוקר - שיקום (1/2)', 'שישי בוקר - פנימית (1/2)']
 
 
 # ---------------------------------------------------------------------------
@@ -196,8 +197,8 @@ def count_eligible_for_slot(date_str, dept, staff_df, requests_df, schedule_df):
         emp_type = str(emp.get('type', '')).strip()
         if emp_type == 'מנהל/ת':
             continue
-        # Type restriction: external can't work פנימית
-        if emp_type == 'תורן חוץ' and dept == 'פנימית גריאטרית':
+        # Type restriction: external can't work פנימית (including Friday morning פנימית)
+        if emp_type == 'תורן חוץ' and 'פנימית' in dept:
             continue
         # Home dept restriction
         if emp.get('only_home_dept', False):
@@ -247,6 +248,17 @@ def build_ordering(year, month, data, strategy):
                 'is_we':    is_we,
                 'day':      d_obj.day,
             })
+        # Friday morning half-shifts — only on Fridays
+        if d_obj.weekday() == 4:
+            for fri_dept in FRI_MORNING_DEPTS:
+                count, _ = count_eligible_for_slot(d_str, fri_dept, staff_df, requests_df, schedule_df)
+                slots.append({
+                    'date_obj': d_obj,
+                    'dept':     fri_dept,
+                    'eligible': count,
+                    'is_we':    True,
+                    'day':      d_obj.day,
+                })
 
     if strategy == 'tier':
         def tier(s):
@@ -368,7 +380,7 @@ def run_scheduling_simulation(year, month, data, day_ordering):
 
             if not name or name in ('---', 'ADMIN') or emp_type == 'מנהל/ת':
                 continue
-            if emp_type == 'תורן חוץ' and dept == 'פנימית גריאטרית':
+            if emp_type == 'תורן חוץ' and 'פנימית' in dept:
                 continue
             # Already assigned another dept today
             if any(s for s in sim_schedule if str(s.get('date', '')) == d_str and str(s.get('employee', '')).strip() == name):
@@ -485,7 +497,7 @@ def run_scheduling_simulation(year, month, data, day_ordering):
                 ft      = str(cand.get('type', '')).strip()
                 if not fn or fn in ('---', 'ADMIN') or ft == 'מנהל/ת':
                     continue
-                if ft == 'תורן חוץ' and dept == 'פנימית גריאטרית':
+                if ft == 'תורן חוץ' and 'פנימית' in dept:
                     continue
                 if any(s for s in sim_schedule if str(s.get('date', '')) == d_str and str(s.get('employee', '')).strip() == fn):
                     continue
@@ -597,7 +609,7 @@ def check_scheduling_feasibility(year, month, data):
             'day':          0,
         })
 
-    # ── 2. Empty slots ──
+    # ── 2. Truly empty slots (even fallback failed) ──
     for empty in sorted(best_result['empty_slots'], key=lambda s: (s['date'], s['dept'])):
         d_str = empty['date']
         dept  = empty['dept']
@@ -613,6 +625,35 @@ def check_scheduling_feasibility(year, month, data):
             'severity':     'קריטי',
             'problem_type': '[שיבוץ] יום ריק',
             'description':  f"יום {d_disp} — {dept}: לא נמצא עובד זמין",
+            'day':          day_n,
+        })
+
+    # ── Note if everything was filled cleanly ──
+    if not best_result['empty_slots'] and not best_result['fallback_slots']:
+        problems.append({
+            'severity':     'מידע',
+            'problem_type': '[שיבוץ] סטטוס שיבוץ',
+            'description':  'כל המשמרות אויישו בהצלחה ללא הגמשת חוקים',
+            'day':          0,
+        })
+
+    # ── 3. Fallback slots (filled only by relaxing rest-gap/soft-quota) ──
+    for fb in sorted(best_result['fallback_slots'], key=lambda s: (s['date'], s['dept'])):
+        d_str = fb['date']
+        dept  = fb['dept']
+        emp   = str(fb.get('employee', '')).strip()
+        try:
+            d_obj  = datetime.strptime(d_str, '%Y-%m-%d').date()
+            d_disp = f"{d_obj.day}/{month} ({day_names_he[d_obj.weekday()]})"
+            day_n  = d_obj.day
+        except ValueError:
+            d_disp = d_str
+            day_n  = 0
+
+        problems.append({
+            'severity':     'אזהרה',
+            'problem_type': '[שיבוץ] שיבוץ בקושי',
+            'description':  f"יום {d_disp} — {dept}: שובץ {emp} רק בהגמשת חוקים (ניצול מכסה / מנוחה)",
             'day':          day_n,
         })
 
