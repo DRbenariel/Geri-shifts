@@ -21,7 +21,6 @@ SCOPES = [
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1fmjfqA04VMfbBYHw2OXqoY08X7heazlx0Cr2Uaa2LkY/edit?usp=sharing"
 YEAR = 2026
 DEPTS = ['פנימית גריאטרית', 'שיקום']
-FRI_MORNING_DEPTS = ['שישי בוקר - שיקום (1/2)', 'שישי בוקר - פנימית (1/2)']
 
 
 # ---------------------------------------------------------------------------
@@ -248,17 +247,6 @@ def build_ordering(year, month, data, strategy):
                 'is_we':    is_we,
                 'day':      d_obj.day,
             })
-        # Friday morning half-shifts — only on Fridays
-        if d_obj.weekday() == 4:
-            for fri_dept in FRI_MORNING_DEPTS:
-                count, _ = count_eligible_for_slot(d_str, fri_dept, staff_df, requests_df, schedule_df)
-                slots.append({
-                    'date_obj': d_obj,
-                    'dept':     fri_dept,
-                    'eligible': count,
-                    'is_we':    True,
-                    'day':      d_obj.day,
-                })
 
     if strategy == 'tier':
         def tier(s):
@@ -522,6 +510,125 @@ def run_scheduling_simulation(year, month, data, day_ordering):
                                       'is_manual': False, 'empty_reason': 'לא נמצא עובד'})
                 empty_slots.append({'date': d_str, 'dept': dept})
 
+    # ── Friday morning post-pass (mirrors appy.py logic) ──
+    # Dept names: שישי בוקר - פנימית (1)/(2) and שישי בוקר - שיקום (1)/(2)
+    # פנימית slots are auto-derived from the Friday/Saturday פנימית workers.
+    # שיקום slots: מתמחה does it themselves; תורן חוץ → find a replacement מתמחה.
+    fri_morning_counts = {}  # track per-employee fairness
+    fridays_in_month = [
+        date(year, month, d) for d in range(1, num_days + 1)
+        if date(year, month, d).weekday() == 4
+    ]
+
+    for fri_date in fridays_in_month:
+        fri_str = fri_date.strftime('%Y-%m-%d')
+        sat_str = (fri_date + timedelta(days=1)).strftime('%Y-%m-%d')
+
+        # ── פנימית morning: derived from who works פנימית on Friday and Saturday ──
+        fri_pnimia = next(
+            (s['employee'] for s in sim_schedule
+             if s['date'] == fri_str and s['dept'] == 'פנימית גריאטרית'
+             and str(s.get('employee', '')).strip() not in ('', '---')),
+            None
+        )
+        sat_pnimia = next(
+            (s['employee'] for s in sim_schedule
+             if s['date'] == sat_str and s['dept'] == 'פנימית גריאטרית'
+             and str(s.get('employee', '')).strip() not in ('', '---')),
+            None
+        )
+        if fri_pnimia:
+            sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)',
+                                  'employee': fri_pnimia, 'is_manual': False,
+                                  'empty_reason': 'נגזר אוטומטית משישי'})
+            fri_morning_counts[fri_pnimia] = fri_morning_counts.get(fri_pnimia, 0) + 1
+        else:
+            sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)',
+                                  'employee': '---', 'is_manual': False,
+                                  'empty_reason': 'לא שובץ פנימית בשישי'})
+            empty_slots.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)'})
+
+        if sat_pnimia:
+            sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)',
+                                  'employee': sat_pnimia, 'is_manual': False,
+                                  'empty_reason': 'נגזר אוטומטית משבת'})
+            fri_morning_counts[sat_pnimia] = fri_morning_counts.get(sat_pnimia, 0) + 1
+        else:
+            sim_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)',
+                                  'employee': '---', 'is_manual': False,
+                                  'empty_reason': 'לא שובץ פנימית בשבת'})
+            empty_slots.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)'})
+
+        # ── שיקום morning: derived or via replacement מתמחה ──
+        for slot_num, source_date_str, source_label in [
+            ('1', fri_str, 'שישי'), ('2', sat_str, 'שבת')
+        ]:
+            target_dept   = f'שישי בוקר - שיקום ({slot_num})'
+            rehab_worker  = next(
+                (s['employee'] for s in sim_schedule
+                 if s['date'] == source_date_str and s['dept'] == 'שיקום'
+                 and str(s.get('employee', '')).strip() not in ('', '---')),
+                None
+            )
+            if not rehab_worker:
+                sim_schedule.append({'date': fri_str, 'dept': target_dept,
+                                      'employee': '---', 'is_manual': False,
+                                      'empty_reason': f'לא שובץ שיקום ב{source_label}'})
+                empty_slots.append({'date': fri_str, 'dept': target_dept})
+                continue
+
+            worker_row  = staff_df[staff_df['name'].astype(str).str.strip() == rehab_worker]
+            worker_type = str(worker_row.iloc[0].get('type', '')).strip() if not worker_row.empty else ''
+
+            if worker_type == 'מתמחה':
+                # מתמחה does Friday morning themselves
+                sim_schedule.append({'date': fri_str, 'dept': target_dept,
+                                      'employee': rehab_worker, 'is_manual': False,
+                                      'empty_reason': f'נגזר אוטומטית מ{source_label}'})
+                fri_morning_counts[rehab_worker] = fri_morning_counts.get(rehab_worker, 0) + 1
+            else:
+                # תורן חוץ → find a מתמחה replacement from שיקום dept
+                cands = []
+                for _, row in staff_df.iterrows():
+                    n = str(row.get('name', '')).strip()
+                    t = str(row.get('type', '')).strip()
+                    d = str(row.get('dept', '')).strip()
+                    if t != 'מתמחה' or d != 'שיקום' or not n or n in ('---', 'ADMIN'):
+                        continue
+                    if n in block_map.get(fri_str, set()):
+                        continue
+                    # Not already assigned on Friday
+                    if any(s for s in sim_schedule
+                           if s['date'] == fri_str and str(s.get('employee', '')).strip() == n):
+                        continue
+                    # Rest gap ±2 days around Friday
+                    has_conflict = any(
+                        any(s for s in sim_schedule
+                            if s['date'] == (fri_date + timedelta(days=off)).strftime('%Y-%m-%d')
+                            and str(s.get('employee', '')).strip() == n)
+                        for off in (-2, -1, 1, 2)
+                    )
+                    if has_conflict:
+                        continue
+                    fq = safe_int(row.get('monthly_quota', 0))
+                    if work_load.get(n, 0) >= fq:
+                        continue
+                    cands.append((n, fri_morning_counts.get(n, 0)))
+
+                if cands:
+                    cands.sort(key=lambda x: x[1])  # fewest Friday mornings → fairest pick
+                    best = cands[0][0]
+                    sim_schedule.append({'date': fri_str, 'dept': target_dept,
+                                          'employee': best, 'is_manual': False,
+                                          'empty_reason': f'השלמה במקום {rehab_worker}'})
+                    fri_morning_counts[best] = fri_morning_counts.get(best, 0) + 1
+                    work_load[best] = work_load.get(best, 0) + 1
+                else:
+                    sim_schedule.append({'date': fri_str, 'dept': target_dept,
+                                          'employee': '---', 'is_manual': False,
+                                          'empty_reason': 'לא נמצא מחליף לבוקר'})
+                    empty_slots.append({'date': fri_str, 'dept': target_dept})
+
     score = len(empty_slots) * 100 + len(fallback_slots) * 10
     return {
         'schedule':       sim_schedule,
@@ -584,10 +691,10 @@ def check_scheduling_feasibility(year, month, data):
                 continue
             dept = str(s.get('dept', ''))
 
-            # Friday morning shifts
+            # Friday morning shifts (dept names: שישי בוקר - X (1) / (2))
             if 'שישי בוקר' in dept:
                 fri_morning += 1
-                continue  # don't count as a regular shift
+                continue  # don't count as a regular shift (counted separately)
 
             total_shifts += 1
             try:
