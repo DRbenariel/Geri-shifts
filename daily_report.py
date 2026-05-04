@@ -383,10 +383,9 @@ def run_scheduling_simulation(year, month, data, day_ordering):
             if work_load.get(name, 0) >= monthly_quota:
                 failure_reasons.append(f"{name}: מכסה")
                 continue
-            # Soft quota reservation (first half of month)
-            if d_obj.day < 15 and monthly_quota > 0 and work_load.get(name, 0) >= monthly_quota * 0.5:
-                failure_reasons.append(f"{name}: שמירת מכסה")
-                continue
+            # Note: soft quota reservation (50% by day 15) intentionally omitted from
+            # the simulation. The simulation tests hard feasibility only — pacing is an
+            # app-level fairness rule, not a physical constraint.
             # Weekend quota
             weekend_quota = safe_int(person.get('weekend_quota', 0))
             if is_functional_weekend_standalone(d_obj, special_days_df):
