@@ -27,22 +27,28 @@ All reads/writes go through `get_db_data()` / `save_to_db()` — never access Sh
 - Dates are stored as `YYYY-MM-DD` strings in Sheets, parsed with `datetime.strptime`.
 - Year is hardcoded to 2026 throughout — do not generalize unless explicitly asked.
 - `sel_month` is always an integer (1–12) read from session state.
-- Staff roles: `מתמחה` (intern), `תורן חוץ` (external), `מנהל/ת` (admin).
+- Staff roles: `מתמחה` (intern), `תורן חוץ` (external), `מנהל/ת` (admin), **`רופא בכיר`** (senior doctor — daily schedule only), **`מנהל מחלקה`** (department head — manages day-schedule for own dept(s)).
 - Request statuses: `אילוץ` (block/can't work), `בקשה` (wish/prefer to work).
 - Shift departments: `שיקום`, `פנימית גריאטרית`, plus four Friday morning half-shifts: `שישי בוקר - שיקום (1)`, `שישי בוקר - שיקום (2)`, `שישי בוקר - פנימית (1)`, `שישי בוקר - פנימית (2)`. Each Friday has all 4 → 4 Fridays/month = **16 שישי בוקר shifts**.
+- Daily-schedule departments (separate from night shifts): `שיקום גריאטרי א'`, `שיקום גריאטרי ב'`, `פנימית גריאטרית`.
+- Day status values (in `work_schedule_daily.status`): `עובד` / `חופש` / `202` / `אחרי תורנות` / `אחר`. **Always use "אחרי תורנות"** (not "מחרת תורנות").
 
 ## Google Sheets structure
 | Sheet | Key columns |
 |---|---|
-| `staff` | name, type, dept, monthly_quota, weekend_quota, password, only_home_dept |
+| `staff` | name, type, dept, monthly_quota, weekend_quota, password, only_home_dept, **email**, **manage_depts** |
 | `schedule` | date, dept, employee, is_manual, empty_reason |
 | `requests` | employee, date, status |
 | `special_days` | date, description, day_type |
-| `settings` | key, value (active_month) |
-| `Schedule_Export` | wide-format export (תאריך, יום, פנימית גריאטרית, שיקום, שישי בוקר cols) |
+| `settings` | key, value (`active_month`, **`daily_active_month`**, **`daily_requests_open`**) |
+| `Schedule_Export` | wide-format export of night shifts (תאריך, יום, פנימית גריאטרית, שיקום, שישי בוקר cols) — **export button moved to "לוח שיבוץ" tab** (no longer in דוחות וניהול) |
 | `daily_report` | generated_at, month, severity, problem_type, description |
 | `swap_requests` | requester, requester_date, requester_dept, candidate, candidate_date, candidate_dept, swap_type, chain_ext, chain_ext_dept, created_at, status |
 | `analytics_log` | event_id, session_id, timestamp, user_name, user_role, event_type, detail_1, detail_2, device_type, ua_string, viewport_width, active_month, day_of_month |
+| **`dept_rotation`** | employee, year_month (YYYY-MM), daily_dept |
+| **`absence_requests`** | id (uuid), employee, start_date, end_date, type (חופש/202/חופש עתידי/היעדרות אחרת), status (pending/approved/rejected), dept_at_request, manager_email, approved_by, notes, created_at, responded_at |
+| **`work_schedule_daily`** | date, employee, daily_dept, status, note, is_manual |
+| **`WSD_<dept>_<year_month>`** | per-dept wide-format export — rows=employees, cols=days 1..N, cells=status emoji. Created on demand by the "ייצוא" sub-tab in סידור חודשי. |
 
 ## Algorithm notes
 - `run_smart_scheduling()` — greedy, no backtracking. Scores candidates with hardcoded weights.
@@ -140,6 +146,64 @@ Implementation rules:
 ## Feature: דוח בעיות צפויות headline
 - Top of `דוחות וניהול` tab shows a live banner counting "ימי שיא חסימה" from the last saved report (קריטי / אזהרה counts) before the manual run button.
 - Headline reads from the already-saved `daily_report` sheet — does not re-run analysis on load.
+
+## Feature: סידור יומי / סידור חודשי (Daily Work Schedule)
+A second module on top of the night-shift scheduler — covers daytime staffing for 3 depts (`שיקום גריאטרי א'`, `שיקום גריאטרי ב'`, `פנימית גריאטרית`).
+
+### Tab access
+- **"הגשת בקשות"** (renamed from "הגשת אילוצים") — UNIFIED tab:
+  - מתמחה: 🌙 night constraints + ☀️ day absences (both sections)
+  - תורן חוץ: 🌙 night constraints only
+  - רופא בכיר: ☀️ day absences only
+  - מנהל מחלקה / מנהל/ת: not shown
+- **"סידור יומי"** (label for non-admins) / **"סידור חודשי"** (label for מנהל/ת) — same navbar tab, role-dependent label set in `render_navbar()`:
+  - מנהל/ת: 5 sub-tabs — שיבוץ חודשי / לוח עבודה כללי / כל הבקשות / צור סידור / ייצוא — with a top-level **month selector** (`view_month`) for planning ahead, plus a "הפוך לחודש פעיל" button
+  - מנהל מחלקה: 2 sub-tabs — לוח מחלקה (editable grid for own dept(s), includes own row) / בקשות ממתינות
+  - מתמחה / רופא בכיר: 1 view — לוח עבודה שלי (read-only colored calendar)
+  - תורן חוץ: tab not shown
+
+### Day-absence calendar UI ("הגשת בקשות" → ☀️ section)
+Calendar shows ONLY absence-related states — **no night shifts, no אחרי תורנות**:
+- 🔵 חופש מאושר (includes pre-approved חופש עתידי)
+- 🟡 202 מאושר
+- 🔘 בקשה ממתינה
+- ⬜ פנוי (clickable for new request)
+- ▶ / ✓ — current range being selected
+Submission dropdown has only **two types**: "חופש" / "202". Range select via 1st-click=start, 2nd-click=end.
+Submission writes to `absence_requests` (status=pending) + emails the matching מנהל מחלקה via `send_notification_email()`.
+Gate: `daily_requests_open` setting. Admin opens/closes via 🔓/🔒 button in שיבוץ חודשי sub-tab.
+
+### Department-grid editing (לוח מחלקה / לוח עבודה כללי)
+- One row per employee × one column per day. Cell shows status (עובד/חופש/202/אחרי/אחר), clicking cycles through statuses.
+- Any manual edit writes `is_manual=True` to `work_schedule_daily` — these rows are **never overwritten** by the schedule generator.
+- מנהל מחלקה appears as a row in the grid even without a `dept_rotation` row (their dept is read from `manage_depts`). They can "plant" themselves directly without going through the absence-request workflow.
+
+### Schedule generation (`_generate_work_schedule`)
+- Triggered by admin via "צור סידור" button.
+- For each (employee, day) in the month based on `dept_rotation`:
+  - **Priority 1**: approved absence covers this day → status = type
+  - **Priority 2**: night shift on day-1 (in `schedule` sheet, excluding שישי בוקר) → status = "אחרי תורנות"
+  - Else → status = "עובד"
+- Preserves all rows where `is_manual=True`.
+
+### Settings keys
+- `daily_active_month` — int 1..12, the live month employees are submitting for.
+- `daily_requests_open` — "True"/"False" string, gate for חופש/202 submissions. Auto-reset to "True" when admin changes `daily_active_month` via the "הפוך לחודש פעיל" button. חופש עתידי bypasses the gate (always submittable).
+- Read with `_get_setting(key, default)` helper, write with `_set_setting(key, value)`.
+
+### Email notifications
+- `send_notification_email(to_address, subject, body_html)` — defined right after `get_gspread_client()`. Uses stdlib `smtplib`+`email.mime`. Wrapped in `except Exception: pass` — never crashes the app.
+- Reads SMTP creds from `[email]` section in `secrets.toml` (`smtp_server`, `smtp_port`, `sender_address`, `sender_password`). Silently skips if not configured.
+- Triggers: (1) employee submits absence → manager email, (2) approve/reject → requester email.
+
+### Helpers
+- `_get_setting(key, default)` / `_set_setting(key, value)` — settings sheet read/write
+- `_approve_request(req_id, responder)` / `_reject_request(req_id, responder)` — wrap `_update_absence_status()` which updates row + emails requester
+- `_generate_work_schedule(year_month, view_month)` — main scheduler
+- `_wsd_get_status(date_str, employee, default)` / `_wsd_upsert(date, emp, dept, status, is_manual, note)` — work_schedule_daily I/O
+- `_render_dept_grid(dept_name, year_month, view_month, key_ns, employees, max_days)` — shared editable grid (admin + manager use it)
+- `_export_dept_grid(dept_name, year_month, view_month)` — writes wide-format `WSD_<dept>_<year_month>` sheet
+- `_export_schedule_wide(view_month)` — old Schedule_Export wide-format export, **moved to "לוח שיבוץ" tab** (was previously in "דוחות וניהול → ייצוא נתונים")
 
 ## Known data quality issues
 - **Employee names in Google Sheets may have trailing/invisible spaces.** Always `.str.strip()` before any name comparison — in login, submission checks, availability display, and anywhere `staff['name']` is compared to `requests['employee']`. The employee `לין חיר אל דין` has a confirmed trailing space in the staff sheet.

@@ -355,34 +355,51 @@ def setup_style():
     """, unsafe_allow_html=True)
 
 def render_navbar(role):
-    """Renders the responsive navigation bar using tabs for better RTL support."""
-    
+    """Renders the responsive navigation bar.
+    Role-based visibility:
+      - לוח שיבוץ + הגשת בקשות: מתמחה / תורן חוץ / מנהל/ת (לא: מנהל מחלקה / רופא בכיר)
+      - צוות + דוחות: מנהל/ת בלבד
+      - סידור יומי / סידור חודשי: כולם חוץ מ-תורן חוץ — תווית משתנה לפי תפקיד
+    """
     items = []
-    
+
     items.append(sac.TabsItem('הגדרות', icon='gear'))
-    items.append(sac.TabsItem('לוח שיבוץ', icon='calendar-week'))
-    
-    if role != "מנהל/ת":
-        items.append(sac.TabsItem('הגשת אילוצים', icon='calendar-check'))
-        
+
+    # לוח שיבוץ (תורנויות לילה) — מנהל מחלקה ורופא בכיר לא רואים
+    if role not in ("מנהל מחלקה", "רופא בכיר"):
+        items.append(sac.TabsItem('לוח שיבוץ', icon='calendar-week'))
+
+    # הגשת בקשות (טאב מאוחד שמחליף את "הגשת אילוצים") — לא לאדמין, לא למנהל מחלקה
+    if role not in ("מנהל/ת", "מנהל מחלקה"):
+        items.append(sac.TabsItem('הגשת בקשות', icon='calendar-check'))
+
+    # אדמין-בלבד
     if role == "מנהל/ת":
         items.append(sac.TabsItem('צוות', icon='people'))
         items.append(sac.TabsItem('דוחות וניהול', icon='bar-chart-line'))
-    # Determine default selected index based on role
-    # In RTL, index 0 is sometimes visually left or right depending on the container direction.
-    # Currently items are: 
-    # Admin items: 0: Settings, 1: Schedule, 2: Team, 3: Reports
-    # Intern items: 0: Settings, 1: Schedule, 2: Constraints
-    
-    # Check if this is the first render after login
+
+    # סידור יומי / סידור חודשי — תווית לפי תפקיד; תורן חוץ לא רואה
+    if role != "תורן חוץ":
+        daily_label = 'סידור חודשי' if role == "מנהל/ת" else 'סידור יומי'
+        items.append(sac.TabsItem(daily_label, icon='calendar3'))
+
+    # ── Default index after first login ───────────────────────────
     if 'nav_initialized' not in st.session_state:
+        # Find the most useful default per role
+        labels = [it.label for it in items]
         if role == "מנהל/ת":
-            st.session_state.current_nav_index = 3 # Reports
+            default = 'דוחות וניהול'
+        elif role in ("מנהל מחלקה", "רופא בכיר"):
+            default = 'סידור יומי'
         else:
-            st.session_state.current_nav_index = 2 # Constraints
+            default = 'הגשת בקשות'
+        st.session_state.current_nav_index = labels.index(default) if default in labels else 0
         st.session_state.nav_initialized = True
 
-    # Render horizontally using sac.tabs which handles RTL better Native-wise
+    # Clamp current_nav_index in case the items list changed
+    if st.session_state.current_nav_index >= len(items):
+        st.session_state.current_nav_index = 0
+
     st.markdown('<div dir="rtl" style="text-align: right;">', unsafe_allow_html=True)
     result = sac.tabs(
         items=items,
@@ -391,19 +408,17 @@ def render_navbar(role):
         size='lg',
         color='#4f46e5',
         return_index=False,
-        align='center' # Align items to the center or start/end
+        align='center'
     )
     st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Update current index based on user selection to maintain state across reruns
-    # Find the index of the selected item
+
     selected_idx = 0
     for i, item in enumerate(items):
         if item.label == result:
             selected_idx = i
             break
     st.session_state.current_nav_index = selected_idx
-    
+
     return result
 
 def render_mobile_bottom_nav(role):
