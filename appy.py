@@ -2675,7 +2675,7 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-st.title("מערכת תורנויות")
+st.title("מערכת סידור עבודה המערך הגריאטרי")
 
 # Logout button centered under title for mobile robustness
 if st.button("התנתק", key="logout_top", use_container_width=False):
@@ -3352,39 +3352,24 @@ elif role == "מנהל/ת":
         st.caption("שינויים בטבלה נשמרים רק בלחיצה על כפתור השמירה")
         
         # עטיפה בטופס (Form) כדי למנוע טעינה מחדש בכל שינוי תא
-        # הגדרות ווטסאפ בתוך הטופס כדי ששינויי תאריך לא יגרמו לאיפוס הטבלה
         with st.form(key="staff_batch_edit_form"):
-            # --- הגדרות לתזכורות ווטסאפ ---
-            import urllib.parse
-            st.markdown("**הגדרות תזכורת ווטסאפ (יופיעו כקישורים בטבלה למטה):**")
-            col_wa1, col_wa2 = st.columns(2)
-            with col_wa1:
-                hebrew_months = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"]
-                default_month_idx = (date.today().replace(day=1) + timedelta(days=32)).month - 1
-                wa_target_month = st.selectbox("חודש רלוונטי:", hebrew_months, index=default_month_idx)
-            with col_wa2:
-                default_deadline = date.today().replace(day=20) if date.today().day < 20 else (date.today().replace(day=1) + timedelta(days=32)).replace(day=20)
-                wa_deadline = st.date_input("תאריך יעד למילוי בקשות:", value=default_deadline)
-            # -----------------------------------------
-            # Prepare view without password
-            # Explicitly select columns to show, excluding password
-            # Also ensure only_home_dept is present
+            # Ensure only_home_dept exists
             if 'only_home_dept' not in st.session_state.staff.columns:
-                 st.session_state.staff['only_home_dept'] = False
-                 
+                st.session_state.staff['only_home_dept'] = False
+
             # Fix True/False serialization from Google Sheets
             def _is_true(v):
                 if pd.isna(v): return False
                 if isinstance(v, bool): return v
                 return str(v).strip().lower() == 'true'
-                
+
             st.session_state.staff['only_home_dept'] = st.session_state.staff['only_home_dept'].apply(_is_true)
-            
+
             # Multi-select for Home Dept only
             valid_names = [n for n in st.session_state.staff['name'].tolist() if str(n).strip() and n != '---']
             default_homes = st.session_state.staff[st.session_state.staff['only_home_dept']]['name'].dropna().tolist()
             default_homes = [n for n in default_homes if n in valid_names]
-            
+
             selected_home_depts = st.multiselect(
                 "עובדים המוגבלים למחלקת האם בלבד (ללא חציות למחלקות אחרות):",
                 options=valid_names,
@@ -3392,48 +3377,52 @@ elif role == "מנהל/ת":
             )
             st.divider()
 
-            # We want to edit: name, type, dept, monthly_quota, weekend_quota
-            # We remove 'password' and 'only_home_dept' from the editable table
-            cols_to_show = [c for c in st.session_state.staff.columns if c not in ['password', 'only_home_dept']]
+            # Build editor view: exclude password & only_home_dept from the editable table
+            # (only_home_dept handled via the multiselect above)
+            preferred_order = ['name', 'type', 'dept', 'monthly_quota', 'weekend_quota',
+                               'email', 'manage_depts']
+            available = [c for c in preferred_order if c in st.session_state.staff.columns]
+            # tack on any unexpected extra cols (except hidden)
+            extras = [c for c in st.session_state.staff.columns
+                      if c not in available and c not in ('password', 'only_home_dept', 'whatsapp_link')]
+            cols_to_show = available + extras
             staff_view = st.session_state.staff[cols_to_show].copy()
-            
-            # --- הוספת עמודת תזכורת ווטסאפ ---
-            whatsapp_links = []
-            for idx, row in staff_view.iterrows():
-                emp_name = str(row['name'])
-                if emp_name.strip() and emp_name != '---':
-                    wa_msg = f"היי {emp_name},\nתזכורת למלא בקשות לחודש {wa_target_month} עד לתאריך {wa_deadline.strftime('%d/%m/%Y')}.\nלמערכת השיבוצים: https://geri-shifts-scheduler.streamlit.app"
-                    encoded_msg = urllib.parse.quote(wa_msg)
-                    link = f"https://wa.me/?text={encoded_msg}"
-                else:
-                    link = None
-                whatsapp_links.append(link)
-            
-            staff_view['whatsapp_link'] = whatsapp_links
-            cols_to_show.append('whatsapp_link')
-            # -----------------------------------------
-            
-            # Reorder for RTL or just keep consistent? 
-            # Original code did: reversed_staff_view = st.session_state.staff[st.session_state.staff.columns[::-1]]
-            # Let's respect RTL by reversing, but ensuring password is gone first.
-            
+
+            # Reverse for RTL display
             reversed_cols = cols_to_show[::-1]
             reversed_staff_view = staff_view[reversed_cols]
 
             staff_editor = st.data_editor(
-                reversed_staff_view, 
-                use_container_width=True, 
+                reversed_staff_view,
+                use_container_width=True,
                 num_rows="dynamic",
+                hide_index=True,
                 column_config={
-                    "whatsapp_link": st.column_config.LinkColumn(
-                        "ווטסאפ",
-                        help="לחץ לפתיחת ווטסאפ",
-                        display_text="📱",
-                        width="small"
-                    )
+                    "name": st.column_config.TextColumn(
+                        "👤 שם", help="שם מלא של העובד", width="medium", required=True),
+                    "type": st.column_config.SelectboxColumn(
+                        "תפקיד",
+                        options=["מתמחה", "תורן חוץ", "מנהל/ת", "רופא בכיר", "מנהל מחלקה"],
+                        width="small", required=True),
+                    "dept": st.column_config.SelectboxColumn(
+                        "מחלקה",
+                        options=["שיקום", "פנימית גריאטרית", "כללי", "הנהלה"],
+                        width="small"),
+                    "monthly_quota": st.column_config.NumberColumn(
+                        "מכסה חודשית", help="מספר תורנויות חודשיות נדרשות",
+                        min_value=0, max_value=20, step=1, width="small"),
+                    "weekend_quota": st.column_config.NumberColumn(
+                        "מכסת סופ\"ש", help="תורנויות סוף שבוע נדרשות",
+                        min_value=0, max_value=10, step=1, width="small"),
+                    "email": st.column_config.TextColumn(
+                        "📧 אימייל", help="לקבלת התראות (אופציונלי)", width="medium"),
+                    "manage_depts": st.column_config.TextColumn(
+                        "מחלקות בניהול",
+                        help="רק למנהל מחלקה — שמות מופרדים בפסיקים, לדוגמה: שיקום גריאטרי א',שיקום גריאטרי ב'",
+                        width="medium"),
                 }
             )
-            submit_changes = st.form_submit_button("💾 שמור שינויים בצוות")
+            submit_changes = st.form_submit_button("💾 שמור שינויים בצוות", use_container_width=False)
         
         if submit_changes:
             # Merge logic:
@@ -3444,11 +3433,7 @@ elif role == "מנהל/ת":
             
             # Because we reversed columns for display, we reverse back to normal for processing
             edited_df = staff_editor[staff_editor.columns[::-1]]
-            
-            # Remove the whatsapp column so it doesn't get saved to DB!
-            if 'whatsapp_link' in edited_df.columns:
-                edited_df = edited_df.drop(columns=['whatsapp_link'])
-            
+
             # Reattach only_home_dept dynamically from the multiselect
             edited_df['only_home_dept'] = edited_df['name'].isin(selected_home_depts)
 
@@ -3579,6 +3564,56 @@ elif role == "מנהל/ת":
                     st.success(f"האילוצים של {selected_emp_mgr} עודכנו בהצלחה!")
                     st.session_state.pop(f"{mgr_key_prefix}_init_{sel_month}", None)
                     st.rerun()
+
+            # ── ☀️ היעדרויות יומיות לעובד הנבחר ──────────────────────
+            st.divider()
+            st.markdown("### ☀️ היעדרויות יומיות (עבודת בוקר)")
+            st.caption("בקשות ההיעדרות של העובד — ניתן לאשר/לדחות בקשות ממתינות.")
+
+            ar_tzevet = st.session_state.absence_requests.copy()
+            if ar_tzevet.empty or 'employee' not in ar_tzevet.columns:
+                st.info("אין בקשות במערכת.")
+            else:
+                ar_tzevet['employee'] = ar_tzevet['employee'].astype(str).str.strip()
+                ar_tzevet['status']   = ar_tzevet['status'].astype(str).str.lower()
+                emp_n = str(selected_emp_mgr).strip()
+                emp_reqs_da = ar_tzevet[ar_tzevet['employee'] == emp_n]
+
+                if emp_reqs_da.empty:
+                    st.info(f"אין בקשות היעדרות לעובד {selected_emp_mgr}.")
+                else:
+                    pending_da = emp_reqs_da[emp_reqs_da['status'] == 'pending']
+                    if not pending_da.empty:
+                        st.markdown(f"**🟡 ממתינות לאישור ({len(pending_da)})**")
+                        for idx_da, row_da in pending_da.iterrows():
+                            with st.container(border=True):
+                                ca, cb, cc, cd, ce = st.columns([2, 2, 2, 1, 1])
+                                ca.write(f"{row_da['start_date']} – {row_da['end_date']}")
+                                cb.write(row_da.get('type', '—'))
+                                cc.write(row_da.get('dept_at_request', '—') or '—')
+                                req_id_da = str(row_da.get('id', idx_da))
+                                if cd.button("✅ אשר", key=f"tzv_ap_{req_id_da}",
+                                             use_container_width=True):
+                                    _approve_request(req_id_da, str(user_name).strip())
+                                    st.rerun()
+                                if ce.button("❌ דחה", key=f"tzv_rj_{req_id_da}",
+                                             use_container_width=True):
+                                    _reject_request(req_id_da, str(user_name).strip())
+                                    st.rerun()
+                                if row_da.get('notes'):
+                                    st.caption(f"💬 {row_da['notes']}")
+                    # All requests (including approved/rejected) as a compact table
+                    st.markdown("**📋 היסטוריה מלאה**")
+                    show_da = emp_reqs_da[['start_date','end_date','type','status','approved_by','notes']].copy()
+                    show_da['status'] = show_da['status'].map({
+                        'pending':'⏳ ממתין', 'approved':'✅ אושר', 'rejected':'❌ נדחה'
+                    }).fillna(show_da['status'])
+                    show_da = show_da.rename(columns={
+                        'start_date':'תאריך התחלה', 'end_date':'תאריך סיום',
+                        'type':'סוג', 'status':'סטטוס', 'approved_by':'מאשר', 'notes':'הערה',
+                    })
+                    st.dataframe(show_da, use_container_width=True, hide_index=True)
+
     elif selected_nav == 'דוחות וניהול':
         # st.header("דוח סטטוס ומסכמים") - Removed by user request
         
@@ -4327,6 +4362,61 @@ elif role == "מנהל/ת":
                 else:
                     fail = [n for n, o in results if not o]
                     st.warning(f"יוצאו {ok_count}/3. נכשלו: {', '.join(fail)}")
+
+    # ── סידור יומי (אדמין) — same view as מנהל מחלקה but for any dept of choice ──
+    if selected_nav == 'סידור יומי':
+        st.subheader("🗓️ סידור יומי — תצוגת מנהל מחלקה (אדמין)")
+        st.caption("בחר מחלקה לראות אותה כפי שמנהל המחלקה רואה (לוח מחלקה + בקשות ממתינות).")
+
+        adm_hebrew_months = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
+                             "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
+        ALL_DAILY_DEPTS = ["שיקום גריאטרי א'", "שיקום גריאטרי ב'", "פנימית גריאטרית"]
+        sel_dept_admin = st.selectbox("מחלקה לתצוגה:", ALL_DAILY_DEPTS, key="adm_sy_dept")
+
+        st.caption(f"חודש פעיל: **{adm_hebrew_months[daily_active_month_int-1]} 2026**")
+        adm_y_m = f"2026-{daily_active_month_int:02d}"
+
+        adm_mgr_tabs = st.tabs(["לוח מחלקה", "בקשות ממתינות"])
+        with adm_mgr_tabs[0]:
+            st.markdown(f"#### לוח {sel_dept_admin}")
+            _render_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int,
+                              "adm_mgrview", max_days=15)
+            st.divider()
+            if st.button(f"📤 ייצא {sel_dept_admin}", key="adm_mgr_exp"):
+                if _export_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int):
+                    st.success(f"✅ {sel_dept_admin} יוצא!")
+
+        with adm_mgr_tabs[1]:
+            st.markdown(f"#### בקשות ממתינות — {sel_dept_admin}")
+            ar_admgr = st.session_state.absence_requests.copy()
+            if ar_admgr.empty or 'status' not in ar_admgr.columns:
+                st.info("אין בקשות במערכת.")
+            else:
+                ar_admgr['status']          = ar_admgr['status'].astype(str).str.lower()
+                ar_admgr['dept_at_request'] = ar_admgr['dept_at_request'].astype(str)
+                pen = ar_admgr[(ar_admgr['status'] == 'pending') &
+                               (ar_admgr['dept_at_request'] == sel_dept_admin)]
+                if pen.empty:
+                    st.success("אין בקשות ממתינות במחלקה זו ✅")
+                else:
+                    st.caption(f"📋 {len(pen)} בקשות ממתינות")
+                    for idx, row in pen.iterrows():
+                        with st.container(border=True):
+                            cc1, cc2, cc3, cc4, cc5 = st.columns([2, 2, 2, 1, 1])
+                            cc1.markdown(f"**{row.get('employee', '—')}**")
+                            cc2.write(f"{row['start_date']} – {row['end_date']}")
+                            cc3.write(row.get('type', '—'))
+                            req_id = str(row.get('id', idx))
+                            if cc4.button("✅ אשר", key=f"admmgr_ap_{req_id}",
+                                          use_container_width=True):
+                                _approve_request(req_id, str(user_name).strip())
+                                st.rerun()
+                            if cc5.button("❌ דחה", key=f"admmgr_rj_{req_id}",
+                                          use_container_width=True):
+                                _reject_request(req_id, str(user_name).strip())
+                                st.rerun()
+                            if row.get('notes'):
+                                st.caption(f"💬 {row['notes']}")
 
 
 else:

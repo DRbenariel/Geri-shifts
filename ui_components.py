@@ -378,10 +378,13 @@ def render_navbar(role):
         items.append(sac.TabsItem('צוות', icon='people'))
         items.append(sac.TabsItem('דוחות וניהול', icon='bar-chart-line'))
 
-    # סידור יומי / סידור חודשי — תווית לפי תפקיד; תורן חוץ לא רואה
-    if role != "תורן חוץ":
-        daily_label = 'סידור חודשי' if role == "מנהל/ת" else 'סידור יומי'
-        items.append(sac.TabsItem(daily_label, icon='calendar3'))
+    # סידור יומי / סידור חודשי — תורן חוץ לא רואה
+    # אדמין רואה את שניהם: "סידור חודשי" (תכנון + 5 תתי-טאבים) + "סידור יומי" (תצוגת מנהל מחלקה)
+    if role == "מנהל/ת":
+        items.append(sac.TabsItem('סידור חודשי', icon='calendar3'))
+        items.append(sac.TabsItem('סידור יומי',  icon='calendar-day'))
+    elif role != "תורן חוץ":
+        items.append(sac.TabsItem('סידור יומי', icon='calendar3'))
 
     # ── Default index after first login ───────────────────────────
     if 'nav_initialized' not in st.session_state:
