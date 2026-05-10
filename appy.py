@@ -847,13 +847,14 @@ def login_screen():
     st.markdown("<br>", unsafe_allow_html=True) # Spacing before button
     
     if st.button("כניסה", use_container_width=True):
-        staff_df = get_db_data("staff")
+        # Use _fetch_live so login always reads fresh data, bypassing the cache
+        # (a stale cached empty-DataFrame would otherwise block every login attempt)
+        staff_df = _fetch_live("staff")
         hashed_pass = hashlib.sha256(password.encode()).hexdigest()
 
-        # Guard: empty sheet or missing 'name' column (API hiccup / first boot)
-        if staff_df.empty or 'name' not in staff_df.columns:
-            # Clear the cache so next attempt fetches fresh data
-            _fetch_sheet_data_silently.clear()
+        # Guard: 'name' column missing means the sheet could not be read at all
+        # (staff_df.empty is valid — sheet may have headers but no employees yet)
+        if 'name' not in staff_df.columns:
             st.error("לא ניתן לטעון את רשימת הצוות — נסה שוב")
             st.stop()
 
