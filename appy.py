@@ -31,26 +31,42 @@ from streamlit_gsheets import GSheetsConnection
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _fetch_sheet_data_silently(worksheet_name):
-    # הפונקציה הזו רצה מאחורי הקלעים ומביאה את הנתונים ללא הודעות קופצות
+    """
+    Cached sheet read. Uses get_all_values() so a sheet with a header row but
+    no data rows still returns a DataFrame with correct column names.
+    """
     gc = get_gspread_client()
     url = st.secrets["connections"]["gsheets"]["spreadsheet"]
     sh = gc.open_by_url(url)
     try:
         ws = sh.worksheet(worksheet_name)
-        data = ws.get_all_records()
-        return pd.DataFrame(data)
+        vals = ws.get_all_values()
+        if not vals:
+            return pd.DataFrame()
+        headers = vals[0]
+        data    = vals[1:]
+        return pd.DataFrame(data, columns=headers)
     except gspread.exceptions.WorksheetNotFound:
         return pd.DataFrame()
 
 def _fetch_live(worksheet_name):
-    """Direct Sheets read that bypasses the cache — use only immediately before a write."""
+    """
+    Direct Sheets read that bypasses the cache — use only immediately before a write.
+    Uses get_all_values() so a sheet with a header row but no data rows still returns
+    a DataFrame with the correct column names (not an empty columnless DataFrame).
+    """
     for attempt in range(3):
         try:
             gc = get_gspread_client()
             url = st.secrets["connections"]["gsheets"]["spreadsheet"]
             sh = gc.open_by_url(url)
             ws = sh.worksheet(worksheet_name)
-            return pd.DataFrame(ws.get_all_records())
+            vals = ws.get_all_values()
+            if not vals:
+                return pd.DataFrame()
+            headers = vals[0]
+            data    = vals[1:]
+            return pd.DataFrame(data, columns=headers)
         except gspread.exceptions.WorksheetNotFound:
             return pd.DataFrame()
         except gspread.exceptions.APIError as e:
@@ -745,68 +761,72 @@ def save_to_db(worksheet_name, df, is_rtl=False):
     st.error(f"שגיאה קריטית בשמירה לגיליון '{worksheet_name}': {last_err}")
 
 def init_db():
-    # בדיקה האם יש נתונים בטבלת staff, אם לא - נאתחל
+    """
+    Safe, additive initialisation.
+    ONLY creates worksheets that do not yet exist — NEVER overwrites or clears
+    any worksheet that is already present (even if it has zero data rows).
+    This prevents accidental data loss on API hiccups or cold-start empty reads.
+    """
+    # Required sheets and their header columns
+    REQUIRED_SHEETS = {
+        "staff": ['name', 'type', 'dept', 'monthly_quota', 'weekend_quota',
+                  'password', 'only_home_dept', 'email', 'manage_depts',
+                  'recurring_absent_days'],
+        "schedule":     ['date', 'dept', 'employee', 'is_manual', 'empty_reason'],
+        "requests":     ['employee', 'date', 'status'],
+        "special_days": ['date', 'description', 'day_type'],
+        "dept_rotation":        ['employee', 'year_month', 'daily_dept'],
+        "absence_requests":     ['id', 'employee', 'start_date', 'end_date', 'type',
+                                 'status', 'dept_at_request', 'manager_email',
+                                 'approved_by', 'notes', 'created_at', 'responded_at'],
+        "work_schedule_daily":  ['date', 'employee', 'daily_dept', 'status', 'note', 'is_manual'],
+    }
+    SETTINGS_DEFAULTS = [
+        ('active_month',        str((date.today().replace(day=1) + timedelta(days=32)).month)),
+        ('daily_active_month',  str((date.today().replace(day=1) + timedelta(days=32)).month)),
+        ('daily_requests_open', 'True'),
+    ]
+
     try:
-        current_staff = get_db_data("staff")
+        gc  = get_gspread_client()
+        url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+        sh  = gc.open_by_url(url)
 
-        # אם חזר DataFrame ריק, ייתכן שהגיליון לא קיים או ריק לחלוטין
-        if current_staff.empty or 'name' not in current_staff.columns:
-            st.info("מאתחל נתונים ראשוניים ב-Google Sheets (פעולה חד פעמית)...")
+        existing_titles = {ws.title for ws in sh.worksheets()}
+        created_any = False
 
-            # יצירת טבלת עובדים ריקה בסיסית, ההזנה תתבצע מהמערכת
-            # email + manage_depts + recurring_absent_days נוספו לפיצ'ר סידור יומי
-            staff_df = pd.DataFrame(columns=['name', 'type', 'dept', 'monthly_quota', 'weekend_quota',
-                                              'password', 'only_home_dept', 'email', 'manage_depts',
-                                              'recurring_absent_days'])
-            save_to_db("staff", staff_df)
+        for sheet_name, columns in REQUIRED_SHEETS.items():
+            if sheet_name not in existing_titles:
+                # Create the worksheet with just the header row — no data rows
+                empty_df = pd.DataFrame(columns=columns)
+                save_to_db(sheet_name, empty_df)
+                created_any = True
 
-            # אתחול שאר הטבלאות
-            schedule_df = pd.DataFrame(columns=['date', 'dept', 'employee', 'is_manual', 'empty_reason'])
-            save_to_db("schedule", schedule_df)
-
-            requests_df = pd.DataFrame(columns=['employee', 'date', 'status'])
-            save_to_db("requests", requests_df)
-
-            # טבלת הגדרות (Settings) - חודש פעיל + הגדרות סידור יומי
-            next_month_init = (date.today().replace(day=1) + timedelta(days=32)).month
-            settings_df = pd.DataFrame([
-                {'key': 'active_month',         'value': str(next_month_init)},
-                {'key': 'daily_active_month',   'value': str(next_month_init)},
-                {'key': 'daily_requests_open',  'value': 'True'},
-            ])
+        # settings sheet: create if missing, else only ADD missing keys (never overwrite)
+        if "settings" not in existing_titles:
+            next_m = (date.today().replace(day=1) + timedelta(days=32)).month
+            settings_df = pd.DataFrame(
+                [{'key': k, 'value': v} for k, v in SETTINGS_DEFAULTS])
             save_to_db("settings", settings_df)
+            created_any = True
+        else:
+            # Add any settings keys that do not yet exist
+            cur = get_db_data("settings")
+            existing_keys = set(cur['key'].astype(str)) if not cur.empty and 'key' in cur.columns else set()
+            for key, val in SETTINGS_DEFAULTS:
+                if key not in existing_keys:
+                    cur = pd.concat([cur, pd.DataFrame([{'key': key, 'value': val}])],
+                                    ignore_index=True)
+            if set(cur['key'].astype(str)) != existing_keys:
+                save_to_db("settings", cur)
 
-            # טבלת ימים מיוחדים (Special Days) עם סוג היום
-            special_days_df = pd.DataFrame(columns=['date', 'description', 'day_type'])
-            save_to_db("special_days", special_days_df)
-
-            # ── טבלאות סידור יומי (פיצ'ר חדש) ─────────────────────────
-            # שיוך עובדים למחלקות יומיות לפי חודש
-            dept_rotation_df = pd.DataFrame(columns=['employee', 'year_month', 'daily_dept'])
-            save_to_db("dept_rotation", dept_rotation_df)
-
-            # בקשות היעדרות (חופש / 202 / חופש עתידי / היעדרות אחרת)
-            absence_requests_df = pd.DataFrame(columns=[
-                'id', 'employee', 'start_date', 'end_date', 'type', 'status',
-                'dept_at_request', 'manager_email', 'approved_by', 'notes',
-                'created_at', 'responded_at'])
-            save_to_db("absence_requests", absence_requests_df)
-
-            # סידור יומי שנוצר/עודכן (output של ה-generator)
-            work_schedule_daily_df = pd.DataFrame(columns=[
-                'date', 'employee', 'daily_dept', 'status', 'note', 'is_manual'])
-            save_to_db("work_schedule_daily", work_schedule_daily_df)
-
-            st.success("הנתונים אותחלו בהצלחה! אנא רענן את העמוד.")
+        if created_any:
+            pass  # silent — no st.info/success shown to the user
 
     except Exception as e:
-        # הודעה מרוכזת אחת למשתמש
-        if "Worksheet" in str(e) and "not found" in str(e):
-             st.warning("שים לב: המערכת לא מצאה את הגיליונות הנדרשים (staff/schedule). אנא וודא שהם קיימים ב-Google Sheet שלך.")
-        elif "Public Spreadsheet" in str(e) or "403" in str(e):
-             st.error("שגיאת הרשאות: לא ניתן לכתוב לגיליון (Public Spreadsheet). \nאם אתה מריץ מקומית: וודא שקובץ הסודות קיים. \nאם בענן: וודא שהגדרת Secrets בהגדרות האפליקציה.")
-        else:
-             st.error(f"שגיאה באתחול: {e}")
+        if "403" in str(e) or "Public Spreadsheet" in str(e):
+            st.error("שגיאת הרשאות Google Sheets — וודא ש-Secrets הוגדרו נכון.")
+        # All other errors: silent — don't block the app from loading
 
 # --- 3. ניהול התחברות (Login) ---
 def login_screen():
