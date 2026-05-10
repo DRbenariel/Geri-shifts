@@ -854,7 +854,14 @@ def login_screen():
     if st.button("כניסה", use_container_width=True):
         staff_df = get_db_data("staff")
         hashed_pass = hashlib.sha256(password.encode()).hexdigest()
-        
+
+        # Guard: empty sheet or missing 'name' column (API hiccup / first boot)
+        if staff_df.empty or 'name' not in staff_df.columns:
+            # Clear the cache so next attempt fetches fresh data
+            _fetch_sheet_data_silently.clear()
+            st.error("לא ניתן לטעון את רשימת הצוות — נסה שוב")
+            st.stop()
+
         # בדיקה אם המשתמש קיים (strip whitespace from sheet names to avoid invisible-character mismatches)
         staff_df['name'] = staff_df['name'].astype(str).str.strip()
         user_match = staff_df[staff_df['name'] == username]
