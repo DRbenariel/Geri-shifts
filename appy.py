@@ -417,9 +417,7 @@ def _export_dept_grid(dept_name, year_month, view_month):
         col_names = ['#'] + [str(d) for d in days]
 
         rows = []
-        # Row: dates header
-        rows.append({'#': 'תאריך', **{str(d): str(d) for d in days}})
-        # Row: weekday letters
+        # Row: weekday letters (day numbers are already the column headers)
         rows.append({'#': 'יום', **{str(d): WD[(date(year, view_month, d).weekday() + 1) % 7] for d in days}})
         # Section A header
         rows.append({'#': '— עובדים —', **{str(d): '' for d in days}})
@@ -485,6 +483,7 @@ _GRID_STATUS_CYCLE = {
     "202":          "אחרי תורנות",
     "אחרי תורנות":  "אחר",
     "אחר":          "עובד",
+    "תורנות":       "חופש",   # clicking overrides auto-derived night-shift status
 }
 _GRID_STATUS_LABEL_SHORT = {
     "עובד":         "עובד",
@@ -492,6 +491,7 @@ _GRID_STATUS_LABEL_SHORT = {
     "202":          "202",
     "אחרי תורנות":  "אחרי",
     "אחר":          "אחר",
+    "תורנות":       "תורנות",
 }
 _GRID_STATUS_PFX = {
     "עובד":         "wsdcell_w",
@@ -499,6 +499,7 @@ _GRID_STATUS_PFX = {
     "202":          "wsdcell_2",
     "אחרי תורנות":  "wsdcell_p",
     "אחר":          "wsdcell_a",
+    "תורנות":       "wsdcell_t",
 }
 
 def _wsd_get_note(date_str, employee):
@@ -510,6 +511,36 @@ def _wsd_get_note(date_str, employee):
     if m.any():
         return str(wsd[m].iloc[0].get('note', '') or '')
     return ""
+
+_FRIDAY_SHIFT_DEPTS = {
+    "שישי בוקר - שיקום (1)", "שישי בוקר - שיקום (2)",
+    "שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)",
+}
+
+def _derive_auto_status(date_str, employee):
+    """
+    Derive the day-schedule status for an employee from the night-shift schedule sheet,
+    used only when no work_schedule_daily entry exists for this (date, employee).
+    Returns 'תורנות' (night shift today), 'אחרי תורנות' (night shift yesterday), or 'עובד'.
+    """
+    try:
+        sch = st.session_state.schedule
+        if sch.empty or 'date' not in sch.columns:
+            return "עובד"
+        emp = str(employee).strip()
+        night_sch = sch[~sch['dept'].astype(str).isin(_FRIDAY_SHIFT_DEPTS)]
+        names = night_sch['employee'].astype(str).str.strip()
+        dates = night_sch['date'].astype(str)
+        # Night shift today → תורנות
+        if ((dates == date_str) & (names == emp)).any():
+            return "תורנות"
+        # Night shift yesterday → אחרי תורנות
+        prev = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        if ((dates == prev) & (names == emp)).any():
+            return "אחרי תורנות"
+    except Exception:
+        pass
+    return "עובד"
 
 def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None, max_days=None):
     """
@@ -527,13 +558,9 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
     """
     year = 2026
     num_days = calendar.monthrange(year, view_month)[1]
-    if max_days:
-        days_all = list(range(1, min(num_days, max_days) + 1))
-        halves = [days_all]
-    else:
-        first_half  = list(range(1, 16))
-        second_half = list(range(16, num_days + 1))
-        halves = [first_half, second_half] if second_half else [first_half]
+    first_half  = list(range(1, 16))
+    second_half = list(range(16, num_days + 1))
+    halves = [first_half, second_half] if second_half else [first_half]
 
     # Derive employees from dept_rotation if not provided
     if employees is None:
@@ -587,7 +614,8 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                 unsafe_allow_html=True)
             for i, d in enumerate(days):
                 date_str = f"{year}-{view_month:02d}-{d:02d}"
-                cur_status = _wsd_get_status(date_str, emp, default="עובד")
+                _wsd_raw   = _wsd_get_status(date_str, emp, default=None)
+                cur_status = _wsd_raw if _wsd_raw is not None else _derive_auto_status(date_str, emp)
                 cur_note   = _wsd_get_note(date_str, emp)
                 label_short = _GRID_STATUS_LABEL_SHORT.get(cur_status, cur_status[:4])
                 if cur_note:
@@ -2816,6 +2844,10 @@ st.markdown("""
         background:#94a3b8 !important; color:white !important;
         font-size:0.7rem !important; min-height:30px !important; padding:2px 1px !important;
     }
+    div[class*="st-key-wsdcell_t_"] > div[data-testid="stButton"] > button {
+        background:#7c3aed !important; color:white !important;
+        font-size:0.7rem !important; min-height:30px !important; padding:2px 1px !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 st.title("מערכת סידור עבודה המערך הגריאטרי")
@@ -4522,7 +4554,7 @@ elif role == "מנהל/ת":
         with adm_mgr_tabs[0]:
             st.markdown(f"#### לוח {sel_dept_admin}")
             _render_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int,
-                              "adm_mgrview", max_days=15)
+                              "adm_mgrview")
             st.divider()
             if st.button(f"📤 ייצא {sel_dept_admin}", key="adm_mgr_exp"):
                 if _export_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int):
@@ -5176,7 +5208,7 @@ else:
                                 if user_name not in emps:
                                     emps = [user_name] + emps
                                 _render_dept_grid(d_name, da_y_m, daily_active_month_int,
-                                                  f"mgr_{di}", employees=emps, max_days=15)
+                                                  f"mgr_{di}", employees=emps)
                                 st.divider()
                                 if st.button(f"📤 ייצא {d_name}", key=f"mgr_exp_{di}"):
                                     if _export_dept_grid(d_name, da_y_m, daily_active_month_int):
@@ -5192,7 +5224,7 @@ else:
                         if user_name not in emps:
                             emps = [user_name] + emps
                         _render_dept_grid(d_name, da_y_m, daily_active_month_int,
-                                          "mgr_solo", employees=emps, max_days=15)
+                                          "mgr_solo", employees=emps)
                         st.divider()
                         if st.button(f"📤 ייצא {d_name}", key="mgr_exp_solo"):
                             if _export_dept_grid(d_name, da_y_m, daily_active_month_int):
@@ -5259,6 +5291,7 @@ else:
                 "חופש":         ("#dbeafe", "#1e40af"),
                 "202":          ("#fef9c3", "#854d0e"),
                 "אחרי תורנות":  ("#ffedd5", "#9a3412"),
+                "תורנות":       ("#ede9fe", "#5b21b6"),
                 "אחר":          ("#f1f5f9", "#475569"),
             }
 
@@ -5285,7 +5318,8 @@ else:
                                             unsafe_allow_html=True)
                                 continue
                             date_str = f"2026-{view_m:02d}-{day:02d}"
-                            status = _wsd_get_status(date_str, user_name, default="עובד")
+                            _wsd_raw_es = _wsd_get_status(date_str, user_name, default=None)
+                            status = _wsd_raw_es if _wsd_raw_es is not None else _derive_auto_status(date_str, user_name)
                             bg, fg = STATUS_COLOR.get(status, ("#f8fafc", "#334155"))
                             st.markdown(
                                 f"<div style='background:{bg};color:{fg};border-radius:8px;"
@@ -5302,5 +5336,6 @@ else:
                 "<span style='background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:4px'>חופש</span> &nbsp;"
                 "<span style='background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:4px'>202</span> &nbsp;"
                 "<span style='background:#ffedd5;color:#9a3412;padding:2px 8px;border-radius:4px'>אחרי תורנות</span> &nbsp;"
+                "<span style='background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:4px'>תורנות</span> &nbsp;"
                 "<span style='background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:4px'>אחר</span>"
                 "</div>", unsafe_allow_html=True)
