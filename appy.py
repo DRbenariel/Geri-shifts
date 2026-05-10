@@ -29,11 +29,43 @@ from streamlit_gsheets import GSheetsConnection
 
 # --- 2. ניהול מסד נתונים (Google Sheets) ---
 
+def _strip_cell(s):
+    """
+    Strip only MATCHING surrounding quote pairs from a cell value.
+    '...'  →  ...    (removes surrounding single quotes)
+    "..."  →  ...    (removes surrounding double quotes)
+    שיקום גריאטרי א'  →  unchanged  (trailing apostrophe is part of the name)
+    """
+    s = str(s).strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        return s[1:-1]
+    return s
+
+def _clean_sheet_values(vals):
+    """
+    Convert raw get_all_values() output to a clean DataFrame.
+    Strips matching surrounding quote pairs from headers and cell values —
+    these are baked in when data was imported via CSV or written with
+    USER_ENTERED mode that serialised Python string reprs into cells.
+    """
+    if not vals:
+        return pd.DataFrame()
+    headers = [_strip_cell(h) for h in vals[0]]
+    rows = []
+    for row in vals[1:]:
+        cleaned = [_strip_cell(c) for c in row]
+        # Pad short rows to match header length
+        while len(cleaned) < len(headers):
+            cleaned.append('')
+        rows.append(cleaned[:len(headers)])
+    return pd.DataFrame(rows, columns=headers)
+
 @st.cache_data(ttl=600, show_spinner=False)
 def _fetch_sheet_data_silently(worksheet_name):
     """
     Cached sheet read. Uses get_all_values() so a sheet with a header row but
     no data rows still returns a DataFrame with correct column names.
+    Strips surrounding quotes from all headers and cell values.
     """
     gc = get_gspread_client()
     url = st.secrets["connections"]["gsheets"]["spreadsheet"]
@@ -41,19 +73,15 @@ def _fetch_sheet_data_silently(worksheet_name):
     try:
         ws = sh.worksheet(worksheet_name)
         vals = ws.get_all_values()
-        if not vals:
-            return pd.DataFrame()
-        headers = vals[0]
-        data    = vals[1:]
-        return pd.DataFrame(data, columns=headers)
+        return _clean_sheet_values(vals)
     except gspread.exceptions.WorksheetNotFound:
         return pd.DataFrame()
 
 def _fetch_live(worksheet_name):
     """
     Direct Sheets read that bypasses the cache — use only immediately before a write.
-    Uses get_all_values() so a sheet with a header row but no data rows still returns
-    a DataFrame with the correct column names (not an empty columnless DataFrame).
+    Uses get_all_values() + _clean_sheet_values() to preserve column names even on
+    header-only sheets and to strip surrounding quotes baked in by CSV imports.
     """
     for attempt in range(3):
         try:
@@ -61,12 +89,7 @@ def _fetch_live(worksheet_name):
             url = st.secrets["connections"]["gsheets"]["spreadsheet"]
             sh = gc.open_by_url(url)
             ws = sh.worksheet(worksheet_name)
-            vals = ws.get_all_values()
-            if not vals:
-                return pd.DataFrame()
-            headers = vals[0]
-            data    = vals[1:]
-            return pd.DataFrame(data, columns=headers)
+            return _clean_sheet_values(ws.get_all_values())
         except gspread.exceptions.WorksheetNotFound:
             return pd.DataFrame()
         except gspread.exceptions.APIError as e:
@@ -730,7 +753,7 @@ def save_to_db(worksheet_name, df, is_rtl=False):
                 ws = sh.add_worksheet(title=worksheet_name, rows=100, cols=20)
 
             ws.clear()
-            ws.update(range_name='A1', values=data)
+            ws.update(range_name='A1', values=data, value_input_option='RAW')
 
             if is_rtl:
                 try:
