@@ -2941,6 +2941,15 @@ except:
     active_month_int = date.today().month
 
 # ── Daily-schedule settings (Phase 2+) ──
+def _parse_manage_depts(raw):
+    """
+    Split a comma-separated manage_depts string into a clean list of dept names.
+    Normalises Hebrew Geresh ׳ (U+05F3) → ASCII apostrophe ' so manually-typed
+    values like 'שיקום גריאטרי א׳' match DAILY_DEPTS_ALL entries exactly.
+    """
+    normalised = str(raw).strip().replace('׳', "'").replace('״', '״')
+    return [d.strip() for d in normalised.split(',') if d.strip()]
+
 def _get_setting(key, default):
     try:
         rows = st.session_state.settings[st.session_state.settings['key'] == key]
@@ -3546,7 +3555,7 @@ elif role == "מנהל/ת":
                     )
                     new_email = st.text_input("אימייל (להתראות):", placeholder="optional@example.com")
                 with col_new2:
-                    new_dept = st.selectbox("מחלקה:", ["שיקום", "פנימית גריאטרית", "כללי", "הנהלה"])
+                    new_dept = st.selectbox("מחלקה:", ["שיקום", "פנימית גריאטרית", "כללי", "הנהלה", "זה״ב"])
                     new_quota = st.number_input("מכסה חודשית:", min_value=0, value=6)
                     new_weekend_quota = st.number_input("מכסת סופ\"ש:", min_value=0, value=1)
                     new_only_home = st.checkbox("מוגבל למחלקה זו בלבד?", value=False)
@@ -5061,8 +5070,7 @@ else:
                             for _, sr in staff_df_local.iterrows():
                                 if str(sr.get('type', '')).strip() != 'מנהל מחלקה':
                                     continue
-                                mdepts_raw = str(sr.get('manage_depts', '')).strip()
-                                mdepts = [d.strip() for d in mdepts_raw.split(',') if d.strip()]
+                                mdepts = _parse_manage_depts(sr.get('manage_depts', ''))
                                 if dept_at_req in mdepts:
                                     manager_email = str(sr.get('email', '')).strip()
                                     break
@@ -5187,8 +5195,7 @@ else:
                         for _, sr in st.session_state.staff.iterrows():
                             if str(sr.get('type', '')).strip() != 'מנהל מחלקה':
                                 continue
-                            mdepts_raw = str(sr.get('manage_depts', '')).strip()
-                            mdepts = [d.strip() for d in mdepts_raw.split(',') if d.strip()]
+                            mdepts = _parse_manage_depts(sr.get('manage_depts', ''))
                             if fut_dept in mdepts:
                                 fut_mgr_email = str(sr.get('email', '')).strip()
                                 break
@@ -5242,8 +5249,7 @@ else:
             ]
             managed_depts = []
             if not staff_row.empty:
-                managed = str(staff_row.iloc[0].get('manage_depts', '')).strip()
-                managed_depts = [d.strip() for d in managed.split(',') if d.strip()]
+                managed_depts = _parse_manage_depts(staff_row.iloc[0].get('manage_depts', ''))
             if not managed_depts:
                 st.warning("⚠️ לא הוגדרו מחלקות בניהולך. אנא פנה למנהל המערכת.")
             else:
