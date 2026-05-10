@@ -16,7 +16,7 @@ import time
 calendar.setfirstweekday(calendar.SUNDAY)
 
 # ── Daily-schedule departments (Phase 1+, single source of truth) ──
-DAILY_DEPTS_ALL = ["שיקום גריאטרי א'", "שיקום גריאטרי ב'", "פנימית גריאטרית", "זה\"ב"]
+DAILY_DEPTS_ALL = ["שיקום גריאטרי א'", "שיקום גריאטרי ב'", "פנימית גריאטרית", "זה״ב"]
 
 import ui_components # Modular UI components
 
@@ -542,17 +542,17 @@ def _derive_auto_status(date_str, employee):
         pass
     return "עובד"
 
+_MANUAL_STATUSES = ["עובד", "חופש", "202", "אחרי תורנות", "אחר"]
+
 def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None, max_days=None):
     """
     Render an editable grid for a single dept and month.
 
-    Two modes (controlled via a checkbox above the grid):
-      - **View/quick-edit (default)**: clicking a cell cycles its status.
-      - **Edit mode**: clicking a cell opens a popover with:
-          • status selectbox
-          • text_input for a note (e.g. "עוזב/ת מוקדם")
-          • save button
-        A 💬 marker is shown on cells that have a note.
+    Each cell has:
+      - A **status button** (left-click cycles through statuses; CSS-coloured).
+        If a note exists it is shown as a tooltip on this button.
+      - A tiny **💬 note button** (right of each cell) that opens a popover
+        for typing / clearing the note.  No checkbox or edit-mode toggle.
 
     The month is shown in two halves: days 1-15, then 16-end.
     """
@@ -576,21 +576,11 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
         st.info(f"אין עובדים משובצים ל-{dept_name} בחודש זה.")
         return
 
-    # Edit-mode toggle (per dept namespace, per month)
-    edit_mode_key = f"editmode_{key_ns}_{view_month}"
-    if edit_mode_key not in st.session_state:
-        st.session_state[edit_mode_key] = False
-    edit_mode = st.checkbox(
-        "✏️ מצב עריכה (לחיצה על תא תפתח חלון לעריכת סטטוס + הערה)",
-        key=edit_mode_key,
-        value=st.session_state[edit_mode_key],
-    )
-
     for half_idx, days in enumerate(halves):
         if half_idx > 0:
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         n = len(days)
-        # Header
+        # Header row — each day takes two tiny sub-cols [status, note-icon]
         cols = st.columns([2] + [1] * n)
         cols[0].markdown(
             "<div style='background:#f1f5f9;font-weight:700;text-align:center;"
@@ -604,7 +594,7 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                 f"padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#334155'>{d}{marker}</div>",
                 unsafe_allow_html=True)
 
-        # Rows
+        # Data rows
         for emp in employees:
             cols = st.columns([2] + [1] * n)
             cols[0].markdown(
@@ -618,44 +608,53 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                 cur_status = _wsd_raw if _wsd_raw is not None else _derive_auto_status(date_str, emp)
                 cur_note   = _wsd_get_note(date_str, emp)
                 label_short = _GRID_STATUS_LABEL_SHORT.get(cur_status, cur_status[:4])
-                if cur_note:
-                    label_short = "💬" + label_short
                 pfx = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
                 cell_key = f"{pfx}_{key_ns}_{emp}_{d}"
+
                 with cols[i+1]:
-                    if edit_mode:
-                        # Edit mode: popover with selectbox + note + save
-                        try:
-                            pop = st.popover(label_short, use_container_width=True)
-                            pop_ctx = pop
-                        except Exception:
-                            # Fallback for older Streamlit: use expander
-                            pop_ctx = st.expander(label_short, expanded=False)
-                        with pop_ctx:
-                            new_st = st.selectbox(
-                                "סטטוס:", list(_GRID_STATUS_CYCLE.keys()),
-                                index=list(_GRID_STATUS_CYCLE.keys()).index(cur_status)
-                                       if cur_status in _GRID_STATUS_CYCLE else 0,
-                                key=f"editstat_{key_ns}_{emp}_{d}"
-                            )
-                            new_note = st.text_input(
-                                "הערה:", value=cur_note,
-                                placeholder="לדוגמה: עוזב/ת מוקדם",
-                                key=f"editnote_{key_ns}_{emp}_{d}"
-                            )
-                            if st.button("💾 שמור", key=f"editsave_{key_ns}_{emp}_{d}",
-                                         use_container_width=True):
-                                _wsd_upsert(date_str, emp, dept_name, new_st,
-                                            is_manual=True, note=new_note.strip())
-                                st.rerun()
-                    else:
-                        # Quick mode: cycle status on click
-                        if st.button(label_short, key=cell_key, use_container_width=True,
-                                     help=cur_note if cur_note else None):
+                    # Split each day cell: [status button | 💬 note icon]
+                    sc = st.columns([3, 1])
+                    with sc[0]:
+                        # Status button — click cycles status
+                        if st.button(
+                            label_short, key=cell_key,
+                            use_container_width=True,
+                            help=cur_note if cur_note else None,
+                        ):
                             nxt = _GRID_STATUS_CYCLE.get(cur_status, "חופש")
-                            _wsd_upsert(date_str, emp, dept_name, nxt, is_manual=True,
-                                        note=cur_note)
+                            _wsd_upsert(date_str, emp, dept_name, nxt,
+                                        is_manual=True, note=cur_note)
                             st.rerun()
+                    with sc[1]:
+                        # Note popover — opens a small panel for editing the note
+                        note_icon = "💬" if cur_note else "+"
+                        note_pop_key = f"notepop_{key_ns}_{emp}_{d}"
+                        try:
+                            with st.popover(note_icon, key=note_pop_key,
+                                            use_container_width=True):
+                                st.markdown(
+                                    f"<b>{emp}</b> — {d}/{view_month}",
+                                    unsafe_allow_html=True)
+                                # Quick status change inside the popover too
+                                ps = st.selectbox(
+                                    "סטטוס:", _MANUAL_STATUSES,
+                                    index=_MANUAL_STATUSES.index(cur_status)
+                                           if cur_status in _MANUAL_STATUSES else 0,
+                                    key=f"popst_{key_ns}_{emp}_{d}",
+                                )
+                                new_note = st.text_input(
+                                    "הערה:", value=cur_note,
+                                    placeholder="הוסף הערה (לדוגמה: עוזב/ת מוקדם)",
+                                    key=f"popnote_{key_ns}_{emp}_{d}",
+                                )
+                                if st.button("💾 שמור",
+                                             key=f"popsave_{key_ns}_{emp}_{d}",
+                                             use_container_width=True):
+                                    _wsd_upsert(date_str, emp, dept_name, ps,
+                                                is_manual=True, note=new_note.strip())
+                                    st.rerun()
+                        except Exception:
+                            pass  # older Streamlit without popover — note editing unavailable
 
 def log_event(event_type, detail_1='', detail_2=''):
     """
@@ -2847,6 +2846,16 @@ st.markdown("""
     div[class*="st-key-wsdcell_t_"] > div[data-testid="stButton"] > button {
         background:#7c3aed !important; color:white !important;
         font-size:0.7rem !important; min-height:30px !important; padding:2px 1px !important;
+    }
+    /* Note icon buttons — minimal appearance */
+    div[class*="st-key-notepop_"] button {
+        background:transparent !important; color:#94a3b8 !important;
+        border:1px solid #e2e8f0 !important;
+        font-size:0.65rem !important; min-height:30px !important; padding:1px !important;
+        border-radius:4px !important;
+    }
+    div[class*="st-key-notepop_"] button:hover {
+        color:#4f46e5 !important; border-color:#4f46e5 !important;
     }
 </style>
 """, unsafe_allow_html=True)
