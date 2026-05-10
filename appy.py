@@ -2874,29 +2874,29 @@ st.markdown("""
                    font-size:0.82rem; padding-bottom:4px; }
 
     /* ── WSD dept-grid cell coloring (Phase 6) ── */
+    div[class*="st-key-wsdcell_"] > div[data-testid="stButton"] > button {
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        font-size:0.7rem !important; min-height:30px !important; padding:2px 1px !important;
+    }
     div[class*="st-key-wsdcell_w_"] > div[data-testid="stButton"] > button {
         background:#16a34a !important; color:white !important;
-        font-size:0.7rem !important; min-height:30px !important; padding:2px 1px !important;
     }
     div[class*="st-key-wsdcell_h_"] > div[data-testid="stButton"] > button {
         background:#2563eb !important; color:white !important;
-        font-size:0.7rem !important; min-height:30px !important; padding:2px 1px !important;
     }
     div[class*="st-key-wsdcell_2_"] > div[data-testid="stButton"] > button {
         background:#ca8a04 !important; color:white !important;
-        font-size:0.7rem !important; min-height:30px !important; padding:2px 1px !important;
     }
     div[class*="st-key-wsdcell_p_"] > div[data-testid="stButton"] > button {
         background:#f97316 !important; color:white !important;
-        font-size:0.7rem !important; min-height:30px !important; padding:2px 1px !important;
     }
     div[class*="st-key-wsdcell_a_"] > div[data-testid="stButton"] > button {
         background:#94a3b8 !important; color:white !important;
-        font-size:0.7rem !important; min-height:30px !important; padding:2px 1px !important;
     }
     div[class*="st-key-wsdcell_t_"] > div[data-testid="stButton"] > button {
         background:#7c3aed !important; color:white !important;
-        font-size:0.7rem !important; min-height:30px !important; padding:2px 1px !important;
     }
     /* Note icon buttons — minimal appearance */
     div[class*="st-key-notepop_"] button {
@@ -3554,11 +3554,13 @@ elif role == "מנהל/ת":
                 # שדה manage_depts — רק למנהל מחלקה
                 new_manage_depts = ""
                 if new_type == "מנהל מחלקה":
-                    st.caption("אילו מחלקות יומיות הוא מנהל? (מופרד בפסיקים)")
-                    new_manage_depts = st.text_input(
+                    selected_depts = st.multiselect(
                         "מחלקות בניהולו:",
-                        placeholder="שיקום גריאטרי א',שיקום גריאטרי ב'"
+                        options=DAILY_DEPTS_ALL,
+                        default=[],
+                        key="new_emp_manage_depts"
                     )
+                    new_manage_depts = ",".join(selected_depts)
 
                 if st.form_submit_button("הוסף עובד"):
                     if new_name.strip():
