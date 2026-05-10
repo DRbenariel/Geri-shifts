@@ -21,7 +21,7 @@ DAILY_DEPTS_ALL = ["שיקום גריאטרי א'", "שיקום גריאטרי �
 import ui_components # Modular UI components
 
 # --- 1. עיצוב ו-CSS ---
-st.set_page_config(page_title="מערכת שיבוץ", layout="wide")
+st.set_page_config(page_title="מערכת סידור עבודה", layout="wide")
 ui_components.setup_style()
 
 import hashlib
@@ -808,11 +808,6 @@ def init_db():
         else:
              st.error(f"שגיאה באתחול: {e}")
 
-# אתחול מסד הנתונים (רק פעם אחת)
-if 'db_initialized' not in st.session_state:
-    init_db()
-    st.session_state.db_initialized = True
-
 # --- 3. ניהול התחברות (Login) ---
 def login_screen():
     st.markdown("""
@@ -844,7 +839,7 @@ def login_screen():
         </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("<h1 style='text-align: center; color: #1e293b; margin-bottom: 24px; font-size: 1.8rem;'>מערכת שיבוץ תורנויות המערך הגריאטרי</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #1e293b; margin-bottom: 24px; font-size: 1.8rem;'>מערכת סידור עבודה המערך הגריאטרי</h1>", unsafe_allow_html=True)
     
     username = st.text_input("שם משתמש:").strip()
     password = st.text_input("סיסמה:", type="password")
@@ -887,6 +882,11 @@ if not st.session_state.logged_in:
     login_screen()
     st.stop()
 else:
+    # אתחול מסד הנתונים (רק פעם אחת, אחרי כניסה — לא מוצג על מסך הכניסה)
+    if 'db_initialized' not in st.session_state:
+        init_db()
+        st.session_state.db_initialized = True
+
     # --- אתחול סשן אנליטיקה (פעם אחת לכל כניסה) ---
     if 'analytics_session_id' not in st.session_state:
         st.session_state.analytics_session_id = str(uuid.uuid4())
