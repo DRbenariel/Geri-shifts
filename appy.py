@@ -737,10 +737,19 @@ def log_event(event_type, detail_1='', detail_2=''):
 
 
 def save_to_db(worksheet_name, df, is_rtl=False):
-    """Write df to a Google Sheets worksheet. Retries up to 4 times on 429 rate-limit errors."""
+    """
+    Write df to a Google Sheets worksheet. Retries up to 4 times on 429 rate-limit errors.
+
+    SAFE write order — prevents data loss on transient API failures:
+      1. ws.update()  ← write new data first (old data still present in stale rows below)
+      2. ws.resize()  ← trim stale rows/cols after a successful write (soft failure OK)
+    Never calls ws.clear() before writing, so a mid-write failure never leaves the sheet empty.
+    """
     url = st.secrets["connections"]["gsheets"]["spreadsheet"]
     df_str = df.astype(str).replace('nan', '', regex=True).replace('None', '', regex=True)
     data = [df_str.columns.tolist()] + df_str.values.tolist()
+    n_rows = len(data)
+    n_cols = max((len(r) for r in data), default=1)
 
     last_err = None
     for attempt in range(4):
@@ -750,10 +759,17 @@ def save_to_db(worksheet_name, df, is_rtl=False):
             try:
                 ws = sh.worksheet(worksheet_name)
             except gspread.exceptions.WorksheetNotFound:
-                ws = sh.add_worksheet(title=worksheet_name, rows=100, cols=20)
+                ws = sh.add_worksheet(title=worksheet_name,
+                                      rows=max(n_rows, 1), cols=max(n_cols, 1))
 
-            ws.clear()
+            # Write first — data is safe even if the trim below fails
             ws.update(range_name='A1', values=data, value_input_option='RAW')
+
+            # Trim stale rows/cols that exceed the new data (soft failure is OK)
+            try:
+                ws.resize(rows=max(n_rows, 1), cols=max(n_cols, 1))
+            except Exception:
+                pass
 
             if is_rtl:
                 try:
@@ -3587,6 +3603,7 @@ elif role == "מנהל/ת":
                                 'password': def_pass_hash,
                                 'email': new_email.strip(),
                                 'manage_depts': new_manage_depts.strip(),
+                                'recurring_absent_days': '',
                             }])
 
                             st.session_state.staff = pd.concat([st.session_state.staff, new_emp_row], ignore_index=True)
