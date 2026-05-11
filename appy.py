@@ -485,6 +485,248 @@ def _export_dept_grid(dept_name, year_month, view_month):
     except Exception:
         return False
 
+# ── Excel colour map (PatternFill hex) ──────────────────────────────────────
+_XL_STATUS_FILL = {
+    "עובד":         "DCFCE7",
+    "חופש":         "DBEAFE",
+    "202":          "FEF9C3",
+    "אחרי תורנות":  "FFEDD5",
+    "תורנות":       "EDE9FE",
+    "אחר":          "F1F5F9",
+}
+
+def _get_user_email(user_name):
+    """Return email for user_name from staff sheet, or '' if missing."""
+    try:
+        sf = st.session_state.staff
+        if sf.empty or 'email' not in sf.columns:
+            return ""
+        row = sf[sf['name'].astype(str).str.strip() == str(user_name).strip()]
+        if row.empty:
+            return ""
+        return str(row.iloc[0].get('email', '') or '').strip()
+    except Exception:
+        return ""
+
+def _export_dept_grid_excel(dept_name, year_month, view_month):
+    """
+    Build an in-memory Excel workbook for the dept grid and return (bytes, filename).
+    Returns (None, None) on failure.
+    """
+    try:
+        import openpyxl
+        from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+        year = 2026
+        num_days = calendar.monthrange(year, view_month)[1]
+        days = list(range(1, num_days + 1))
+        WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
+
+        dr = st.session_state.dept_rotation
+        if dr.empty or 'employee' not in dr.columns:
+            return None, None
+        mask = ((dr['year_month'].astype(str) == year_month) &
+                (dr['daily_dept'].astype(str) == dept_name))
+        employees = dr[mask]['employee'].astype(str).str.strip().tolist()
+        if not employees:
+            return None, None
+
+        wb = openpyxl.Workbook()
+        ws_xl = wb.active
+        ws_xl.title = dept_name[:31]
+        ws_xl.sheet_view.rightToLeft = True
+
+        thin = Side(style='thin', color='CBD5E1')
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        # Row 1: dept + month title
+        ws_xl.cell(1, 1, f"{dept_name} — {year_month}").font = Font(bold=True, size=12)
+        ws_xl.merge_cells(start_row=1, start_column=1,
+                          end_row=1, end_column=num_days + 1)
+
+        # Row 2: header — col A = "עובד", then day numbers
+        ws_xl.cell(2, 1, "עובד").font = Font(bold=True)
+        for i, d in enumerate(days):
+            wd_letter = WD[(date(year, view_month, d).weekday() + 1) % 7]
+            cell = ws_xl.cell(2, i + 2, f"{d}\n{wd_letter}")
+            cell.font = Font(bold=True, size=9)
+            cell.alignment = Alignment(horizontal='center', vertical='center',
+                                       wrap_text=True)
+            cell.border = border
+        ws_xl.row_dimensions[2].height = 28
+        ws_xl.column_dimensions['A'].width = 16
+
+        # Data rows
+        for ri, emp in enumerate(employees):
+            row_num = ri + 3
+            ws_xl.cell(row_num, 1, emp).font = Font(bold=False, size=10)
+            ws_xl.cell(row_num, 1).alignment = Alignment(horizontal='right')
+            for i, d in enumerate(days):
+                date_str = f"{year}-{view_month:02d}-{d:02d}"
+                raw = _wsd_get_status(date_str, emp, default=None)
+                status = raw if raw is not None else _derive_auto_status(date_str, emp)
+                note   = _wsd_get_note(date_str, emp)
+                col_num = i + 2
+                cell = ws_xl.cell(row_num, col_num)
+                lbl = _GRID_STATUS_LABEL_SHORT.get(status, status)
+                cell.value = lbl + (f"\n{note}" if note else "")
+                cell.alignment = Alignment(horizontal='center', vertical='center',
+                                           wrap_text=True, shrink_to_fit=False)
+                fill_hex = _XL_STATUS_FILL.get(status, "F8FAFC")
+                cell.fill = PatternFill("solid", fgColor=fill_hex)
+                cell.border = border
+                cell.font   = Font(size=9)
+            ws_xl.column_dimensions[
+                openpyxl.utils.get_column_letter(i + 2)].width = 6
+
+        # Freeze header rows
+        ws_xl.freeze_panes = "B3"
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        safe = dept_name.replace("'", "").replace('"', '').replace('/', '_')[:25]
+        return buf.getvalue(), f"WSD_{safe}_{year_month}.xlsx"
+    except Exception:
+        return None, None
+
+def _export_personal_schedule_excel(user_name, view_month):
+    """
+    Build an Excel file with the personal day schedule for one employee.
+    Returns (bytes, filename) or (None, None).
+    """
+    try:
+        import openpyxl
+        from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+        year = 2026
+        num_days = calendar.monthrange(year, view_month)[1]
+        WD_FULL = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
+
+        wb = openpyxl.Workbook()
+        ws_xl = wb.active
+        ws_xl.title = "לוח עבודה אישי"
+        ws_xl.sheet_view.rightToLeft = True
+
+        thin = Side(style='thin', color='CBD5E1')
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        # Header
+        headers = ["תאריך", "יום", "סטטוס", "הערה"]
+        header_fills = ["334155"] * 4
+        for ci, h in enumerate(headers):
+            cell = ws_xl.cell(1, ci + 1, h)
+            cell.font = Font(bold=True, color="FFFFFF", size=10)
+            cell.fill = PatternFill("solid", fgColor="334155")
+            cell.alignment = Alignment(horizontal='center')
+            cell.border = border
+
+        ws_xl.column_dimensions['A'].width = 12
+        ws_xl.column_dimensions['B'].width = 10
+        ws_xl.column_dimensions['C'].width = 14
+        ws_xl.column_dimensions['D'].width = 22
+
+        for d in range(1, num_days + 1):
+            date_str = f"{year}-{view_month:02d}-{d:02d}"
+            wd_name  = WD_FULL[(date(year, view_month, d).weekday() + 1) % 7]
+            raw = _wsd_get_status(date_str, user_name, default=None)
+            status = raw if raw is not None else _derive_auto_status(date_str, user_name)
+            note   = _wsd_get_note(date_str, user_name)
+            row_num = d + 1
+            ws_xl.cell(row_num, 1, date_str).border = border
+            ws_xl.cell(row_num, 2, wd_name).border = border
+            status_cell = ws_xl.cell(row_num, 3, status)
+            status_cell.fill = PatternFill("solid", fgColor=_XL_STATUS_FILL.get(status, "F8FAFC"))
+            status_cell.alignment = Alignment(horizontal='center')
+            status_cell.border = border
+            ws_xl.cell(row_num, 4, note).border = border
+
+        ws_xl.freeze_panes = "A2"
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        safe_name = str(user_name).replace(' ', '_')[:20]
+        return buf.getvalue(), f"סידור_{safe_name}_{year}-{view_month:02d}.xlsx"
+    except Exception:
+        return None, None
+
+def _export_dept_to_new_gsheet(dept_name, year_month, view_month):
+    """
+    Create a brand-new Google Sheets file outside Shifts_scheduler, write the dept grid
+    into it, make it public ('anyone with link can edit'), and return (True, url, '').
+    Returns (False, '', error_message) on failure.
+    """
+    try:
+        year = 2026
+        num_days = calendar.monthrange(year, view_month)[1]
+        days = list(range(1, num_days + 1))
+        WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
+
+        dr = st.session_state.dept_rotation
+        if dr.empty or 'employee' not in dr.columns:
+            return False, '', "אין שיבוצי מחלקה לחודש זה"
+        mask = ((dr['year_month'].astype(str) == year_month) &
+                (dr['daily_dept'].astype(str) == dept_name))
+        employees = dr[mask]['employee'].astype(str).str.strip().tolist()
+        if not employees:
+            return False, '', "אין עובדים משובצים למחלקה זו"
+
+        safe = dept_name.replace("'", "").replace('"', '').replace('/', '_')[:25]
+        sheet_title = f"WSD_{safe}_{year_month}"
+
+        gc = get_gspread_client()
+        sh_new = gc.create(sheet_title)
+
+        # Make it accessible to anyone with the link
+        sh_new.share('', perm_type='anyone', role='writer')
+
+        # Build data (same layout as _export_dept_grid)
+        col_names = ['#'] + [str(d) for d in days]
+        rows = []
+        rows.append({'#': 'יום', **{str(d): WD[(date(year, view_month, d).weekday() + 1) % 7] for d in days}})
+        rows.append({'#': f'{dept_name} — {year_month}', **{str(d): '' for d in days}})
+
+        per_day_working = {}
+        per_day_absent  = {}
+        for d in days:
+            date_str = f"{year}-{view_month:02d}-{d:02d}"
+            working, absent = [], []
+            for emp in employees:
+                status = _wsd_get_status(date_str, emp, default="עובד")
+                note   = _wsd_get_note(date_str, emp)
+                tag = note if note else ""
+                if status == "עובד":
+                    working.append(emp + (f" ({tag})" if tag else ""))
+                else:
+                    absent.append(f"{emp} ({status}" + (f" — {tag}" if tag else "") + ")")
+            per_day_working[d] = working
+            per_day_absent[d]  = absent
+
+        max_work_rows = max((len(v) for v in per_day_working.values()), default=0)
+        max_abs_rows  = max((len(v) for v in per_day_absent.values()),  default=0)
+
+        rows.append({'#': '— עובדים —', **{str(d): '' for d in days}})
+        for i in range(max_work_rows):
+            row = {'#': ''}
+            for d in days:
+                lst = per_day_working.get(d, [])
+                row[str(d)] = lst[i] if i < len(lst) else ''
+            rows.append(row)
+        rows.append({'#': '— נעדרים —', **{str(d): '' for d in days}})
+        for i in range(max_abs_rows):
+            row = {'#': ''}
+            for d in days:
+                lst = per_day_absent.get(d, [])
+                row[str(d)] = lst[i] if i < len(lst) else ''
+            rows.append(row)
+
+        export_df = pd.DataFrame(rows, columns=col_names)
+        data = [export_df.columns.tolist()] + export_df.values.tolist()
+        ws_new = sh_new.sheet1
+        ws_new.update(range_name='A1', values=data, value_input_option='RAW')
+
+        return True, sh_new.url, ''
+    except Exception as e:
+        return False, '', str(e)
+
 def _wsd_get_status(date_str, employee, default="עובד"):
     """Look up status for (date, employee) in work_schedule_daily session_state."""
     wsd = st.session_state.work_schedule_daily
@@ -583,6 +825,56 @@ def _derive_auto_status(date_str, employee):
 
 _MANUAL_STATUSES = ["עובד", "חופש", "202", "אחרי תורנות", "אחר"]
 
+def _render_export_buttons(dept_name, year_month, view_month, key_ns, user_name=""):
+    """
+    Render three export buttons for a dept:
+      1. 📥 Excel — download_button
+      2. 📤 ייצא לקובץ הראשי — write worksheet to same Shifts_scheduler spreadsheet
+      3. 🆕 גיליון Google חדש — create standalone GSheet, open in new tab
+    """
+    import streamlit.components.v1 as _components
+    c1, c2, c3 = st.columns(3)
+
+    # 1. Excel download
+    with c1:
+        xl_bytes, xl_fname = _export_dept_grid_excel(dept_name, year_month, view_month)
+        if xl_bytes:
+            st.download_button(
+                "📥 הורד Excel",
+                data=xl_bytes,
+                file_name=xl_fname,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"xl_dl_{key_ns}",
+                use_container_width=True,
+            )
+        else:
+            st.button("📥 Excel", key=f"xl_dl_{key_ns}_na", disabled=True,
+                      use_container_width=True)
+
+    # 2. Export to main Shifts_scheduler spreadsheet
+    with c2:
+        if st.button("📤 ייצא לקובץ הראשי", key=f"exp_main_{key_ns}",
+                     use_container_width=True):
+            if _export_dept_grid(dept_name, year_month, view_month):
+                st.success(f"✅ {dept_name} יוצא לגיליון הראשי!")
+            else:
+                st.error("שגיאה בייצוא")
+
+    # 3. New standalone Google Sheet — auto-open in browser
+    with c3:
+        if st.button("🆕 גיליון Google חדש", key=f"exp_new_{key_ns}",
+                     use_container_width=True):
+            ok, url, err = _export_dept_to_new_gsheet(dept_name, year_month, view_month)
+            if ok:
+                # Auto-open in new browser tab
+                _components.html(
+                    f'<script>window.open("{url}", "_blank");</script>',
+                    height=0)
+                st.success(f"✅ גיליון נוצר!")
+                st.markdown(f"[🔗 פתח גיליון]({url})")
+            else:
+                st.error(f"שגיאה: {err}")
+
 def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None, max_days=None):
     """
     Render an editable grid for a single dept and month.
@@ -614,6 +906,68 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
     if not employees:
         st.info(f"אין עובדים משובצים ל-{dept_name} בחודש זה.")
         return
+
+    # ── Mobile toggle — auto-enable when phone detected ─────────────────────
+    _mob_key = f"wsd_mob_{key_ns}"
+    if _mob_key not in st.session_state:
+        st.session_state[_mob_key] = bool(
+            st.session_state.get('mobile_detected_persistent', False))
+    is_mobile = st.toggle("📱 תצוגת מובייל", value=st.session_state[_mob_key],
+                          key=_mob_key)
+
+    if is_mobile:
+        # ── Mobile list view: one expander per employee, one row per day ────
+        WD_SHORT = ["א", "ב", "ג", "ד", "ה", "ו'", "ש'"]
+        all_days = list(range(1, num_days + 1))
+        for emp in employees:
+            with st.expander(f"👤 {emp}", expanded=True):
+                for d in all_days:
+                    date_str    = f"{year}-{view_month:02d}-{d:02d}"
+                    _wsd_raw    = _wsd_get_status(date_str, emp, default=None)
+                    cur_status  = _wsd_raw if _wsd_raw is not None else _derive_auto_status(date_str, emp)
+                    cur_note    = _wsd_get_note(date_str, emp)
+                    label_short = _GRID_STATUS_LABEL_SHORT.get(cur_status, cur_status[:4])
+                    pfx         = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
+                    cell_key_m  = f"{pfx}_{key_ns}_m_{emp}_{d}"
+                    wd_letter   = WD_SHORT[(date(year, view_month, d).weekday() + 1) % 7]
+                    is_weekend  = wd_letter in ("ו'", "ש'")
+                    day_style   = "color:#b91c1c;font-weight:700" if is_weekend else "font-weight:600"
+                    c1, c2, c3 = st.columns([3, 4, 1])
+                    c1.markdown(
+                        f"<div style='{day_style};font-size:0.92rem;"
+                        f"padding:6px 4px'>{d}/{view_month} {wd_letter}</div>",
+                        unsafe_allow_html=True)
+                    with c2:
+                        if st.button(label_short, key=cell_key_m,
+                                     use_container_width=True):
+                            nxt = _GRID_STATUS_CYCLE.get(cur_status, "חופש")
+                            _wsd_upsert(date_str, emp, dept_name, nxt,
+                                        is_manual=True, note=cur_note)
+                            st.rerun()
+                    with c3:
+                        note_icon = "💬" if cur_note else "+"
+                        try:
+                            with st.popover(note_icon, key=f"notepop_m_{key_ns}_{emp}_{d}",
+                                            use_container_width=True):
+                                st.markdown(f"<b>{emp}</b> — {d}/{view_month}",
+                                            unsafe_allow_html=True)
+                                ps = st.selectbox(
+                                    "סטטוס:", _MANUAL_STATUSES,
+                                    index=_MANUAL_STATUSES.index(cur_status)
+                                           if cur_status in _MANUAL_STATUSES else 0,
+                                    key=f"popst_m_{key_ns}_{emp}_{d}")
+                                new_note = st.text_input(
+                                    "הערה:", value=cur_note,
+                                    key=f"popnote_m_{key_ns}_{emp}_{d}")
+                                if st.button("💾 שמור",
+                                             key=f"popsave_m_{key_ns}_{emp}_{d}",
+                                             use_container_width=True):
+                                    _wsd_upsert(date_str, emp, dept_name, ps,
+                                                is_manual=True, note=new_note.strip())
+                                    st.rerun()
+                        except Exception:
+                            pass
+        return  # skip desktop grid below
 
     for half_idx, days in enumerate(halves):
         if half_idx > 0:
@@ -4599,20 +4953,16 @@ elif role == "מנהל/ת":
                     )
         with sub_tabs[4]:
             st.markdown(f"#### ייצוא סידור יומי — {hebrew_months[view_month-1]} 2026")
-            st.caption("יוצר/מעדכן לשונית `WSD_<מחלקה>_<חודש>` לכל מחלקה. שורות=עובדים, עמודות=ימים, תאים=סטטוס.")
+            st.caption("📥 Excel — הורדה מקומית | 📤 ייצא לקובץ הראשי — לשונית ב-Shifts_scheduler | 🆕 גיליון חדש — קובץ Google Sheets נפרד")
             st.divider()
             for d_name in DAILY_DEPTS_ALL:
-                cc1, cc2 = st.columns([3, 1])
-                cc1.markdown(f"**{d_name}** — לשונית נפרדת בגיליון")
-                with cc2:
-                    if st.button(f"📤 ייצא", key=f"exp_main_{d_name}", use_container_width=True):
-                        ok = _export_dept_grid(d_name, view_year_month, view_month)
-                        if ok:
-                            st.success(f"✅ {d_name} יוצא!")
-                        else:
-                            st.error("שגיאה בייצוא — וודא שיש שיבוצים למחלקה זו")
+                st.markdown(f"**{d_name}**")
+                _render_export_buttons(d_name, view_year_month, view_month,
+                                       f"adm_exp_{d_name.replace(' ','_')[:12]}", user_name)
+                st.markdown("")
             st.divider()
-            if st.button(f"📤 ייצא את כל {len(DAILY_DEPTS_ALL)} המחלקות", key="exp_main_all", use_container_width=False):
+            if st.button(f"📤 ייצא את כל {len(DAILY_DEPTS_ALL)} המחלקות לקובץ הראשי",
+                         key="exp_main_all", use_container_width=False):
                 results = []
                 for d_name in DAILY_DEPTS_ALL:
                     ok = _export_dept_grid(d_name, view_year_month, view_month)
@@ -4644,9 +4994,8 @@ elif role == "מנהל/ת":
             _render_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int,
                               "adm_mgrview")
             st.divider()
-            if st.button(f"📤 ייצא {sel_dept_admin}", key="adm_mgr_exp"):
-                if _export_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int):
-                    st.success(f"✅ {sel_dept_admin} יוצא!")
+            _render_export_buttons(sel_dept_admin, adm_y_m, daily_active_month_int,
+                                   "adm_mgrview", user_name)
 
         with adm_mgr_tabs[1]:
             st.markdown(f"#### בקשות ממתינות — {sel_dept_admin}")
@@ -5295,9 +5644,8 @@ else:
                                 _render_dept_grid(d_name, da_y_m, daily_active_month_int,
                                                   f"mgr_{di}", employees=emps)
                                 st.divider()
-                                if st.button(f"📤 ייצא {d_name}", key=f"mgr_exp_{di}"):
-                                    if _export_dept_grid(d_name, da_y_m, daily_active_month_int):
-                                        st.success(f"✅ {d_name} יוצא!")
+                                _render_export_buttons(d_name, da_y_m, daily_active_month_int,
+                                                       f"mgr_{di}", user_name)
                     else:
                         d_name = managed_depts[0]
                         dr = st.session_state.dept_rotation
@@ -5311,9 +5659,8 @@ else:
                         _render_dept_grid(d_name, da_y_m, daily_active_month_int,
                                           "mgr_solo", employees=emps)
                         st.divider()
-                        if st.button(f"📤 ייצא {d_name}", key="mgr_exp_solo"):
-                            if _export_dept_grid(d_name, da_y_m, daily_active_month_int):
-                                st.success(f"✅ {d_name} יוצא!")
+                        _render_export_buttons(d_name, da_y_m, daily_active_month_int,
+                                               "mgr_solo", user_name)
                 with mgr_tabs[1]:
                     st.markdown("#### בקשות היעדרות ממתינות")
                     ar_df_mgr = st.session_state.absence_requests.copy()
@@ -5424,3 +5771,15 @@ else:
                 "<span style='background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:4px'>תורנות</span> &nbsp;"
                 "<span style='background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:4px'>אחר</span>"
                 "</div>", unsafe_allow_html=True)
+
+            # ── Personal schedule Excel download ────────────────────────────
+            st.markdown("---")
+            _pers_bytes, _pers_fname = _export_personal_schedule_excel(user_name, view_m)
+            if _pers_bytes:
+                st.download_button(
+                    "📥 הורד לוח עבודה שלי (Excel)",
+                    data=_pers_bytes,
+                    file_name=_pers_fname,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="personal_xl_dl",
+                )
