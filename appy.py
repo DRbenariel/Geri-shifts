@@ -650,80 +650,30 @@ def _export_personal_schedule_excel(user_name, view_month):
 
 def _export_dept_to_new_gsheet(dept_name, year_month, view_month):
     """
-    Create a brand-new Google Sheets file outside Shifts_scheduler, write the dept grid
-    into it, make it public ('anyone with link can edit'), and return (True, url, '').
-    Returns (False, '', error_message) on failure.
+    Export the dept grid into the EXISTING Shifts_scheduler spreadsheet
+    (same as _export_dept_grid) and return a direct URL to that specific
+    worksheet tab so it can be opened immediately in the browser.
+    Returns (True, tab_url, '') or (False, '', error_message).
+    No new files are created — avoids Drive quota issues.
     """
     try:
-        year = 2026
-        num_days = calendar.monthrange(year, view_month)[1]
-        days = list(range(1, num_days + 1))
-        WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
+        # Run the standard export into the main spreadsheet
+        ok = _export_dept_grid(dept_name, year_month, view_month)
+        if not ok:
+            return False, '', "שגיאה בייצוא — וודא שיש שיבוצים למחלקה זו"
 
-        dr = st.session_state.dept_rotation
-        if dr.empty or 'employee' not in dr.columns:
-            return False, '', "אין שיבוצי מחלקה לחודש זה"
-        mask = ((dr['year_month'].astype(str) == year_month) &
-                (dr['daily_dept'].astype(str) == dept_name))
-        employees = dr[mask]['employee'].astype(str).str.strip().tolist()
-        if not employees:
-            return False, '', "אין עובדים משובצים למחלקה זו"
-
+        # Build the worksheet name (same logic as _export_dept_grid)
         safe = dept_name.replace("'", "").replace('"', '').replace('/', '_')[:25]
-        sheet_title = f"WSD_{safe}_{year_month}"
+        sheet_name = f"WSD_{safe}_{year_month}"
 
-        gc = get_gspread_client()
-        sh_new = gc.create(sheet_title)
+        # Open the spreadsheet and get the worksheet's gid for a direct tab URL
+        gc  = get_gspread_client()
+        url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+        sh  = gc.open_by_url(url)
+        ws  = sh.worksheet(sheet_name)
+        tab_url = f"{sh.url}#gid={ws.id}"
 
-        # Make it accessible to anyone with the link
-        sh_new.share('', perm_type='anyone', role='writer')
-
-        # Build data (same layout as _export_dept_grid)
-        col_names = ['#'] + [str(d) for d in days]
-        rows = []
-        rows.append({'#': 'יום', **{str(d): WD[(date(year, view_month, d).weekday() + 1) % 7] for d in days}})
-        rows.append({'#': f'{dept_name} — {year_month}', **{str(d): '' for d in days}})
-
-        per_day_working = {}
-        per_day_absent  = {}
-        for d in days:
-            date_str = f"{year}-{view_month:02d}-{d:02d}"
-            working, absent = [], []
-            for emp in employees:
-                status = _wsd_get_status(date_str, emp, default="עובד")
-                note   = _wsd_get_note(date_str, emp)
-                tag = note if note else ""
-                if status == "עובד":
-                    working.append(emp + (f" ({tag})" if tag else ""))
-                else:
-                    absent.append(f"{emp} ({status}" + (f" — {tag}" if tag else "") + ")")
-            per_day_working[d] = working
-            per_day_absent[d]  = absent
-
-        max_work_rows = max((len(v) for v in per_day_working.values()), default=0)
-        max_abs_rows  = max((len(v) for v in per_day_absent.values()),  default=0)
-
-        rows.append({'#': '— עובדים —', **{str(d): '' for d in days}})
-        for i in range(max_work_rows):
-            row = {'#': ''}
-            for d in days:
-                lst = per_day_working.get(d, [])
-                row[str(d)] = lst[i] if i < len(lst) else ''
-            rows.append(row)
-        rows.append({'#': '— נעדרים —', **{str(d): '' for d in days}})
-        for i in range(max_abs_rows):
-            row = {'#': ''}
-            for d in days:
-                lst = per_day_absent.get(d, [])
-                row[str(d)] = lst[i] if i < len(lst) else ''
-            rows.append(row)
-
-        export_df = pd.DataFrame(rows, columns=col_names)
-        data = [export_df.columns.tolist()] + export_df.values.tolist()
-        ws_new = sh_new.sheet1
-        ws_new.update(range_name='A1', values=data, value_input_option='RAW')
-
-        return True, sh_new.url, ''
+        return True, tab_url, ''
     except Exception as e:
         return False, '', str(e)
 
@@ -861,7 +811,7 @@ def _render_export_buttons(dept_name, year_month, view_month, key_ns, user_name=
     Render three export buttons for a dept:
       1. 📥 Excel — download_button
       2. 📤 ייצא לקובץ הראשי — write worksheet to same Shifts_scheduler spreadsheet
-      3. 🆕 גיליון Google חדש — create standalone GSheet, open in new tab
+      3. 🔗 פתח ב-Sheets — create standalone GSheet, open in new tab
     """
     import streamlit.components.v1 as _components
     c1, c2, c3 = st.columns(3)
@@ -893,7 +843,7 @@ def _render_export_buttons(dept_name, year_month, view_month, key_ns, user_name=
 
     # 3. New standalone Google Sheet — auto-open in browser
     with c3:
-        if st.button("🆕 גיליון Google חדש", key=f"exp_new_{key_ns}",
+        if st.button("🔗 פתח ב-Sheets", key=f"exp_new_{key_ns}",
                      use_container_width=True):
             ok, url, err = _export_dept_to_new_gsheet(dept_name, year_month, view_month)
             if ok:
