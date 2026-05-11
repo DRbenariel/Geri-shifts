@@ -575,7 +575,7 @@ def _export_dept_grid_excel(dept_name, year_month, view_month):
                           end_row=1, end_column=num_days + 1)
 
         # Row 2: header — col A = "עובד", then day numbers
-        ws_xl.cell(2, 1, "עובד").font = Font(bold=True)
+        ws_xl.cell(2, 1, "עובד/ת").font = Font(bold=True)
         for i, d in enumerate(days):
             wd_letter = WD[(date(year, view_month, d).weekday() + 1) % 7]
             cell = ws_xl.cell(2, i + 2, f"{d}\n{wd_letter}")
@@ -759,7 +759,7 @@ _GRID_STATUS_CYCLE = {
     "תורנות":       "חופש",   # clicking overrides auto-derived night-shift status
 }
 _GRID_STATUS_LABEL_SHORT = {
-    "עובד":         "עובד",
+    "עובד":         "עובד/ת",
     "חופש":         "חופש",
     "202":          "202",
     "אחרי תורנות":  "אחרי",
@@ -836,6 +836,15 @@ def _derive_auto_status(date_str, employee):
     return "עובד"
 
 _MANUAL_STATUSES = ["עובד", "חופש", "202", "אחרי תורנות", "אחר"]
+# ── Inclusive display labels for role types (stored values unchanged) ─────────
+_TYPE_DISPLAY = {
+    'מתמחה':      'מתמחה',
+    'תורן חוץ':   'תורן/ת חוץ',
+    'מנהל/ת':     'מנהל/ת',
+    'רופא בכיר':  'רופא/ה בכיר/ה',
+    'מנהל מחלקה': 'מנהל/ת מחלקה',
+}
+
 
 def _render_export_buttons(dept_name, year_month, view_month, key_ns, user_name=""):
     """
@@ -1057,14 +1066,18 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
         cols = st.columns([2] + [1] * n)
         cols[0].markdown(
             "<div style='background:#f1f5f9;font-weight:700;text-align:center;"
-            "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#334155'>עובד</div>",
+            "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#334155'>עובד/ת</div>",
             unsafe_allow_html=True)
+        _WD_LETTERS = ["א", "ב", "ג", "ד", "ה", "ו'", "ש'"]
         for i, d in enumerate(days):
             wd = (date(year, view_month, d).weekday() + 1) % 7
-            marker = " ו'" if wd == 5 else (" ש'" if wd == 6 else "")
+            wd_letter = _WD_LETTERS[wd]
+            is_wknd_col = wd in (5, 6)
+            hdr_bg = "#fef2f2" if is_wknd_col else "#f1f5f9"
+            hdr_col = "#b91c1c" if is_wknd_col else "#334155"
             cols[i+1].markdown(
-                f"<div style='background:#f1f5f9;font-weight:700;text-align:center;"
-                f"padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#334155'>{d}{marker}</div>",
+                f"<div style='background:{hdr_bg};font-weight:700;text-align:center;"
+                f"padding:6px 2px;border-radius:6px;font-size:0.75rem;color:{hdr_col}'>{d} {wd_letter}</div>",
                 unsafe_allow_html=True)
 
         # Data rows
@@ -4022,7 +4035,8 @@ elif role == "מנהל/ת":
                     new_name = st.text_input("שם מלא:")
                     new_type = st.selectbox(
                         "תפקיד:",
-                        ["מתמחה", "תורן חוץ", "מנהל/ת", "רופא בכיר", "מנהל מחלקה"]
+                        ["מתמחה", "תורן חוץ", "מנהל/ת", "רופא בכיר", "מנהל מחלקה"],
+                        format_func=lambda x: _TYPE_DISPLAY.get(x, x),
                     )
                     new_email = st.text_input("אימייל (להתראות):", placeholder="optional@example.com")
                 with col_new2:
@@ -4867,7 +4881,7 @@ elif role == "מנהל/ת":
             eligible = eligible[eligible['name'] != '---']
 
             if eligible.empty:
-                st.warning("אין עובדים פעילים מסוג מתמחה או רופא בכיר.")
+                st.warning("אין עובדים פעילים מסוג מתמחה או רופא/ה בכיר/ה.")
             else:
                 # Pre-fill from existing dept_rotation rows for this month
                 dr = st.session_state.dept_rotation.copy()
@@ -4955,7 +4969,7 @@ elif role == "מנהל/ת":
         # ─── Tabs 2-5 stubs (future phases) ─────────────────────
         with sub_tabs[1]:
             st.markdown(f"#### לוח עבודה כללי — {hebrew_months[view_month-1]} 2026")
-            st.caption("לחיצה על תא מחזרת בין: עובד → חופש → 202 → אחרי תורנות → אחר. שינויים נשמרים מיד עם is_manual=True.")
+            st.caption("לחיצה על תא מחזרת בין: עובד/ת → חופש → 202 → אחרי תורנות → אחר. שינויים נשמרים מיד עם is_manual=True.")
             dept_inner = st.tabs(DAILY_DEPTS_ALL)
             _ns_map = {d: f"dept_{i}" for i, d in enumerate(DAILY_DEPTS_ALL)}
             for d_tab, d_name in zip(dept_inner, DAILY_DEPTS_ALL):
@@ -4963,7 +4977,7 @@ elif role == "מנהל/ת":
                     _render_dept_grid(d_name, view_year_month, view_month, _ns_map[d_name])
                     st.markdown(
                         "<div style='direction:rtl;font-size:0.75rem;color:#64748b;margin-top:6px'>"
-                        "<b>מקרא:</b> <span style='background:#16a34a;color:white;padding:1px 6px;border-radius:4px'>עובד</span> &nbsp;"
+                        "<b>מקרא:</b> <span style='background:#16a34a;color:white;padding:1px 6px;border-radius:4px'>עובד/ת</span> &nbsp;"
                         "<span style='background:#2563eb;color:white;padding:1px 6px;border-radius:4px'>חופש</span> &nbsp;"
                         "<span style='background:#ca8a04;color:white;padding:1px 6px;border-radius:4px'>202</span> &nbsp;"
                         "<span style='background:#f97316;color:white;padding:1px 6px;border-radius:4px'>אחרי תורנות</span> &nbsp;"
@@ -5079,7 +5093,7 @@ elif role == "מנהל/ת":
 
     # ── סידור יומי (אדמין) — same view as מנהל מחלקה but for any dept of choice ──
     if selected_nav == 'סידור יומי':
-        st.subheader("🗓️ סידור יומי — תצוגת מנהל מחלקה (אדמין)")
+        st.subheader("🗓️ סידור יומי — תצוגת מנהל/ת מחלקה (אדמין)")
         st.caption("בחר מחלקה לראות אותה כפי שמנהל המחלקה רואה (לוח מחלקה + בקשות ממתינות).")
 
         adm_hebrew_months = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
@@ -5709,7 +5723,7 @@ else:
     # ── סידור יומי (עובדים / מנהלי מחלקה) ────────────────────────
     if selected_nav == 'סידור יומי':
         if role == "מנהל מחלקה":
-            st.subheader("🗓️ סידור יומי — מנהל מחלקה")
+            st.subheader("🗓️ סידור יומי — מנהל/ת מחלקה")
             # Look up the depts this manager controls
             staff_row = st.session_state.staff[
                 st.session_state.staff['name'].astype(str).str.strip() == str(user_name).strip()
@@ -5821,6 +5835,7 @@ else:
 
             STATUS_COLOR = {
                 "עובד":         ("#dcfce7", "#166534"),
+                "עובד/ת":       ("#dcfce7", "#166534"),
                 "חופש":         ("#dbeafe", "#1e40af"),
                 "202":          ("#fef9c3", "#854d0e"),
                 "אחרי תורנות":  ("#ffedd5", "#9a3412"),
@@ -5864,12 +5879,12 @@ else:
                                 f"min-height:42px;display:flex;flex-direction:column;"
                                 f"align-items:center;justify-content:center;"
                                 f"border:1px solid #e2e8f0'>"
-                                f"<b>{day}</b><br/>{status}</div>",
+                                f"<b>{day}</b><br/>{"עובד/ת" if status == "עובד" else status}</div>",
                                 unsafe_allow_html=True)
 
             st.markdown(
                 "<div style='direction:rtl;font-size:0.75rem;color:#64748b;margin-top:10px'>"
-                "<span style='background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px'>עובד</span> &nbsp;"
+                "<span style='background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px'>עובד/ת</span> &nbsp;"
                 "<span style='background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:4px'>חופש</span> &nbsp;"
                 "<span style='background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:4px'>202</span> &nbsp;"
                 "<span style='background:#ffedd5;color:#9a3412;padding:2px 8px;border-radius:4px'>אחרי תורנות</span> &nbsp;"
