@@ -403,14 +403,15 @@ def _export_schedule_wide(view_month):
 def _export_dept_grid(dept_name, year_month, view_month):
     """
     Export the dept grid for a given month — PIVOTED format.
-    Layout:
-      Row 1: header — '' | תאריך | day1 | day2 | ... | dayN
-      Row 2: header — '' | יום   | weekday letter for each day
-      Section A (כותרת "עובדים"): one row per max-employee-slot — each cell is
-        an employee's name on that date if they are working that day.
-      Separator row.
-      Section B (כותרת "נעדרים"): one row per max-absent-slot — each cell is
-        "name (reason)" if employee is absent on that date.
+
+    Status resolution: same logic as the board display —
+      manual override → use stored status
+      non-manual "עובד" (or no entry) → re-derive (recurring days, תורנות, אחרי תורנות)
+
+    Section נמצאים: עובד (with note if any) + תורנות
+    Section נעדרים: חופש / 202 / אחרי תורנות / אחר — each cell "name (reason)"
+
+    Worksheet is set to RTL after writing.
     Worksheet name: 'WSD_<dept>_<year_month>'. Returns True on success.
     """
     try:
@@ -428,45 +429,60 @@ def _export_dept_grid(dept_name, year_month, view_month):
         if not employees:
             return False
 
-        # For each day: collect (working_names, absent_with_reason)
+        _ABSENT_STATUSES = {"חופש", "202", "אחרי תורנות", "אחר"}
+
         WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
-        per_day_working = {}   # day → list[name]
-        per_day_absent  = {}   # day → list["name (reason)"]
+        per_day_working = {}   # day → list[str]  — נמצאים
+        per_day_absent  = {}   # day → list[str]  — נעדרים
+
         for d in days:
             date_str = f"{year}-{view_month:02d}-{d:02d}"
             working, absent = [], []
             for emp in employees:
-                status = _wsd_get_status(date_str, emp, default="עובד")
-                note   = _wsd_get_note(date_str, emp)
-                tag = note if note else ""
-                if status == "עובד":
-                    label = emp + (f" ({tag})" if tag else "")
-                    working.append(label)
+                raw    = _wsd_get_status(date_str, emp, default=None)
+                manual = _wsd_is_manual(date_str, emp)
+                # Same live-derive logic as the board
+                if raw is None or (raw == "עובד" and not manual):
+                    status = _derive_auto_status(date_str, emp)
                 else:
-                    reason = status if not tag else f"{status} — {tag}"
+                    status = raw
+                note = _wsd_get_note(date_str, emp)
+
+                if status in _ABSENT_STATUSES:
+                    # נעדרים: "name (reason)" or "name (reason — note)"
+                    reason = f"{status} — {note}" if note else status
                     absent.append(f"{emp} ({reason})")
+                else:
+                    # נמצאים: עובד or תורנות — show note or status tag if not plain עובד
+                    if status == "תורנות":
+                        working.append(f"{emp} (תורנות)")
+                    elif note:
+                        working.append(f"{emp} ({note})")
+                    else:
+                        working.append(emp)
+
             per_day_working[d] = working
             per_day_absent[d]  = absent
 
-        max_work_rows  = max((len(v) for v in per_day_working.values()), default=0)
-        max_abs_rows   = max((len(v) for v in per_day_absent.values()),  default=0)
+        max_work_rows = max((len(v) for v in per_day_working.values()), default=0)
+        max_abs_rows  = max((len(v) for v in per_day_absent.values()),  default=0)
 
-        # Build the wide table as a list of dicts (one per row)
-        # Column order: '' (label), then days 1..N
         col_names = ['#'] + [str(d) for d in days]
-
         rows = []
-        # Row: weekday letters (day numbers are already the column headers)
+
+        # Weekday-letter header row
         rows.append({'#': 'יום', **{str(d): WD[(date(year, view_month, d).weekday() + 1) % 7] for d in days}})
-        # Section A header
-        rows.append({'#': '— עובדים —', **{str(d): '' for d in days}})
+
+        # Section נמצאים
+        rows.append({'#': '— נמצאים —', **{str(d): '' for d in days}})
         for i in range(max_work_rows):
             row = {'#': ''}
             for d in days:
                 lst = per_day_working.get(d, [])
                 row[str(d)] = lst[i] if i < len(lst) else ''
             rows.append(row)
-        # Section B header
+
+        # Section נעדרים
         rows.append({'#': '— נעדרים —', **{str(d): '' for d in days}})
         for i in range(max_abs_rows):
             row = {'#': ''}
@@ -477,10 +493,25 @@ def _export_dept_grid(dept_name, year_month, view_month):
 
         export_df = pd.DataFrame(rows, columns=col_names)
 
-        # Sanitize sheet name
         safe = dept_name.replace("'", "").replace('"', '').replace('/', '_')[:25]
         sheet_name = f"WSD_{safe}_{year_month}"
         save_to_db(sheet_name, export_df)
+
+        # Set worksheet to RTL
+        try:
+            gc  = get_gspread_client()
+            url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+            sh  = gc.open_by_url(url)
+            ws  = sh.worksheet(sheet_name)
+            sh.batch_update({"requests": [{
+                "updateSheetProperties": {
+                    "properties": {"sheetId": ws.id, "rightToLeft": True},
+                    "fields": "rightToLeft"
+                }
+            }]})
+        except Exception:
+            pass  # RTL is cosmetic — don't fail the export if it errors
+
         return True
     except Exception:
         return False
