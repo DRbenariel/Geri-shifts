@@ -737,6 +737,17 @@ def _wsd_get_status(date_str, employee, default="עובד"):
         return str(wsd[m].iloc[0].get('status', default))
     return default
 
+def _wsd_is_manual(date_str, employee):
+    """Return True if the WSD entry for (date, employee) has is_manual=True."""
+    wsd = st.session_state.work_schedule_daily
+    if wsd.empty or 'date' not in wsd.columns:
+        return False
+    m = (wsd['date'].astype(str) == date_str) & (wsd['employee'].astype(str).str.strip() == str(employee).strip())
+    if m.any():
+        v = wsd[m].iloc[0].get('is_manual', False)
+        return v if isinstance(v, bool) else str(v).strip().lower() == 'true'
+    return False
+
 def _wsd_upsert(date_str, employee, daily_dept, status, is_manual=True, note=""):
     """Insert/update one row in work_schedule_daily; persist to sheet."""
     wsd = st.session_state.work_schedule_daily.copy()
@@ -798,27 +809,47 @@ _FRIDAY_SHIFT_DEPTS = {
     "שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)",
 }
 
+_HEB_DAY_TO_IDX = {"א": 0, "ב": 1, "ג": 2, "ד": 3, "ה": 4, "ו": 5, "ש": 6}
+
 def _derive_auto_status(date_str, employee):
     """
-    Derive the day-schedule status for an employee from the night-shift schedule sheet,
-    used only when no work_schedule_daily entry exists for this (date, employee).
-    Returns 'תורנות' (night shift today), 'אחרי תורנות' (night shift yesterday), or 'עובד'.
+    Derive the day-schedule status for (date, employee) without reading work_schedule_daily.
+    Priority order:
+      1. Recurring weekly absence (recurring_absent_days in staff sheet) → "חופש"
+      2. Night shift today (schedule sheet) → "תורנות"
+      3. Night shift yesterday → "אחרי תורנות"
+      4. Default → "עובד"
     """
     try:
-        sch = st.session_state.schedule
-        if sch.empty or 'date' not in sch.columns:
-            return "עובד"
         emp = str(employee).strip()
-        night_sch = sch[~sch['dept'].astype(str).isin(_FRIDAY_SHIFT_DEPTS)]
-        names = night_sch['employee'].astype(str).str.strip()
-        dates = night_sch['date'].astype(str)
-        # Night shift today → תורנות
-        if ((dates == date_str) & (names == emp)).any():
-            return "תורנות"
-        # Night shift yesterday → אחרי תורנות
-        prev = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-        if ((dates == prev) & (names == emp)).any():
-            return "אחרי תורנות"
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+
+        # 1. Recurring weekly absence
+        try:
+            sf = st.session_state.staff
+            if not sf.empty and 'recurring_absent_days' in sf.columns:
+                emp_row = sf[sf['name'].astype(str).str.strip() == emp]
+                if not emp_row.empty:
+                    rec_raw = str(emp_row.iloc[0].get('recurring_absent_days', '') or '').strip()
+                    if rec_raw:
+                        wd_heb_idx = (date_obj.weekday() + 1) % 7  # Sun=0
+                        for tok in rec_raw.split(','):
+                            if _HEB_DAY_TO_IDX.get(tok.strip()) == wd_heb_idx:
+                                return "חופש"
+        except Exception:
+            pass
+
+        # 2 & 3. Night shift schedule
+        sch = st.session_state.schedule
+        if not sch.empty and 'date' in sch.columns:
+            night_sch = sch[~sch['dept'].astype(str).isin(_FRIDAY_SHIFT_DEPTS)]
+            names = night_sch['employee'].astype(str).str.strip()
+            dates = night_sch['date'].astype(str)
+            if ((dates == date_str) & (names == emp)).any():
+                return "תורנות"
+            prev = (date_obj - timedelta(days=1)).strftime("%Y-%m-%d")
+            if ((dates == prev) & (names == emp)).any():
+                return "אחרי תורנות"
     except Exception:
         pass
     return "עובד"
@@ -924,7 +955,11 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                 for d in all_days:
                     date_str    = f"{year}-{view_month:02d}-{d:02d}"
                     _wsd_raw    = _wsd_get_status(date_str, emp, default=None)
-                    cur_status  = _wsd_raw if _wsd_raw is not None else _derive_auto_status(date_str, emp)
+                    # Re-derive when no entry or when non-manual "עובד" (picks up recurring days live)
+                    if _wsd_raw is None or (_wsd_raw == "עובד" and not _wsd_is_manual(date_str, emp)):
+                        cur_status = _derive_auto_status(date_str, emp)
+                    else:
+                        cur_status = _wsd_raw
                     cur_note    = _wsd_get_note(date_str, emp)
                     label_short = _GRID_STATUS_LABEL_SHORT.get(cur_status, cur_status[:4])
                     pfx         = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
@@ -998,7 +1033,11 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
             for i, d in enumerate(days):
                 date_str = f"{year}-{view_month:02d}-{d:02d}"
                 _wsd_raw   = _wsd_get_status(date_str, emp, default=None)
-                cur_status = _wsd_raw if _wsd_raw is not None else _derive_auto_status(date_str, emp)
+                # Re-derive when no entry or when non-manual "עובד" (picks up recurring days live)
+                if _wsd_raw is None or (_wsd_raw == "עובד" and not _wsd_is_manual(date_str, emp)):
+                    cur_status = _derive_auto_status(date_str, emp)
+                else:
+                    cur_status = _wsd_raw
                 cur_note   = _wsd_get_note(date_str, emp)
                 label_short = _GRID_STATUS_LABEL_SHORT.get(cur_status, cur_status[:4])
                 pfx = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
@@ -5751,7 +5790,11 @@ else:
                                 continue
                             date_str = f"2026-{view_m:02d}-{day:02d}"
                             _wsd_raw_es = _wsd_get_status(date_str, user_name, default=None)
-                            status = _wsd_raw_es if _wsd_raw_es is not None else _derive_auto_status(date_str, user_name)
+                            # Re-derive non-manual "עובד" so recurring days show live
+                            if _wsd_raw_es is None or (_wsd_raw_es == "עובד" and not _wsd_is_manual(date_str, user_name)):
+                                status = _derive_auto_status(date_str, user_name)
+                            else:
+                                status = _wsd_raw_es
                             bg, fg = STATUS_COLOR.get(status, ("#f8fafc", "#334155"))
                             st.markdown(
                                 f"<div style='background:{bg};color:{fg};border-radius:8px;"
