@@ -928,61 +928,125 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                           key=_mob_key)
 
     if is_mobile:
-        # ── Mobile list view: one expander per employee, one row per day ────
-        WD_SHORT = ["א", "ב", "ג", "ד", "ה", "ו'", "ש'"]
+        # ── Mobile: date-centric cards — נמצאים / נעדרים per day ────────────
+        WD_FULL  = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
+        _ABSENT_SET = {"חופש", "202", "אחרי תורנות", "אחר"}
         all_days = list(range(1, num_days + 1))
-        for emp in employees:
-            with st.expander(f"👤 {emp}", expanded=True):
-                for d in all_days:
-                    date_str    = f"{year}-{view_month:02d}-{d:02d}"
-                    _wsd_raw    = _wsd_get_status(date_str, emp, default=None)
-                    # Re-derive when no entry or when non-manual "עובד" (picks up recurring days live)
-                    if _wsd_raw is None or (_wsd_raw == "עובד" and not _wsd_is_manual(date_str, emp)):
-                        cur_status = _derive_auto_status(date_str, emp)
-                    else:
-                        cur_status = _wsd_raw
-                    cur_note    = _wsd_get_note(date_str, emp)
-                    label_short = _GRID_STATUS_LABEL_SHORT.get(cur_status, cur_status[:4])
-                    pfx         = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
-                    cell_key_m  = f"{pfx}_{key_ns}_m_{emp}_{d}"
-                    wd_letter   = WD_SHORT[(date(year, view_month, d).weekday() + 1) % 7]
-                    is_weekend  = wd_letter in ("ו'", "ש'")
-                    day_style   = "color:#b91c1c;font-weight:700" if is_weekend else "font-weight:600"
-                    c1, c2, c3 = st.columns([3, 4, 1])
-                    c1.markdown(
-                        f"<div style='{day_style};font-size:0.92rem;"
-                        f"padding:6px 4px'>{d}/{view_month} {wd_letter}</div>",
+
+        for d in all_days:
+            date_str = f"{year}-{view_month:02d}-{d:02d}"
+            wd_idx   = (date(year, view_month, d).weekday() + 1) % 7
+            wd_name  = WD_FULL[wd_idx]
+            is_wknd  = wd_idx in (5, 6)
+
+            # Compute status for every employee this day
+            day_working, day_absent = [], []
+            for emp in employees:
+                raw    = _wsd_get_status(date_str, emp, default=None)
+                manual = _wsd_is_manual(date_str, emp)
+                if raw is None or (raw == "עובד" and not manual):
+                    status = _derive_auto_status(date_str, emp)
+                else:
+                    status = raw
+                note = _wsd_get_note(date_str, emp)
+                if status in _ABSENT_SET:
+                    day_absent.append((emp, status, note))
+                else:
+                    day_working.append((emp, status, note))
+
+            hdr_color = "#b91c1c" if is_wknd else "#1e3a8a"
+            with st.expander(
+                f"📅 {d}/{view_month} {wd_name}  "
+                f"✅ {len(day_working)}  ❌ {len(day_absent)}",
+                expanded=False,
+            ):
+                # ── נמצאים ──────────────────────────────────────────────────
+                if day_working:
+                    st.markdown(
+                        "<div style='font-weight:700;color:#166534;"
+                        "font-size:0.85rem;margin-bottom:4px'>✅ נמצאים</div>",
                         unsafe_allow_html=True)
-                    with c2:
-                        if st.button(label_short, key=cell_key_m,
-                                     use_container_width=True):
-                            nxt = _GRID_STATUS_CYCLE.get(cur_status, "חופש")
-                            _wsd_upsert(date_str, emp, dept_name, nxt,
-                                        is_manual=True, note=cur_note)
-                            st.rerun()
-                    with c3:
-                        note_icon = "💬" if cur_note else "+"
-                        try:
-                            with st.popover(note_icon, key=f"notepop_m_{key_ns}_{emp}_{d}",
-                                            use_container_width=True):
-                                st.markdown(f"<b>{emp}</b> — {d}/{view_month}",
-                                            unsafe_allow_html=True)
-                                ps = st.selectbox(
-                                    "סטטוס:", _MANUAL_STATUSES,
-                                    index=_MANUAL_STATUSES.index(cur_status)
-                                           if cur_status in _MANUAL_STATUSES else 0,
-                                    key=f"popst_m_{key_ns}_{emp}_{d}")
-                                new_note = st.text_input(
-                                    "הערה:", value=cur_note,
-                                    key=f"popnote_m_{key_ns}_{emp}_{d}")
-                                if st.button("💾 שמור",
-                                             key=f"popsave_m_{key_ns}_{emp}_{d}",
-                                             use_container_width=True):
-                                    _wsd_upsert(date_str, emp, dept_name, ps,
-                                                is_manual=True, note=new_note.strip())
-                                    st.rerun()
-                        except Exception:
-                            pass
+                    for emp, status, note in day_working:
+                        tag = ""
+                        if status == "תורנות":
+                            tag = " (תורנות)"
+                        elif note:
+                            tag = f" ({note})"
+                        pfx      = _GRID_STATUS_PFX.get(status, "wsdcell_w")
+                        cell_key = f"{pfx}_{key_ns}_md_{emp}_{d}"
+                        c1, c2 = st.columns([5, 1])
+                        with c1:
+                            if st.button(f"{emp}{tag}", key=cell_key,
+                                         use_container_width=True):
+                                nxt = _GRID_STATUS_CYCLE.get(status, "חופש")
+                                _wsd_upsert(date_str, emp, dept_name, nxt,
+                                            is_manual=True, note=note)
+                                st.rerun()
+                        with c2:
+                            try:
+                                with st.popover("💬" if note else "+",
+                                               key=f"notepop_md_{key_ns}_{emp}_{d}",
+                                               use_container_width=True):
+                                    st.markdown(f"<b>{emp}</b> — {d}/{view_month}",
+                                                unsafe_allow_html=True)
+                                    ps = st.selectbox("סטטוס:", _MANUAL_STATUSES,
+                                        index=_MANUAL_STATUSES.index(status)
+                                               if status in _MANUAL_STATUSES else 0,
+                                        key=f"popst_md_{key_ns}_{emp}_{d}")
+                                    nn = st.text_input("הערה:", value=note,
+                                        key=f"popnote_md_{key_ns}_{emp}_{d}")
+                                    if st.button("💾 שמור",
+                                                 key=f"popsave_md_{key_ns}_{emp}_{d}",
+                                                 use_container_width=True):
+                                        _wsd_upsert(date_str, emp, dept_name, ps,
+                                                    is_manual=True, note=nn.strip())
+                                        st.rerun()
+                            except Exception:
+                                pass
+
+                # ── נעדרים ──────────────────────────────────────────────────
+                if day_absent:
+                    st.markdown(
+                        "<div style='font-weight:700;color:#991b1b;"
+                        "font-size:0.85rem;margin:6px 0 4px'>❌ נעדרים</div>",
+                        unsafe_allow_html=True)
+                    for emp, status, note in day_absent:
+                        reason = f"{status} — {note}" if note else status
+                        pfx      = _GRID_STATUS_PFX.get(status, "wsdcell_h")
+                        cell_key = f"{pfx}_{key_ns}_md_{emp}_{d}"
+                        c1, c2 = st.columns([5, 1])
+                        with c1:
+                            if st.button(f"{emp} ({reason})", key=cell_key,
+                                         use_container_width=True):
+                                nxt = _GRID_STATUS_CYCLE.get(status, "עובד")
+                                _wsd_upsert(date_str, emp, dept_name, nxt,
+                                            is_manual=True, note=note)
+                                st.rerun()
+                        with c2:
+                            try:
+                                with st.popover("💬" if note else "+",
+                                               key=f"notepop_md_{key_ns}_{emp}_{d}_a",
+                                               use_container_width=True):
+                                    st.markdown(f"<b>{emp}</b> — {d}/{view_month}",
+                                                unsafe_allow_html=True)
+                                    ps = st.selectbox("סטטוס:", _MANUAL_STATUSES,
+                                        index=_MANUAL_STATUSES.index(status)
+                                               if status in _MANUAL_STATUSES else 0,
+                                        key=f"popst_md_{key_ns}_{emp}_{d}_a")
+                                    nn = st.text_input("הערה:", value=note,
+                                        key=f"popnote_md_{key_ns}_{emp}_{d}_a")
+                                    if st.button("💾 שמור",
+                                                 key=f"popsave_md_{key_ns}_{emp}_{d}_a",
+                                                 use_container_width=True):
+                                        _wsd_upsert(date_str, emp, dept_name, ps,
+                                                    is_manual=True, note=nn.strip())
+                                        st.rerun()
+                            except Exception:
+                                pass
+
+                if not day_working and not day_absent:
+                    st.caption("אין נתונים ליום זה")
+
         return  # skip desktop grid below
 
     for half_idx, days in enumerate(halves):
@@ -2524,83 +2588,100 @@ def draw_calendar_view(year, month, role, user_name=None):
     cal = calendar.monthcalendar(year, month)
     
     if is_mobile_view:
-        # --- List View Implementation ---
-        days_names = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
-        
-        # Collect all assignments first
-        month_sched = st.session_state.schedule
-        
+        # ── Night-shift mobile: one collapsible card per day ────────────────
+        WD_FULL_N = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
+
         # Collect special days
         month_special_days = {}
-        if 'special_days' in st.session_state and not st.session_state.special_days.empty:
+        if "special_days" in st.session_state and not st.session_state.special_days.empty:
             for _, row in st.session_state.special_days.iterrows():
-                month_special_days[row['date']] = row['description']
-        
-        # Iterate through days linearly
-        for week in cal:
-             for i, day in enumerate(week):
-                if day == 0: continue
+                month_special_days[str(row["date"])[:10]] = row["description"]
 
-                
-                date_str = f"{year}-{month:02d}-{day:02d}"
-                day_name = days_names[i]
-                
-                # Check if user has shift this day (or if admin)
-                day_rows = month_sched[month_sched['date'] == date_str]
-                
-                # Filter for non-admin visibility
-                if role != "מנהל/ת":
-                    day_rows = day_rows[(day_rows['employee'] == user_name) | (day_rows['employee'] == "---")]
-                
-                if day_rows.empty and role != "מנהל/ת":
-                    continue
-                
-                # Render Day Card
-                with st.container():
-                    formatted_date = f"{day:02d}/{month:02d}/{year}"
-                    
-                    # Display Special Day Header Info
-                    sd_text = ""
-                    if date_str in month_special_days:
-                        sd_text = f" &mdash; <span style='color:#b91c1c; font-weight:bold;'>{month_special_days[date_str]}</span>"
-                    
-                    st.markdown(f"**{formatted_date} ({day_name})**{sd_text}", unsafe_allow_html=True)
-                    
-                    if day_rows.empty:
-                        st.caption("אין שיבוצים")
-                    else:
-                        for _, row in day_rows.iterrows():
-                             emp = row['employee']
-                             # Clean employee name from common icons if present
-                             emp_clean = emp.replace("👤", "").replace("🛡️", "").replace("🍼", "").strip()
+        month_sched = st.session_state.schedule
+        num_days_m  = calendar.monthrange(year, month)[1]
 
-                             dept = row['dept']
+        for day in range(1, num_days_m + 1):
+            date_str = f"{year}-{month:02d}-{day:02d}"
+            wd_idx   = (date(year, month, day).weekday() + 1) % 7
+            wd_name  = WD_FULL_N[wd_idx]
+            is_wknd  = wd_idx in (5, 6)
 
-                             style = "color:#1e3a8a;" if "שיקום" in dept else "color:#ea580c;" # Indigo/Orange hints
-                             # Removed icon as requested
-                             st.markdown(f"<div style='margin-right:10px; {style}'>{dept}: <b>{emp_clean}</b></div>", unsafe_allow_html=True)
+            day_rows = month_sched[month_sched["date"].astype(str) == date_str].copy()
+            if role != "מנהל/ת":
+                day_rows = day_rows[
+                    (day_rows["employee"].astype(str).str.strip() == str(user_name).strip()) |
+                    (day_rows["employee"] == "---")
+                ]
+            if day_rows.empty and role != "מנהל/ת":
+                continue
 
-                    # Availability panel for list view (admin only, after all submitted)
-                    if show_availability:
-                        wished_here = date_wished.get(date_str, [])
-                        avail       = date_availability.get(date_str, [])
-                        if wished_here:
-                            st.markdown(
-                                f"<div style='font-size:11px; color:#854d0e;'>⭐ ביקשו: {', '.join(wished_here)}</div>",
-                                unsafe_allow_html=True
-                            )
-                        if avail:
-                            st.markdown(
-                                f"<div style='font-size:11px; color:#166534;'>✅ זמינים: {', '.join(avail)}</div>",
-                                unsafe_allow_html=True
-                            )
-                        if not wished_here and not avail:
-                            st.markdown(
-                                "<div style='font-size:11px; color:#991b1b;'>⚠️ אין זמינים</div>",
-                                unsafe_allow_html=True
-                            )
-                    st.divider()
+            # Build display groups: main depts / friday morning / empty slots
+            mains, friday_m, empty_slots = [], [], []
+            for _, row in day_rows.iterrows():
+                emp  = str(row["employee"]).replace("👤", "").replace("🛡️", "").replace("🍼", "").strip()
+                dept = str(row["dept"])
+                if emp == "---" or emp == "":
+                    empty_slots.append(dept)
+                elif "שישי בוקר" in dept:
+                    friday_m.append((dept, emp))
+                else:
+                    mains.append((dept, emp))
 
+            sd_suffix = f" — {month_special_days[date_str]}" if date_str in month_special_days else ""
+            n_assigned = len(mains) + len(friday_m)
+            n_empty    = len(empty_slots)
+
+            with st.expander(
+                f"📅 {day}/{month} {wd_name}{sd_suffix}  ✅ {n_assigned}  ⚠️ {n_empty}",
+                expanded=False,
+            ):
+                if mains:
+                    st.markdown(
+                        "<div style='font-weight:700;font-size:0.85rem;margin-bottom:4px'>✅ משמרות לילה</div>",
+                        unsafe_allow_html=True)
+                    for dept, emp in mains:
+                        dept_color = "#1e3a8a" if "שיקום" in dept else "#9a3412"
+                        st.markdown(
+                            f"<div style='margin-right:6px;font-size:0.92rem;padding:2px 0'>"
+                            f"<span style='color:{dept_color};font-weight:600'>{dept}:</span> {emp}</div>",
+                            unsafe_allow_html=True)
+                if friday_m:
+                    st.markdown(
+                        "<div style='font-weight:700;font-size:0.85rem;margin:6px 0 4px'>☀️ שישי בוקר</div>",
+                        unsafe_allow_html=True)
+                    for dept, emp in friday_m:
+                        st.markdown(
+                            f"<div style='margin-right:6px;font-size:0.92rem;padding:2px 0'>"
+                            f"<span style='color:#854d0e;font-weight:600'>{dept}:</span> {emp}</div>",
+                            unsafe_allow_html=True)
+                if empty_slots:
+                    st.markdown(
+                        "<div style='font-weight:700;color:#991b1b;font-size:0.85rem;margin:6px 0 4px'>"
+                        "⚠️ ריקים</div>",
+                        unsafe_allow_html=True)
+                    for dept in empty_slots:
+                        st.markdown(
+                            f"<div style='color:#991b1b;font-size:0.85rem;margin-right:6px'>{dept}</div>",
+                            unsafe_allow_html=True)
+                if not mains and not friday_m and not empty_slots:
+                    st.caption("אין שיבוצים")
+
+                # Availability panel (admin only, after all submitted)
+                if show_availability:
+                    wished_here = date_wished.get(date_str, [])
+                    avail       = date_availability.get(date_str, [])
+                    if wished_here:
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#854d0e;margin-top:4px'>⭐ ביקשו: {', '.join(wished_here)}</div>",
+                            unsafe_allow_html=True)
+                    if avail:
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#166534'>✅ זמינים: {', '.join(avail)}</div>",
+                            unsafe_allow_html=True)
+                    if not wished_here and not avail:
+                        st.markdown(
+                            "<div style='font-size:11px;color:#991b1b'>⚠️ אין זמינים</div>",
+                            unsafe_allow_html=True)
     else:
         # --- Standard Grid View ---
         days_names = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
