@@ -5188,7 +5188,7 @@ elif role == "מנהל/ת":
             for d_name in DAILY_DEPTS_ALL:
                 st.markdown(f"**{d_name}**")
                 _render_export_buttons(d_name, view_year_month, view_month,
-                                       f"adm_exp_{d_name.replace(' ','_')[:12]}", user_name)
+                                       f"adm_exp_{d_name.replace(' ','_').replace(chr(39),'').replace(chr(34),'')}", user_name)
                 st.markdown("")
             st.divider()
             if st.button(f"📤 ייצא את כל {len(DAILY_DEPTS_ALL)} המחלקות לקובץ הראשי",
