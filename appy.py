@@ -741,6 +741,33 @@ def _export_dept_to_new_gsheet(dept_name, year_month, view_month):
     except Exception as e:
         return False, '', str(e)
 
+def _get_fri_shift_workers(date_str, daily_dept):
+    """
+    Return list of employee names assigned to the department's Friday-morning
+    shifts on date_str (Fridays only). Returns [] for any other weekday.
+    For פנימית גריאטרית returns both slot-1 and slot-2 names;
+    for each שיקום dept returns the single matching slot name.
+    """
+    try:
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+        if (date_obj.weekday() + 1) % 7 != 5:   # not Friday
+            return []
+        fri_shifts = _DAILY_DEPT_TO_FRIDAY_SHIFTS.get(str(daily_dept), [])
+        if not fri_shifts:
+            return []
+        sch = st.session_state.schedule
+        if sch.empty or 'date' not in sch.columns:
+            return []
+        mask = (
+            (sch['date'].astype(str) == date_str) &
+            (sch['dept'].astype(str).isin(fri_shifts))
+        )
+        workers = sch[mask]['employee'].astype(str).str.strip().tolist()
+        return [w for w in workers if w and w != '---']
+    except Exception:
+        return []
+
+
 def _wsd_get_status(date_str, employee, default="עובד"):
     """Look up status for (date, employee) in work_schedule_daily session_state."""
     wsd = st.session_state.work_schedule_daily
@@ -997,13 +1024,14 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
       - A tiny **💬 note button** (right of each cell) that opens a popover
         for typing / clearing the note.  No checkbox or edit-mode toggle.
 
-    The month is shown in two halves: days 1-15, then 16-end.
+    The month is shown in three segments: 1-10, 11-20, 21-end.
     """
     year = 2026
     num_days = calendar.monthrange(year, view_month)[1]
-    first_half  = list(range(1, 16))
-    second_half = list(range(16, num_days + 1))
-    halves = [first_half, second_half] if second_half else [first_half]
+    seg1 = list(range(1, 11))
+    seg2 = list(range(11, 21))
+    seg3 = list(range(21, num_days + 1))
+    halves = [s for s in [seg1, seg2, seg3] if s]
 
     # Derive employees from dept_rotation if not provided
     if employees is None:
@@ -1049,6 +1077,9 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                 else:
                     status = raw
                 note = _wsd_get_note(date_str, emp)
+                # Fri/Sat auto-חופש → show nothing (not working, not absent listed)
+                if is_wknd and status == "חופש" and not manual:
+                    continue
                 if status in _ABSENT_SET:
                     day_absent.append((emp, status, note))
                 else:
@@ -1155,6 +1186,15 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                         f"margin-top:6px'>🌙 תורנ/ית: <b>{night_worker}</b></div>",
                         unsafe_allow_html=True)
 
+                # ── שישי בוקר (Friday shifts) ─────────────────────────────
+                if wd_idx == 5:   # Friday
+                    fri_workers = _get_fri_shift_workers(date_str, dept_name)
+                    if fri_workers:
+                        st.markdown(
+                            f"<div style='font-size:0.82rem;color:#854d0e;"
+                            f"margin-top:4px'>☀️ שישי בוקר: <b>{'  /  '.join(fri_workers)}</b></div>",
+                            unsafe_allow_html=True)
+
         return  # skip desktop grid below
 
     for half_idx, days in enumerate(halves):
@@ -1162,7 +1202,7 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         n = len(days)
         # Header row — each day takes two tiny sub-cols [status, note-icon]
-        cols = st.columns([2] + [1] * n)
+        cols = st.columns([3] + [2] * n)
         cols[0].markdown(
             "<div style='background:#f1f5f9;font-weight:700;text-align:center;"
             "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#334155'>עובד/ת</div>",
@@ -1181,7 +1221,7 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
 
         # Data rows
         for emp in employees:
-            cols = st.columns([2] + [1] * n)
+            cols = st.columns([3] + [2] * n)
             cols[0].markdown(
                 f"<div style='font-weight:600;font-size:0.82rem;color:#0f172a;"
                 f"padding:4px 8px;background:white;border-radius:6px;"
@@ -1200,7 +1240,17 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                 pfx = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
                 cell_key = f"{pfx}_{key_ns}_{emp}_{d}"
 
+                _wd_cell = (date(year, view_month, d).weekday() + 1) % 7
+                _is_wknd_cell = _wd_cell in (5, 6)
+                _is_empty_cell = _is_wknd_cell and cur_status == "חופש" and not _wsd_is_manual(date_str, emp)
                 with cols[i+1]:
+                    # Fri/Sat auto-חופש → empty grey cell (no button, no note icon)
+                    if _is_empty_cell:
+                        st.markdown(
+                            "<div style='height:32px;background:#f8fafc;"
+                            "border-radius:6px;border:1px solid #e2e8f0'></div>",
+                            unsafe_allow_html=True)
+                        continue
                     # Split each day cell: [status button | 💬 note icon]
                     sc = st.columns([3, 1])
                     with sc[0]:
@@ -1246,7 +1296,7 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                             pass  # older Streamlit without popover — note editing unavailable
 
         # ── תורנ/ית row (one per half) ─────────────────────────────────────
-        cols = st.columns([2] + [1] * n)
+        cols = st.columns([3] + [2] * n)
         cols[0].markdown(
             "<div style='background:#ede9fe;font-weight:700;text-align:center;"
             "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#5b21b6'>🌙 תורנ/ית</div>",
@@ -1254,11 +1304,36 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
         for i, d in enumerate(days):
             date_str_nd = f"{year}-{view_month:02d}-{d:02d}"
             nd = _get_night_duty(date_str_nd, dept_name)
+            _wd_nd = (date(year, view_month, d).weekday() + 1) % 7
+            _cell_bg_nd = "#fef2f2" if _wd_nd in (5, 6) else "#f5f3ff"
             cols[i+1].markdown(
-                f"<div style='background:#f5f3ff;text-align:center;padding:4px 2px;"
+                f"<div style='background:{_cell_bg_nd};text-align:center;padding:4px 2px;"
                 f"border-radius:6px;font-size:0.7rem;color:#6d28d9;"
                 f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
                 f"{nd or '—'}</div>",
+                unsafe_allow_html=True)
+
+        # ── שישי בוקר row (one per half) ────────────────────────────────────
+        cols = st.columns([3] + [2] * n)
+        cols[0].markdown(
+            "<div style='background:#fef9c3;font-weight:700;text-align:center;"
+            "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#854d0e'>☀️ שישי בוקר</div>",
+            unsafe_allow_html=True)
+        for i, d in enumerate(days):
+            date_str_fri = f"{year}-{view_month:02d}-{d:02d}"
+            _wd_fri = (date(year, view_month, d).weekday() + 1) % 7
+            if _wd_fri == 5:   # Friday only
+                fw = _get_fri_shift_workers(date_str_fri, dept_name)
+                cell_txt = " / ".join(fw) if fw else "—"
+                cell_bg_fri = "#fef3c7"
+            else:
+                cell_txt = ""
+                cell_bg_fri = "#f8fafc"
+            cols[i+1].markdown(
+                f"<div style='background:{cell_bg_fri};text-align:center;padding:4px 2px;"
+                f"border-radius:6px;font-size:0.68rem;color:#92400e;"
+                f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                f"{cell_txt}</div>",
                 unsafe_allow_html=True)
 
 def log_event(event_type, detail_1='', detail_2=''):
