@@ -5570,13 +5570,15 @@ else:
         st.session_state['show_update_success'] = False
 
     # ── Day-absence section (Phase 3) — for מתמחה / רופא בכיר ─────────────────────────
-    if selected_nav == 'הגשת בקשות' and role in ('מתמחה', 'רופא בכיר'):
+    if selected_nav == 'הגשת בקשות' and role in ('מתמחה', 'רופא בכיר', 'מנהל מחלקה'):
         hebrew_months_da = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
                             "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
 
-        # If רופא בכיר (no night UI shown above) → render the page header
-        if role == 'רופא בכיר':
+        # מנהל/ת מחלקה / רופא/ה בכיר/ה — no night UI above, so render page header
+        if role in ('רופא בכיר', 'מנהל מחלקה'):
             st.subheader(f"📋 הגשת בקשות לחודש: {hebrew_months_da[daily_active_month_int - 1]}")
+            if role == 'מנהל מחלקה':
+                st.info("💡 כמנהל/ת מחלקה בקשותיך מאושרות אוטומטית ומשתקפות מיד בלוח.")
         else:
             st.divider()
 
@@ -5752,7 +5754,8 @@ else:
                         key=f"dayabs_note_{daily_active_month_int}"
                     )
                 with c4:
-                    can_submit = daily_requests_open
+                    # מנהל מחלקה bypasses the open/close gate (auto-approved)
+                    can_submit = daily_requests_open or role == 'מנהל מחלקה'
                     if st.button("✅ הגש בקשה", use_container_width=True,
                                  key=f"dayabs_submit_{daily_active_month_int}",
                                  disabled=not can_submit):
@@ -5778,6 +5781,12 @@ else:
                                     manager_email = str(sr.get('email', '')).strip()
                                     break
 
+                        # מנהל מחלקה: auto-approved immediately
+                        _is_mgr_req   = (role == 'מנהל מחלקה')
+                        _req_status   = 'approved' if _is_mgr_req else 'pending'
+                        _approved_by  = str(user_name).strip() if _is_mgr_req else ''
+                        _responded_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if _is_mgr_req else ''
+
                         # Build new row
                         new_row = {
                             'id': str(uuid.uuid4()),
@@ -5785,13 +5794,13 @@ else:
                             'start_date': f"2026-{daily_active_month_int:02d}-{lo:02d}",
                             'end_date':   f"2026-{daily_active_month_int:02d}-{hi:02d}",
                             'type': abs_type_disp,
-                            'status': 'pending',
+                            'status': _req_status,
                             'dept_at_request': dept_at_req,
                             'manager_email': manager_email,
-                            'approved_by': '',
+                            'approved_by': _approved_by,
                             'notes': abs_note.strip(),
                             'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                            'responded_at': '',
+                            'responded_at': _responded_at,
                         }
                         new_df = pd.concat(
                             [st.session_state.absence_requests, pd.DataFrame([new_row])],
@@ -5800,21 +5809,40 @@ else:
                         st.session_state.absence_requests = new_df
                         save_to_db("absence_requests", new_df)
 
-                        # Try to email the manager (silently swallows on failure)
-                        if manager_email:
-                            send_notification_email(
-                                manager_email,
-                                f"בקשת היעדרות חדשה: {user_name}",
-                                f"<div dir='rtl'><p>שלום,</p>"
-                                f"<p>עובד <b>{user_name}</b> ({dept_at_req}) הגיש/ה בקשת היעדרות:</p>"
-                                f"<ul><li>סוג: {abs_type_disp}</li>"
-                                f"<li>תאריכים: {new_row['start_date']} – {new_row['end_date']}</li>"
-                                f"<li>הערה: {abs_note or '—'}</li></ul>"
-                                f"<p>נא להיכנס למערכת לאישור או דחיה.</p></div>"
-                            )
-
-                        st.success(f"✅ בקשת {abs_type_disp} ל-{lo:02d}/{daily_active_month_int:02d}–"
-                                   f"{hi:02d}/{daily_active_month_int:02d} נשלחה!")
+                        if _is_mgr_req:
+                            # Auto-approved: write directly to work_schedule_daily
+                            _mgr_dept = dept_at_req
+                            if not _mgr_dept:
+                                _sf  = st.session_state.staff
+                                _srf = _sf[_sf['name'].astype(str).str.strip() == str(user_name).strip()]
+                                if not _srf.empty:
+                                    _mdl = _parse_manage_depts(_srf.iloc[0].get('manage_depts', ''))
+                                    _mgr_dept = _mdl[0] if _mdl else ''
+                            if _mgr_dept:
+                                _di = lo
+                                while _di <= hi:
+                                    _ds = f"2026-{daily_active_month_int:02d}-{_di:02d}"
+                                    _wsd_upsert(_ds, str(user_name).strip(), _mgr_dept,
+                                                abs_type_disp, is_manual=True,
+                                                note=abs_note.strip())
+                                    _di += 1
+                            st.success(f"✅ {abs_type_disp} {lo:02d}/{daily_active_month_int:02d}–"
+                                       f"{hi:02d}/{daily_active_month_int:02d} אושר אוטומטית ועודכן בלוח!")
+                        else:
+                            # Regular employee: email the manager
+                            if manager_email:
+                                send_notification_email(
+                                    manager_email,
+                                    f"בקשת היעדרות חדשה: {user_name}",
+                                    f"<div dir='rtl'><p>שלום,</p>"
+                                    f"<p>עובד <b>{user_name}</b> ({dept_at_req}) הגיש/ה בקשת היעדרות:</p>"
+                                    f"<ul><li>סוג: {abs_type_disp}</li>"
+                                    f"<li>תאריכים: {new_row['start_date']} – {new_row['end_date']}</li>"
+                                    f"<li>הערה: {abs_note or '—'}</li></ul>"
+                                    f"<p>נא להיכנס למערכת לאישור או דחיה.</p></div>"
+                                )
+                            st.success(f"✅ בקשת {abs_type_disp} ל-{lo:02d}/{daily_active_month_int:02d}–"
+                                       f"{hi:02d}/{daily_active_month_int:02d} נשלחה!")
                         st.session_state[sel_start_key] = None
                         st.session_state[sel_end_key]   = None
                         st.rerun()

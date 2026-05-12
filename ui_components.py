@@ -375,8 +375,8 @@ def render_navbar(role):
     if role not in ("מנהל מחלקה", "רופא בכיר"):
         items.append(sac.TabsItem('סידור תורנויות', icon='calendar-week'))
 
-    # הגשת בקשות (טאב מאוחד שמחליף את "הגשת אילוצים") — לא לאדמין, לא למנהל מחלקה
-    if role not in ("מנהל/ת", "מנהל מחלקה"):
+    # הגשת בקשות — לא לאדמין. מנהל/ת מחלקה רואה (היעדרות עצמית, מאושרת אוטומטית)
+    if role != "מנהל/ת":
         items.append(sac.TabsItem('הגשת בקשות', icon='calendar-check'))
 
     # אדמין-בלבד
