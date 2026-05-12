@@ -5968,15 +5968,34 @@ else:
                         st.info("אין בקשות במערכת.")
                     else:
                         ar_df_mgr['status']           = ar_df_mgr['status'].astype(str).str.lower()
-                        ar_df_mgr['dept_at_request'] = ar_df_mgr['dept_at_request'].astype(str)
-                        # Filter: pending + dept in managed_depts (all months)
+                        ar_df_mgr['dept_at_request'] = ar_df_mgr['dept_at_request'].astype(str).str.strip()
+                        ar_df_mgr['employee']        = ar_df_mgr['employee'].astype(str).str.strip()
+
+                        # Normalise dept names for comparison (strip + normalise apostrophes)
+                        def _norm_dept(s):
+                            return str(s).strip().replace('׳', "'").replace('’', "'")
+                        norm_managed = [_norm_dept(d) for d in managed_depts]
+                        dept_match = ar_df_mgr['dept_at_request'].apply(_norm_dept).isin(norm_managed)
+
+                        # Fallback: also match by employee name — find all employees ever in
+                        # managed depts across all dept_rotation rows, regardless of month
+                        dr_all = st.session_state.dept_rotation
+                        managed_emps = set()
+                        if not dr_all.empty and 'daily_dept' in dr_all.columns:
+                            for md in norm_managed:
+                                emask = dr_all['daily_dept'].apply(_norm_dept) == md
+                                managed_emps.update(
+                                    dr_all[emask]['employee'].astype(str).str.strip().tolist()
+                                )
+                        emp_match = ar_df_mgr['employee'].isin(managed_emps)
+
+                        # Combine: dept_at_request match OR employee-in-managed-dept match
                         my_pending = ar_df_mgr[
                             (ar_df_mgr['status'] == 'pending') &
-                            (ar_df_mgr['dept_at_request'].isin(managed_depts))
-                        ].sort_values('start_date') if 'start_date' in ar_df_mgr.columns else ar_df_mgr[
-                            (ar_df_mgr['status'] == 'pending') &
-                            (ar_df_mgr['dept_at_request'].isin(managed_depts))
+                            (dept_match | emp_match)
                         ]
+                        if 'start_date' in my_pending.columns:
+                            my_pending = my_pending.sort_values('start_date')
                         if my_pending.empty:
                             st.success("אין בקשות ממתינות במחלקותיך ✅")
                         else:
