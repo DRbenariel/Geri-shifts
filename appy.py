@@ -304,15 +304,37 @@ def _generate_work_schedule(year_month, view_month):
                 status = "עובד"  # default
                 note   = ""
 
-                # Priority 1: approved absence covers this day?
-                for sd, ed, atype in approved_map.get(emp_n, []):
-                    if sd <= date_obj <= ed:
-                        status = atype if atype else "חופש"
-                        break
+                wd_idx_gen = (date_obj.weekday() + 1) % 7  # Sun=0, Fri=5, Sat=6
 
-                # Priority 2: recurring weekly absence?
+                # Priority 0a: Saturday — department closed
+                if wd_idx_gen == 6:
+                    status = "חופש"
+                    note   = "שבת"
+
+                # Priority 0b: Friday — working employees from שישי בוקר schedule
+                elif wd_idx_gen == 5:
+                    fri_shifts = _DAILY_DEPT_TO_FRIDAY_SHIFTS.get(str(dept_n), [])
+                    if fri_shifts:
+                        # Check if this employee is assigned to the mapped שישי בוקר shift
+                        fri_assigned = {
+                            str(r['employee']).strip()
+                            for _, r in sched.iterrows()
+                            if str(r['date']) == date_str and str(r['dept']) in fri_shifts
+                        }
+                        if emp_n not in fri_assigned:
+                            status = "חופש"
+                            note   = "שישי — לא משובץ"
+
+                # Priority 1: approved absence covers this day?
                 if status == "עובד":
-                    wd_heb_idx = (date_obj.weekday() + 1) % 7  # Sun=0
+                    for sd, ed, atype in approved_map.get(emp_n, []):
+                        if sd <= date_obj <= ed:
+                            status = atype if atype else "חופש"
+                            break
+
+                # Priority 2: recurring weekly absence? (weekdays only — Fri/Sat handled above)
+                if status == "עובד":
+                    wd_heb_idx = wd_idx_gen
                     if wd_heb_idx in recurring_map.get(emp_n, set()):
                         status = "חופש"
                         note = "היעדרות קבועה"
@@ -443,7 +465,7 @@ def _export_dept_grid(dept_name, year_month, view_month):
                 manual = _wsd_is_manual(date_str, emp)
                 # Same live-derive logic as the board
                 if raw is None or (raw == "עובד" and not manual):
-                    status = _derive_auto_status(date_str, emp)
+                    status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
                 else:
                     status = raw
                 note = _wsd_get_note(date_str, emp)
@@ -594,7 +616,7 @@ def _export_dept_grid_excel(dept_name, year_month, view_month):
             for i, d in enumerate(days):
                 date_str = f"{year}-{view_month:02d}-{d:02d}"
                 raw = _wsd_get_status(date_str, emp, default=None)
-                status = raw if raw is not None else _derive_auto_status(date_str, emp)
+                status = raw if raw is not None else _derive_auto_status(date_str, emp, daily_dept=dept_name)
                 note   = _wsd_get_note(date_str, emp)
                 col_num = i + 2
                 cell = ws_xl.cell(row_num, col_num)
@@ -620,7 +642,7 @@ def _export_dept_grid_excel(dept_name, year_month, view_month):
     except Exception:
         return None, None
 
-def _export_personal_schedule_excel(user_name, view_month):
+def _export_personal_schedule_excel(user_name, view_month, daily_dept=None):
     """
     Build an Excel file with the personal day schedule for one employee.
     Returns (bytes, filename) or (None, None).
@@ -659,7 +681,12 @@ def _export_personal_schedule_excel(user_name, view_month):
             date_str = f"{year}-{view_month:02d}-{d:02d}"
             wd_name  = WD_FULL[(date(year, view_month, d).weekday() + 1) % 7]
             raw = _wsd_get_status(date_str, user_name, default=None)
-            status = raw if raw is not None else _derive_auto_status(date_str, user_name)
+            manual = _wsd_is_manual(date_str, user_name)
+            if raw is None or (raw == "עובד" and not manual):
+                status = _derive_auto_status(date_str, user_name,
+                                             daily_dept=daily_dept)
+            else:
+                status = raw
             note   = _wsd_get_note(date_str, user_name)
             row_num = d + 1
             ws_xl.cell(row_num, 1, date_str).border = border
@@ -703,6 +730,12 @@ def _export_dept_to_new_gsheet(dept_name, year_month, view_month):
         sh  = gc.open_by_url(url)
         ws  = sh.worksheet(sheet_name)
         tab_url = f"{sh.url}#gid={ws.id}"
+
+        # Make the spreadsheet viewable by anyone with the link (read-only)
+        try:
+            sh.share('', perm_type='anyone', role='reader')
+        except Exception:
+            pass  # non-critical — link still works for existing editors
 
         return True, tab_url, ''
     except Exception as e:
@@ -792,10 +825,27 @@ _FRIDAY_SHIFT_DEPTS = {
 
 _HEB_DAY_TO_IDX = {"א": 0, "ב": 1, "ג": 2, "ד": 3, "ה": 4, "ו": 5, "ש": 6}
 
-def _derive_auto_status(date_str, employee):
+# Friday shift → daily dept mapping (for deriving who works which daily dept on Fridays)
+_DAILY_DEPT_TO_FRIDAY_SHIFTS = {
+    "פנימית גריאטרית":    ["שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)"],
+    "שיקום גריאטרי א'":   ["שישי בוקר - שיקום (1)"],
+    "שיקום גריאטרי ב'":   ["שישי בוקר - שיקום (2)"],
+}
+
+# Daily dept → night-shift dept name (for תורנ/ית display row)
+_DAILY_DEPT_TO_NIGHT_DEPT = {
+    "פנימית גריאטרית":    "פנימית גריאטרית",
+    "שיקום גריאטרי א'":   "שיקום",
+    "שיקום גריאטרי ב'":   "שיקום",
+}
+
+def _derive_auto_status(date_str, employee, daily_dept=None):
     """
     Derive the day-schedule status for (date, employee) without reading work_schedule_daily.
     Priority order:
+      0. Saturday (wd=6) → "חופש" (department closed)
+      0. Friday (wd=5) + daily_dept known → check שישי בוקר assignment;
+         עובד if assigned to mapped shift, חופש otherwise
       1. Recurring weekly absence (recurring_absent_days in staff sheet) → "חופש"
       2. Night shift today (schedule sheet) → "תורנות"
       3. Night shift yesterday → "אחרי תורנות"
@@ -804,6 +854,28 @@ def _derive_auto_status(date_str, employee):
     try:
         emp = str(employee).strip()
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+        wd_idx = (date_obj.weekday() + 1) % 7  # Sun=0 … Sat=6
+
+        # 0a. Saturday: department closed
+        if wd_idx == 6:
+            return "חופש"
+
+        # 0b. Friday: working employees come from שישי בוקר assignments
+        if wd_idx == 5 and daily_dept:
+            fri_shifts = _DAILY_DEPT_TO_FRIDAY_SHIFTS.get(str(daily_dept), [])
+            if fri_shifts:
+                try:
+                    sch = st.session_state.schedule
+                    if not sch.empty and 'date' in sch.columns:
+                        fri_mask = (
+                            (sch['date'].astype(str) == date_str) &
+                            (sch['dept'].astype(str).isin(fri_shifts))
+                        )
+                        fri_emps = sch[fri_mask]['employee'].astype(str).str.strip().tolist()
+                        fri_emps = [e for e in fri_emps if e and e != '---']
+                        return "עובד" if emp in fri_emps else "חופש"
+                except Exception:
+                    pass
 
         # 1. Recurring weekly absence
         try:
@@ -813,7 +885,7 @@ def _derive_auto_status(date_str, employee):
                 if not emp_row.empty:
                     rec_raw = str(emp_row.iloc[0].get('recurring_absent_days', '') or '').strip()
                     if rec_raw:
-                        wd_heb_idx = (date_obj.weekday() + 1) % 7  # Sun=0
+                        wd_heb_idx = wd_idx
                         for tok in rec_raw.split(','):
                             if _HEB_DAY_TO_IDX.get(tok.strip()) == wd_heb_idx:
                                 return "חופש"
@@ -834,6 +906,25 @@ def _derive_auto_status(date_str, employee):
     except Exception:
         pass
     return "עובד"
+
+
+def _get_night_duty(date_str, daily_dept):
+    """Return the name of the on-call (night-shift) employee for a given date and daily dept."""
+    night_dept = _DAILY_DEPT_TO_NIGHT_DEPT.get(str(daily_dept))
+    if not night_dept:
+        return None
+    try:
+        sch = st.session_state.schedule
+        if sch.empty or 'date' not in sch.columns:
+            return None
+        mask = (sch['date'].astype(str) == date_str) & (sch['dept'].astype(str) == night_dept)
+        rows = sch[mask]
+        if rows.empty:
+            return None
+        emp = str(rows.iloc[0]['employee']).strip()
+        return emp if emp and emp != '---' else None
+    except Exception:
+        return None
 
 _MANUAL_STATUSES = ["עובד", "חופש", "202", "אחרי תורנות", "אחר"]
 # ── Inclusive display labels for role types (stored values unchanged) ─────────
@@ -954,7 +1045,7 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                 raw    = _wsd_get_status(date_str, emp, default=None)
                 manual = _wsd_is_manual(date_str, emp)
                 if raw is None or (raw == "עובד" and not manual):
-                    status = _derive_auto_status(date_str, emp)
+                    status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
                 else:
                     status = raw
                 note = _wsd_get_note(date_str, emp)
@@ -1056,6 +1147,14 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                 if not day_working and not day_absent:
                     st.caption("אין נתונים ליום זה")
 
+                # ── תורנ/ית (night duty) ─────────────────────────────────
+                night_worker = _get_night_duty(date_str, dept_name)
+                if night_worker:
+                    st.markdown(
+                        f"<div style='font-size:0.82rem;color:#5b21b6;"
+                        f"margin-top:6px'>🌙 תורנ/ית: <b>{night_worker}</b></div>",
+                        unsafe_allow_html=True)
+
         return  # skip desktop grid below
 
     for half_idx, days in enumerate(halves):
@@ -1093,7 +1192,7 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                 _wsd_raw   = _wsd_get_status(date_str, emp, default=None)
                 # Re-derive when no entry or when non-manual "עובד" (picks up recurring days live)
                 if _wsd_raw is None or (_wsd_raw == "עובד" and not _wsd_is_manual(date_str, emp)):
-                    cur_status = _derive_auto_status(date_str, emp)
+                    cur_status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
                 else:
                     cur_status = _wsd_raw
                 cur_note   = _wsd_get_note(date_str, emp)
@@ -1145,6 +1244,22 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                                     st.rerun()
                         except Exception:
                             pass  # older Streamlit without popover — note editing unavailable
+
+        # ── תורנ/ית row (one per half) ─────────────────────────────────────
+        cols = st.columns([2] + [1] * n)
+        cols[0].markdown(
+            "<div style='background:#ede9fe;font-weight:700;text-align:center;"
+            "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#5b21b6'>🌙 תורנ/ית</div>",
+            unsafe_allow_html=True)
+        for i, d in enumerate(days):
+            date_str_nd = f"{year}-{view_month:02d}-{d:02d}"
+            nd = _get_night_duty(date_str_nd, dept_name)
+            cols[i+1].markdown(
+                f"<div style='background:#f5f3ff;text-align:center;padding:4px 2px;"
+                f"border-radius:6px;font-size:0.7rem;color:#6d28d9;"
+                f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                f"{nd or '—'}</div>",
+                unsafe_allow_html=True)
 
 def log_event(event_type, detail_1='', detail_2=''):
     """
@@ -5869,7 +5984,8 @@ else:
                             _wsd_raw_es = _wsd_get_status(date_str, user_name, default=None)
                             # Re-derive non-manual "עובד" so recurring days show live
                             if _wsd_raw_es is None or (_wsd_raw_es == "עובד" and not _wsd_is_manual(date_str, user_name)):
-                                status = _derive_auto_status(date_str, user_name)
+                                status = _derive_auto_status(date_str, user_name,
+                                                             daily_dept=my_dept if my_dept != "—" else None)
                             else:
                                 status = _wsd_raw_es
                             bg, fg = STATUS_COLOR.get(status, ("#f8fafc", "#334155"))
@@ -5894,7 +6010,9 @@ else:
 
             # ── Personal schedule Excel download ────────────────────────────
             st.markdown("---")
-            _pers_bytes, _pers_fname = _export_personal_schedule_excel(user_name, view_m)
+            _pers_bytes, _pers_fname = _export_personal_schedule_excel(
+                user_name, view_m,
+                daily_dept=my_dept if my_dept != "—" else None)
             if _pers_bytes:
                 st.download_button(
                     "📥 הורד לוח עבודה שלי (Excel)",
