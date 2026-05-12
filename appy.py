@@ -768,26 +768,40 @@ def _get_fri_shift_workers(date_str, daily_dept):
         return []
 
 
+def _rebuild_wsd_index():
+    """Build a (date_str, employee) → dict index from work_schedule_daily.
+    Called at session init and after every _wsd_upsert write.
+    """
+    idx = {}
+    wsd = st.session_state.get('work_schedule_daily', pd.DataFrame())
+    if not wsd.empty and 'date' in wsd.columns:
+        for _, r in wsd.iterrows():
+            key = (str(r['date']), str(r.get('employee', '')).strip())
+            raw_manual = r.get('is_manual', False)
+            idx[key] = {
+                'status':    str(r.get('status', 'עובד')),
+                'note':      str(r.get('note', '') or ''),
+                'is_manual': raw_manual if isinstance(raw_manual, bool)
+                             else str(raw_manual).strip().lower() == 'true',
+            }
+    st.session_state.wsd_index = idx
+
+
 def _wsd_get_status(date_str, employee, default="עובד"):
-    """Look up status for (date, employee) in work_schedule_daily session_state."""
-    wsd = st.session_state.work_schedule_daily
-    if wsd.empty or 'date' not in wsd.columns:
-        return default
-    m = (wsd['date'].astype(str) == date_str) & (wsd['employee'].astype(str).str.strip() == str(employee).strip())
-    if m.any():
-        return str(wsd[m].iloc[0].get('status', default))
-    return default
+    """O(1) status lookup via pre-built wsd_index."""
+    idx = st.session_state.get('wsd_index')
+    if idx is None:
+        _rebuild_wsd_index()
+        idx = st.session_state.wsd_index
+    return idx.get((str(date_str), str(employee).strip()), {}).get('status', default)
 
 def _wsd_is_manual(date_str, employee):
-    """Return True if the WSD entry for (date, employee) has is_manual=True."""
-    wsd = st.session_state.work_schedule_daily
-    if wsd.empty or 'date' not in wsd.columns:
-        return False
-    m = (wsd['date'].astype(str) == date_str) & (wsd['employee'].astype(str).str.strip() == str(employee).strip())
-    if m.any():
-        v = wsd[m].iloc[0].get('is_manual', False)
-        return v if isinstance(v, bool) else str(v).strip().lower() == 'true'
-    return False
+    """O(1) is_manual lookup via pre-built wsd_index."""
+    idx = st.session_state.get('wsd_index')
+    if idx is None:
+        _rebuild_wsd_index()
+        idx = st.session_state.wsd_index
+    return idx.get((str(date_str), str(employee).strip()), {}).get('is_manual', False)
 
 def _wsd_upsert(date_str, employee, daily_dept, status, is_manual=True, note=""):
     """Insert/update one row in work_schedule_daily; persist to sheet."""
@@ -807,6 +821,7 @@ def _wsd_upsert(date_str, employee, daily_dept, status, is_manual=True, note="")
             'status': status, 'note': note, 'is_manual': is_manual,
         }])], ignore_index=True)
     st.session_state.work_schedule_daily = wsd
+    _rebuild_wsd_index()   # keep O(1) index in sync
     save_to_db("work_schedule_daily", wsd)
 
 # Status cycle for in-grid editing (clicks rotate through these)
@@ -836,14 +851,12 @@ _GRID_STATUS_PFX = {
 }
 
 def _wsd_get_note(date_str, employee):
-    """Look up note for (date, employee) in work_schedule_daily."""
-    wsd = st.session_state.work_schedule_daily
-    if wsd.empty or 'date' not in wsd.columns:
-        return ""
-    m = (wsd['date'].astype(str) == date_str) & (wsd['employee'].astype(str).str.strip() == str(employee).strip())
-    if m.any():
-        return str(wsd[m].iloc[0].get('note', '') or '')
-    return ""
+    """O(1) note lookup via pre-built wsd_index."""
+    idx = st.session_state.get('wsd_index')
+    if idx is None:
+        _rebuild_wsd_index()
+        idx = st.session_state.wsd_index
+    return idx.get((str(date_str), str(employee).strip()), {}).get('note', '')
 
 _FRIDAY_SHIFT_DEPTS = {
     "שישי בוקר - שיקום (1)", "שישי בוקר - שיקום (2)",
@@ -1377,6 +1390,17 @@ def log_event(event_type, detail_1='', detail_2=''):
         pass  # Analytics failure must never affect the main app
 
 
+import threading as _threading
+
+def _log_async(event_type, detail_1='', detail_2=''):
+    """Fire-and-forget wrapper for log_event — never blocks the UI."""
+    _threading.Thread(
+        target=log_event,
+        args=(event_type, detail_1, detail_2),
+        daemon=True,
+    ).start()
+
+
 def save_to_db(worksheet_name, df, is_rtl=False):
     """
     Write df to a Google Sheets worksheet. Retries up to 4 times on 429 rate-limit errors.
@@ -1611,7 +1635,7 @@ else:
             _is_mobile = _is_mobile or (isinstance(_vp_cap, (int, float)) and 0 < _vp_cap < 768)
             st.session_state.analytics_device_type = 'mobile' if _is_mobile else 'desktop'
             st.session_state.analytics_device_captured = True
-            log_event('login_success', st.session_state.analytics_device_type, str(_vp_cap))
+            _log_async('login_success', st.session_state.analytics_device_type, str(_vp_cap))
     except Exception:
         pass
 
@@ -2005,7 +2029,13 @@ if 'work_schedule_daily' not in st.session_state:
     if df.empty or 'date' not in df.columns:
         df = pd.DataFrame(columns=[
             'date', 'employee', 'daily_dept', 'status', 'note', 'is_manual'])
+    else:
+        # Scope to 2026 only — prevents multi-year data from bloating session state
+        df = df[df['date'].astype(str).str.startswith('2026')]
     st.session_state.work_schedule_daily = df
+    _rebuild_wsd_index()   # build O(1) lookup index at session start
+elif 'wsd_index' not in st.session_state:
+    _rebuild_wsd_index()   # rebuild if session restored without index
 
 # כלי שיבוץ ידני
 if 'manual_date' not in st.session_state:
@@ -2770,9 +2800,13 @@ def draw_calendar_view(year, month, role, user_name=None):
         
     try:
         from streamlit_javascript import st_javascript
-        # Check User Agent and Width
-        ua_string = st_javascript("window.navigator.userAgent", key="ua_check_1")
-        ui_width = st_javascript("window.innerWidth", key="width_check_1")
+        # Check User Agent and Width — run once per session, not every rerun
+        if not st.session_state.get('analytics_device_captured'):
+            ua_string = st_javascript("window.navigator.userAgent", key="ua_check_1")
+            ui_width  = st_javascript("window.innerWidth",          key="width_check_1")
+        else:
+            ua_string = st.session_state.get('analytics_ua', '')
+            ui_width  = st.session_state.get('analytics_vp_width', 0) or 0
         
         # 1. User Agent Check
         if ua_string and isinstance(ua_string, str):
@@ -3590,7 +3624,7 @@ st.title("מערכת סידור עבודה המערך הגריאטרי")
 if st.button("התנתק", key="logout_top", use_container_width=False):
     _login_time = st.session_state.get('analytics_login_time', datetime.now())
     _session_dur = int((datetime.now() - _login_time).total_seconds())
-    log_event('logout', str(_session_dur), 'explicit')
+    _log_async('logout', str(_session_dur), 'explicit')
     st.session_state.logged_in = False
     st.rerun()
 st.markdown('</div>', unsafe_allow_html=True)
@@ -3598,9 +3632,12 @@ st.markdown('</div>', unsafe_allow_html=True)
 role = st.session_state.user_role
 user_name = st.session_state.user_name
 
-# שליפת החודש הפעיל — נטען מחדש בכל רינדור כדי שעדכון מנהל יגיע לכל המשתמשים מיד
+# שליפת החודש הפעיל — cached with 30 s TTL so admin changes propagate quickly
+# but don't trigger a new API call on every widget interaction.
 try:
-    st.session_state.settings = get_db_data("settings")
+    if (time.time() - st.session_state.get('_settings_fetched_at', 0) > 30):
+        st.session_state.settings = get_db_data("settings")
+        st.session_state['_settings_fetched_at'] = time.time()
 except:
     st.session_state.settings = pd.DataFrame([{'key': 'active_month', 'value': str(date.today().month + 1)}])
 
@@ -3659,8 +3696,8 @@ if selected_nav != _prev_tab:
     _now_tab = datetime.now()
     if _prev_tab is not None:
         _secs_on_prev = int((_now_tab - st.session_state.get('analytics_tab_enter', _now_tab)).total_seconds())
-        log_event('tab_view', _prev_tab, str(_secs_on_prev))
-    log_event('tab_view', selected_nav, 'enter')
+        _log_async('tab_view', _prev_tab, str(_secs_on_prev))
+    _log_async('tab_view', selected_nav, 'enter')
     st.session_state.analytics_last_tab = selected_nav
     st.session_state.analytics_tab_enter = _now_tab
 
@@ -3745,7 +3782,7 @@ if selected_nav == 'הגדרות':
                     chosen = next(o for o in shift_options if o[0] == sel_label)
                     swap_date, swap_dept = chosen[1], chosen[2]
                     swap_month_int = int(swap_date.split('-')[1])
-                    log_event('swap_search', swap_date, swap_dept)
+                    _log_async('swap_search', swap_date, swap_dept)
 
                     with st.spinner("מחפש החלפות..."):
                         results = find_swap_candidates(
@@ -3790,7 +3827,7 @@ if selected_nav == 'הגדרות':
                                         existing = st.session_state.swap_requests
                                         combined = new_req if existing.empty else pd.concat([existing, new_req], ignore_index=True)
                                         save_to_db("swap_requests", combined)
-                                        log_event('swap_request_sent', swap_date, 'full')
+                                        _log_async('swap_request_sent', swap_date, 'full')
                                         st.session_state.swap_requests = combined
                                         st.success("הבקשה נשלחה למנהל/ת לאישור.")
                                 st.divider()
@@ -3820,7 +3857,7 @@ if selected_nav == 'הגדרות':
                                         existing = st.session_state.swap_requests
                                         combined = new_req if existing.empty else pd.concat([existing, new_req], ignore_index=True)
                                         save_to_db("swap_requests", combined)
-                                        log_event('swap_request_sent', swap_date, 'partial')
+                                        _log_async('swap_request_sent', swap_date, 'partial')
                                         st.session_state.swap_requests = combined
                                         st.success("הבקשה נשלחה למנהל/ת לאישור.")
                                 st.divider()
@@ -3856,7 +3893,7 @@ if selected_nav == 'הגדרות':
                                         existing = st.session_state.swap_requests
                                         combined = new_req if existing.empty else pd.concat([existing, new_req], ignore_index=True)
                                         save_to_db("swap_requests", combined)
-                                        log_event('swap_request_sent', swap_date, 'chain')
+                                        _log_async('swap_request_sent', swap_date, 'chain')
                                         st.session_state.swap_requests = combined
                                         st.success("הבקשה נשלחה למנהל/ת לאישור.")
                                 st.divider()
@@ -5516,7 +5553,7 @@ else:
 
                     merged = pd.concat([base, pd.DataFrame(new_rows)], ignore_index=True) if new_rows else base
                     save_to_db("requests", merged)
-                    log_event('constraint_submit', str(len(selected)), str(len(wishes)))
+                    _log_async('constraint_submit', str(len(selected)), str(len(wishes)))
                     st.session_state.requests = merged
                     _fetch_sheet_data_silently.clear()
                     st.session_state['confirm_request_save'] = False

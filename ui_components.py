@@ -3,7 +3,13 @@ import streamlit_antd_components as sac
 import streamlit_shadcn_ui as ui
 
 def setup_style():
-    """Injects the global CSS for the Medical Slate & Indigo theme."""
+    """Injects the global CSS for the Medical Slate & Indigo theme.
+    Guarded with a session-state flag so the 11 KB CSS block is only
+    injected once per session (not on every Streamlit rerun).
+    """
+    if st.session_state.get('_style_injected'):
+        return
+    st.session_state['_style_injected'] = True
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;700&display=swap');
