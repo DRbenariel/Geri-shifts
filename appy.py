@@ -5197,11 +5197,37 @@ elif role == "מנהל/ת":
         with sub_tabs[1]:
             st.markdown(f"#### לוח עבודה כללי — {hebrew_months[view_month-1]} 2026")
             st.caption("לחיצה על תא מחזרת בין: עובד/ת → חופש → 202 → אחרי תורנות → אחר. שינויים נשמרים מיד עם is_manual=True.")
+            # Pre-build a map: dept_name → [מנהל מחלקה names] so their rows always appear
+            _staff_all = st.session_state.staff
+            _dept_mgr_map: dict[str, list[str]] = {d: [] for d in DAILY_DEPTS_ALL}
+            if not _staff_all.empty and 'type' in _staff_all.columns:
+                for _, _sr in _staff_all.iterrows():
+                    if str(_sr.get('type', '')).strip() != 'מנהל מחלקה':
+                        continue
+                    _mgr_name = str(_sr.get('name', '')).strip()
+                    if not _mgr_name:
+                        continue
+                    for _md in _parse_manage_depts(_sr.get('manage_depts', '')):
+                        if _md in _dept_mgr_map:
+                            _dept_mgr_map[_md].append(_mgr_name)
+
             dept_inner = st.tabs(DAILY_DEPTS_ALL)
             _ns_map = {d: f"dept_{i}" for i, d in enumerate(DAILY_DEPTS_ALL)}
             for d_tab, d_name in zip(dept_inner, DAILY_DEPTS_ALL):
                 with d_tab:
-                    _render_dept_grid(d_name, view_year_month, view_month, _ns_map[d_name])
+                    # Build employee list: dept_rotation for this month + managers of this dept
+                    _dr = st.session_state.dept_rotation
+                    _emps_base = []
+                    if not _dr.empty and 'employee' in _dr.columns:
+                        _mask = ((_dr['year_month'].astype(str) == view_year_month) &
+                                 (_dr['daily_dept'].astype(str) == d_name))
+                        _emps_base = _dr[_mask]['employee'].astype(str).str.strip().tolist()
+                    # Prepend managers (if not already in list from dept_rotation)
+                    for _mn in _dept_mgr_map.get(d_name, []):
+                        if _mn not in _emps_base:
+                            _emps_base = [_mn] + _emps_base
+                    _render_dept_grid(d_name, view_year_month, view_month,
+                                      _ns_map[d_name], employees=_emps_base or None)
                     st.markdown(
                         "<div style='direction:rtl;font-size:0.75rem;color:#64748b;margin-top:6px'>"
                         "<b>מקרא:</b> <span style='background:#16a34a;color:white;padding:1px 6px;border-radius:4px'>עובד/ת</span> &nbsp;"
