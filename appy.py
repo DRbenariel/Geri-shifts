@@ -3661,6 +3661,30 @@ def _parse_manage_depts(raw):
     normalised = str(raw).strip().replace('׳', "'").replace('״', '״')
     return [d.strip() for d in normalised.split(',') if d.strip()]
 
+_ROLE_ORDER = {'מנהל מחלקה': 0, 'רופא בכיר': 1, 'מתמחה': 2}
+
+def _sort_employees_by_role(emp_list: list[str]) -> list[str]:
+    """
+    Sort a list of employee names by role:
+      מנהל/ת מחלקה → רופא/ה בכיר/ה → מתמחה → everything else.
+    Looks up each name in st.session_state.staff; unknown names go last.
+    Preserves original order within the same role (stable sort).
+    """
+    try:
+        sf = st.session_state.staff
+        if sf.empty or 'name' not in sf.columns:
+            return emp_list
+        _name_to_role: dict[str, str] = {}
+        for _, r in sf.iterrows():
+            _name_to_role[str(r.get('name', '')).strip()] = str(r.get('type', '')).strip()
+        return sorted(
+            emp_list,
+            key=lambda n: _ROLE_ORDER.get(_name_to_role.get(str(n).strip(), ''), 99)
+        )
+    except Exception:
+        return emp_list
+
+
 def _get_setting(key, default):
     try:
         rows = st.session_state.settings[st.session_state.settings['key'] == key]
@@ -5226,6 +5250,7 @@ elif role == "מנהל/ת":
                     for _mn in _dept_mgr_map.get(d_name, []):
                         if _mn not in _emps_base:
                             _emps_base = [_mn] + _emps_base
+                    _emps_base = _sort_employees_by_role(_emps_base)
                     _render_dept_grid(d_name, view_year_month, view_month,
                                       _ns_map[d_name], employees=_emps_base or None)
                     st.markdown(
@@ -6032,6 +6057,7 @@ else:
                                     emps = dr[mask]['employee'].astype(str).str.strip().tolist()
                                 if user_name not in emps:
                                     emps = [user_name] + emps
+                                emps = _sort_employees_by_role(emps)
                                 _render_dept_grid(d_name, da_y_m, daily_active_month_int,
                                                   f"mgr_{di}", employees=emps)
                                 st.divider()
@@ -6047,6 +6073,7 @@ else:
                             emps = dr[mask]['employee'].astype(str).str.strip().tolist()
                         if user_name not in emps:
                             emps = [user_name] + emps
+                        emps = _sort_employees_by_role(emps)
                         _render_dept_grid(d_name, da_y_m, daily_active_month_int,
                                           "mgr_solo", employees=emps)
                         st.divider()
