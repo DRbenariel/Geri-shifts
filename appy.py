@@ -930,9 +930,9 @@ _MANUAL_STATUSES = ["עובד", "חופש", "202", "אחרי תורנות", "א�
 # ── Inclusive display labels for role types (stored values unchanged) ─────────
 _TYPE_DISPLAY = {
     'מתמחה':      'מתמחה',
-    'תורן חוץ':   'תורן/ת חוץ',
+    'תורן חוץ':   'תורנ/ית חוץ',
     'מנהל/ת':     'מנהל/ת',
-    'רופא בכיר':  'רופא/ה בכיר/ה',
+    'רופא בכיר':  'רופא/ה בכירה',
     'מנהל מחלקה': 'מנהל/ת מחלקה',
 }
 
@@ -3819,7 +3819,7 @@ if selected_nav == 'הגדרות':
                         st.rerun()
 
 elif role == "מנהל/ת":
-    if selected_nav == 'לוח שיבוץ':
+    if selected_nav == 'סידור תורנויות':
         
         # --- Month Selector for Schedule Tab (Admin Only) ---
         with st.expander("הגדרות תצוגה", expanded=False):
@@ -4591,7 +4591,7 @@ elif role == "מנהל/ת":
             else:
                  st.info("אין נתונים להצגה.")
 
-        # ── "ייצוא נתונים" הוסר מכאן והועבר לטאב "לוח שיבוץ" (ראה כפתור 📤 שם) ──
+        # ── "ייצוא נתונים" הוסר מכאן והועבר לטאב "סידור תורנויות" (ראה כפתור 📤 שם) ──
 
 
     if selected_nav == 'דוחות וניהול': # Fairness merged into Reports
@@ -5115,18 +5115,13 @@ elif role == "מנהל/ת":
             if ar_all.empty or 'status' not in ar_all.columns:
                 st.info("אין בקשות במערכת.")
             else:
-                # Filter: requests touching the view_month (start_date or end_date in this month)
                 ar_all['start_date'] = ar_all['start_date'].astype(str)
                 ar_all['end_date']   = ar_all['end_date'].astype(str)
                 ar_all['status']     = ar_all['status'].astype(str).str.lower()
-                ym = view_year_month
-                touches_month = ar_all[
-                    ar_all['start_date'].str.startswith(ym) |
-                    ar_all['end_date'].str.startswith(ym)
-                ]
-                pending = touches_month[touches_month['status'] == 'pending']
+                # Show ALL pending requests regardless of month
+                pending = ar_all[ar_all['status'] == 'pending'].sort_values('start_date')
                 if pending.empty:
-                    st.success("אין בקשות ממתינות לחודש זה ✅")
+                    st.success("אין בקשות ממתינות ✅")
                 else:
                     st.caption(f"📋 {len(pending)} בקשות ממתינות")
                     for idx, row in pending.iterrows():
@@ -5832,7 +5827,7 @@ else:
                     st.success(f"✅ בקשת חופש עתידי ל-{fut_start} – {fut_end} נשלחה!")
                     st.rerun()
 
-    if selected_nav == 'לוח שיבוץ':
+    if selected_nav == 'סידור תורנויות':
         draw_calendar_view(2026, sel_month, "עובד/ת", user_name)
 
     # ── סידור יומי (עובדים / מנהלי מחלקה) ────────────────────────
@@ -5899,8 +5894,11 @@ else:
                     else:
                         ar_df_mgr['status']           = ar_df_mgr['status'].astype(str).str.lower()
                         ar_df_mgr['dept_at_request'] = ar_df_mgr['dept_at_request'].astype(str)
-                        # Filter: pending + dept in managed_depts
+                        # Filter: pending + dept in managed_depts (all months)
                         my_pending = ar_df_mgr[
+                            (ar_df_mgr['status'] == 'pending') &
+                            (ar_df_mgr['dept_at_request'].isin(managed_depts))
+                        ].sort_values('start_date') if 'start_date' in ar_df_mgr.columns else ar_df_mgr[
                             (ar_df_mgr['status'] == 'pending') &
                             (ar_df_mgr['dept_at_request'].isin(managed_depts))
                         ]
