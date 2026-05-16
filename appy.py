@@ -2879,7 +2879,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                     for dept, emp in mains:
                         dept_color = "#1e3a8a" if "שיקום" in dept else "#9a3412"
                         st.markdown(
-                            f"<div style='margin-right:6px;font-size:0.92rem;padding:2px 0'>"
+                            f"<div style='margin-inline-start:6px;font-size:0.92rem;padding:2px 0'>"
                             f"<span style='color:{dept_color};font-weight:600'>{dept}:</span> {emp}</div>",
                             unsafe_allow_html=True)
                 if friday_m:
@@ -2888,7 +2888,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                         unsafe_allow_html=True)
                     for dept, emp in friday_m:
                         st.markdown(
-                            f"<div style='margin-right:6px;font-size:0.92rem;padding:2px 0'>"
+                            f"<div style='margin-inline-start:6px;font-size:0.92rem;padding:2px 0'>"
                             f"<span style='color:#854d0e;font-weight:600'>{dept}:</span> {emp}</div>",
                             unsafe_allow_html=True)
                 if empty_slots:
@@ -2898,7 +2898,7 @@ def draw_calendar_view(year, month, role, user_name=None):
                         unsafe_allow_html=True)
                     for dept in empty_slots:
                         st.markdown(
-                            f"<div style='color:#991b1b;font-size:0.85rem;margin-right:6px'>{dept}</div>",
+                            f"<div style='color:#991b1b;font-size:0.85rem;margin-inline-start:6px'>{dept}</div>",
                             unsafe_allow_html=True)
                 if not mains and not friday_m and not empty_slots:
                     st.caption("אין שיבוצים")
@@ -4650,7 +4650,7 @@ elif role == "מנהל/ת":
                 border-radius: 12px;
                 padding: 20px;
                 box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-                text-align: right;
+                text-align: end;
                 direction: rtl;
                 border-top: 4px solid {color};
                 transition: transform 0.2s ease-in-out;

@@ -15,9 +15,9 @@ def setup_style():
     @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;700&display=swap');
     
     /* --- Global Reset & Typography --- */
-    html, body, [data-testid="stAppViewContainer"], .main { 
-        direction: rtl; 
-        text-align: right !important; 
+    html, body, [data-testid="stAppViewContainer"], .main {
+        direction: rtl;
+        text-align: end !important;
         font-family: 'Rubik', sans-serif;
         background-color: #f8fafc; /* Slate 50 - Lighter, cleaner background */
         color: #1e293b; /* Slate 800 */
@@ -69,11 +69,11 @@ def setup_style():
         direction: rtl;
         justify-content: flex-start;
         gap: 8px;
-        float: right; /* Helps force alignment in some containers */
+        float: inline-end;
     }
     .stTabs [data-baseweb="tab-panel"] {
         direction: rtl;
-        text-align: right;
+        text-align: end;
     }
     
     /* --- Card Styling (for Mobile Feed) --- */
@@ -130,7 +130,7 @@ def setup_style():
         border: none !important;
         border-radius: 12px !important;
         font-weight: 500 !important;
-        letter-spacing: 0.5px !important;
+        letter-spacing: normal !important;
         padding-top: 0.5rem !important;
         padding-bottom: 0.5rem !important;
     }
@@ -182,10 +182,10 @@ def setup_style():
     /* RTL Alignment Fixes for Selectbox & Input */
     div[data-testid="stSelectbox"] div[data-baseweb="select"] {
         direction: rtl;
-        text-align: right;
+        text-align: end;
     }
     div[data-testid="stSelectbox"] label, div[data-testid="stSelectbox"] label p {
-        text-align: right !important;
+        text-align: end !important;
         width: 100%;
         direction: rtl;
     }
@@ -199,33 +199,33 @@ def setup_style():
     
     /* Force text to stick to the right side */
     .ant-menu-item {
-        flex-direction: row !important; /* Keep natural flow in RTL */
-        justify-content: flex-start !important; /* Start from the right in RTL */
-        text-align: right !important;
+        flex-direction: row !important;
+        justify-content: flex-start !important;
+        text-align: end !important;
         direction: rtl !important;
-        padding-right: 24px !important;
-        padding-left: 16px !important;
+        padding-inline-start: 24px !important;
+        padding-inline-end: 16px !important;
     }
-    
+
     /* Force text content to align right */
     .ant-menu-title-content,
     .ant-menu-item-content,
     .ant-menu-item span {
-        text-align: right !important;
+        text-align: end !important;
         direction: rtl !important;
         display: inline-block !important;
     }
-    
-    /* Move icon to the right side */
+
+    /* Move icon to the start side (right in RTL) */
     .ant-menu-item .anticon {
-        margin-left: 12px !important; /* Space between icon and text */
-        margin-right: 0 !important;
+        margin-inline-start: 12px !important;
+        margin-inline-end: 0 !important;
     }
-    
+
     /* Force the menu item content to be on the right */
     .ant-menu-item-content {
         flex: 1 !important;
-        text-align: right !important;
+        text-align: end !important;
     }
     
     /* --- Force Navbar Background Color --- */
@@ -282,7 +282,7 @@ def setup_style():
     }
     .dept-label {
         font-weight: 700 !important;
-        margin-left: 4px !important;
+        margin-inline-start: 4px !important;
         opacity: 0.9;
     }
     .empty-slot {
@@ -334,7 +334,7 @@ def setup_style():
     /* Global Right Alignment for specific containers */
     .element-container, .stMarkdown {
         direction: rtl;
-        text-align: right;
+        text-align: end;
     }
 
     /* --- Universal Mobile Fixes --- */
@@ -409,7 +409,7 @@ def render_navbar(role):
     if st.session_state.current_nav_index >= len(items):
         st.session_state.current_nav_index = 0
 
-    st.markdown('<div dir="rtl" style="text-align: right;">', unsafe_allow_html=True)
+    st.markdown('<div dir="rtl" style="text-align: end;">', unsafe_allow_html=True)
     result = sac.tabs(
         items=items,
         index=st.session_state.current_nav_index,
