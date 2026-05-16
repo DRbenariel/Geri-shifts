@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as _cmp
 import streamlit_antd_components as sac
 import streamlit_shadcn_ui as ui
 
@@ -10,6 +11,17 @@ def setup_style():
     if st.session_state.get('_style_injected'):
         return
     st.session_state['_style_injected'] = True
+
+    # Set dir="rtl" on the real HTML document — CSS direction alone doesn't
+    # flip Streamlit's flexbox column order; the HTML attribute is required.
+    _cmp.html("""
+    <script>
+        var d = window.parent.document;
+        d.documentElement.setAttribute('dir', 'rtl');
+        d.documentElement.setAttribute('lang', 'he');
+    </script>
+    """, height=0, scrolling=False)
+
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;700&display=swap');
@@ -335,6 +347,16 @@ def setup_style():
     .element-container, .stMarkdown {
         direction: rtl;
         text-align: end;
+    }
+
+    /* Force RTL on Streamlit layout containers so columns render right→left */
+    [data-testid="stHorizontalBlock"],
+    [data-testid="stColumn"],
+    [data-testid="stVerticalBlock"],
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMainBlockContainer"],
+    .stApp, .stMain {
+        direction: rtl;
     }
 
     /* --- Universal Mobile Fixes --- */
