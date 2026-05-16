@@ -5211,11 +5211,11 @@ elif role == "מנהל/ת":
                 if not dr.empty:
                     cur = dr[dr['year_month'] == view_year_month]
                     if not cur.empty:
-                        st.caption(f"📊 שיבוצים נוכחיים בחודש: {len(cur)} עובדים")
+                        st.markdown(f"<p style='direction:rtl;text-align:end;font-size:0.85rem;color:#64748b'>📊 שיבוצים נוכחיים בחודש: {len(cur)} עובדים</p>", unsafe_allow_html=True)
                         for d in DAILY_DEPTS[:-1]:
                             cnt = (cur['daily_dept'] == d).sum()
                             if cnt > 0:
-                                st.caption(f"   • {d}: {cnt} עובדים")
+                                st.markdown(f"<p style='direction:rtl;text-align:end;font-size:0.85rem;color:#64748b'>• {d}: {cnt} עובדים</p>", unsafe_allow_html=True)
 
         # ─── Tabs 2-5 stubs (future phases) ─────────────────────
         with sub_tabs[1]:

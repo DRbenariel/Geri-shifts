@@ -36,8 +36,52 @@ def setup_style():
     }
     
     /* --- Streamlit Component Overrides --- */
-    h1, h2, h3, h4, h5, h6 { color: #0f172a !important; font-weight: 700; }
+    h1, h2, h3, h4, h5, h6 {
+        color: #0f172a !important;
+        font-weight: 700;
+        direction: rtl;
+        text-align: end;
+    }
     p, label { color: #334155 !important; }
+
+    /* Headings & captions inside Streamlit markdown wrappers */
+    [data-testid="stMarkdown"] h1,
+    [data-testid="stMarkdown"] h2,
+    [data-testid="stMarkdown"] h3,
+    [data-testid="stMarkdown"] h4,
+    [data-testid="stMarkdown"] h5,
+    [data-testid="stMarkdown"] h6,
+    [data-testid="stMarkdown"] p,
+    [data-testid="stMarkdown"] li,
+    [data-testid="stHeadingWithActionElements"] h1,
+    [data-testid="stHeadingWithActionElements"] h2,
+    [data-testid="stHeadingWithActionElements"] h3,
+    [data-testid="stHeadingWithActionElements"] h4 {
+        direction: rtl !important;
+        text-align: end !important;
+    }
+
+    /* st.caption */
+    [data-testid="stCaptionContainer"] p,
+    [data-testid="stCaptionContainer"] {
+        direction: rtl !important;
+        text-align: end !important;
+    }
+
+    /* st.dataframe / st.table column headers and cells */
+    [data-testid="stDataFrame"] th,
+    [data-testid="stDataFrame"] td,
+    [data-testid="stDataFrameResizable"] th,
+    [data-testid="stDataFrameResizable"] td {
+        direction: rtl !important;
+        text-align: end !important;
+    }
+    [data-testid="stDataFrame"] [role="columnheader"],
+    [data-testid="stDataFrameResizable"] [role="columnheader"] {
+        direction: rtl !important;
+        text-align: end !important;
+        justify-content: flex-end !important;
+    }
     
     /* --- Main Header Layout --- */
     .main-header {
