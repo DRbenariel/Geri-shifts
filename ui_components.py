@@ -12,13 +12,24 @@ def setup_style():
         return
     st.session_state['_style_injected'] = True
 
-    # Set dir="rtl" on the real HTML document — CSS direction alone doesn't
-    # flip Streamlit's flexbox column order; the HTML attribute is required.
+    # Set dir="rtl" on the real HTML document and attach a MutationObserver
+    # that re-applies RTL to every heading every time Streamlit redraws the page.
     _cmp.html("""
     <script>
         var d = window.parent.document;
         d.documentElement.setAttribute('dir', 'rtl');
         d.documentElement.setAttribute('lang', 'he');
+
+        function fixRtl() {
+            d.querySelectorAll('h1,h2,h3,h4,h5,h6,caption').forEach(function(el) {
+                el.style.direction  = 'rtl';
+                el.style.textAlign  = 'right';
+            });
+        }
+
+        // Run once immediately, then watch for every future redraw.
+        fixRtl();
+        new MutationObserver(fixRtl).observe(d.body, { childList: true, subtree: true });
     </script>
     """, height=0, scrolling=False)
 
