@@ -38,13 +38,13 @@ def setup_style():
     /* --- Streamlit Component Overrides --- */
     h1, h2, h3, h4, h5, h6 {
         color: #0f172a !important;
-        font-weight: 700;
-        direction: rtl;
-        text-align: end;
+        font-weight: 700 !important;
+        direction: rtl !important;
+        text-align: right !important;
     }
     p, label { color: #334155 !important; }
 
-    /* Headings & captions inside Streamlit markdown wrappers */
+    /* Headings inside every Streamlit wrapper — override Streamlit's own stylesheet */
     [data-testid="stMarkdown"] h1,
     [data-testid="stMarkdown"] h2,
     [data-testid="stMarkdown"] h3,
@@ -53,12 +53,14 @@ def setup_style():
     [data-testid="stMarkdown"] h6,
     [data-testid="stMarkdown"] p,
     [data-testid="stMarkdown"] li,
-    [data-testid="stHeadingWithActionElements"] h1,
-    [data-testid="stHeadingWithActionElements"] h2,
-    [data-testid="stHeadingWithActionElements"] h3,
-    [data-testid="stHeadingWithActionElements"] h4 {
+    [data-testid="stHeadingWithActionElements"],
+    [data-testid="stHeadingWithActionElements"] *,
+    [data-testid="stHeading"] h1,
+    [data-testid="stHeading"] h2,
+    [data-testid="stHeading"] h3,
+    [data-testid="stHeading"] h4 {
         direction: rtl !important;
-        text-align: end !important;
+        text-align: right !important;
     }
 
     /* st.caption */
