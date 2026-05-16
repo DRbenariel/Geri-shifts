@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as _cmp
 import streamlit_antd_components as sac
 import streamlit_shadcn_ui as ui
 
@@ -11,90 +10,22 @@ def setup_style():
     if st.session_state.get('_style_injected'):
         return
     st.session_state['_style_injected'] = True
-
-    # Set dir="rtl" on the real HTML document and attach a MutationObserver
-    # that re-applies RTL to every heading every time Streamlit redraws the page.
-    _cmp.html("""
-    <script>
-        var d = window.parent.document;
-        d.documentElement.setAttribute('dir', 'rtl');
-        d.documentElement.setAttribute('lang', 'he');
-
-        function fixRtl() {
-            d.querySelectorAll('h1,h2,h3,h4,h5,h6,caption').forEach(function(el) {
-                el.style.direction  = 'rtl';
-                el.style.textAlign  = 'right';
-            });
-        }
-
-        // Run once immediately, then watch for every future redraw.
-        fixRtl();
-        new MutationObserver(fixRtl).observe(d.body, { childList: true, subtree: true });
-    </script>
-    """, height=0, scrolling=False)
-
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;700&display=swap');
     
     /* --- Global Reset & Typography --- */
-    html, body, [data-testid="stAppViewContainer"], .main {
-        direction: rtl;
-        text-align: end !important;
+    html, body, [data-testid="stAppViewContainer"], .main { 
+        direction: rtl; 
+        text-align: right !important; 
         font-family: 'Rubik', sans-serif;
         background-color: #f8fafc; /* Slate 50 - Lighter, cleaner background */
         color: #1e293b; /* Slate 800 */
     }
     
     /* --- Streamlit Component Overrides --- */
-    h1, h2, h3, h4, h5, h6 {
-        color: #0f172a !important;
-        font-weight: 700 !important;
-        direction: rtl !important;
-        text-align: right !important;
-    }
+    h1, h2, h3, h4, h5, h6 { color: #0f172a !important; font-weight: 700; }
     p, label { color: #334155 !important; }
-
-    /* Headings inside every Streamlit wrapper — override Streamlit's own stylesheet */
-    [data-testid="stMarkdown"] h1,
-    [data-testid="stMarkdown"] h2,
-    [data-testid="stMarkdown"] h3,
-    [data-testid="stMarkdown"] h4,
-    [data-testid="stMarkdown"] h5,
-    [data-testid="stMarkdown"] h6,
-    [data-testid="stMarkdown"] p,
-    [data-testid="stMarkdown"] li,
-    [data-testid="stHeadingWithActionElements"],
-    [data-testid="stHeadingWithActionElements"] *,
-    [data-testid="stHeading"] h1,
-    [data-testid="stHeading"] h2,
-    [data-testid="stHeading"] h3,
-    [data-testid="stHeading"] h4 {
-        direction: rtl !important;
-        text-align: right !important;
-    }
-
-    /* st.caption */
-    [data-testid="stCaptionContainer"] p,
-    [data-testid="stCaptionContainer"] {
-        direction: rtl !important;
-        text-align: end !important;
-    }
-
-    /* st.dataframe / st.table column headers and cells */
-    [data-testid="stDataFrame"] th,
-    [data-testid="stDataFrame"] td,
-    [data-testid="stDataFrameResizable"] th,
-    [data-testid="stDataFrameResizable"] td {
-        direction: rtl !important;
-        text-align: end !important;
-    }
-    [data-testid="stDataFrame"] [role="columnheader"],
-    [data-testid="stDataFrameResizable"] [role="columnheader"] {
-        direction: rtl !important;
-        text-align: end !important;
-        justify-content: flex-end !important;
-    }
     
     /* --- Main Header Layout --- */
     .main-header {
@@ -138,11 +69,11 @@ def setup_style():
         direction: rtl;
         justify-content: flex-start;
         gap: 8px;
-        float: inline-end;
+        float: right; /* Helps force alignment in some containers */
     }
     .stTabs [data-baseweb="tab-panel"] {
         direction: rtl;
-        text-align: end;
+        text-align: right;
     }
     
     /* --- Card Styling (for Mobile Feed) --- */
@@ -199,7 +130,7 @@ def setup_style():
         border: none !important;
         border-radius: 12px !important;
         font-weight: 500 !important;
-        letter-spacing: normal !important;
+        letter-spacing: 0.5px !important;
         padding-top: 0.5rem !important;
         padding-bottom: 0.5rem !important;
     }
@@ -251,10 +182,10 @@ def setup_style():
     /* RTL Alignment Fixes for Selectbox & Input */
     div[data-testid="stSelectbox"] div[data-baseweb="select"] {
         direction: rtl;
-        text-align: end;
+        text-align: right;
     }
     div[data-testid="stSelectbox"] label, div[data-testid="stSelectbox"] label p {
-        text-align: end !important;
+        text-align: right !important;
         width: 100%;
         direction: rtl;
     }
@@ -268,33 +199,33 @@ def setup_style():
     
     /* Force text to stick to the right side */
     .ant-menu-item {
-        flex-direction: row !important;
-        justify-content: flex-start !important;
-        text-align: end !important;
+        flex-direction: row !important; /* Keep natural flow in RTL */
+        justify-content: flex-start !important; /* Start from the right in RTL */
+        text-align: right !important;
         direction: rtl !important;
-        padding-inline-start: 24px !important;
-        padding-inline-end: 16px !important;
+        padding-right: 24px !important;
+        padding-left: 16px !important;
     }
-
+    
     /* Force text content to align right */
     .ant-menu-title-content,
     .ant-menu-item-content,
     .ant-menu-item span {
-        text-align: end !important;
+        text-align: right !important;
         direction: rtl !important;
         display: inline-block !important;
     }
-
-    /* Move icon to the start side (right in RTL) */
+    
+    /* Move icon to the right side */
     .ant-menu-item .anticon {
-        margin-inline-start: 12px !important;
-        margin-inline-end: 0 !important;
+        margin-left: 12px !important; /* Space between icon and text */
+        margin-right: 0 !important;
     }
-
+    
     /* Force the menu item content to be on the right */
     .ant-menu-item-content {
         flex: 1 !important;
-        text-align: end !important;
+        text-align: right !important;
     }
     
     /* --- Force Navbar Background Color --- */
@@ -351,7 +282,7 @@ def setup_style():
     }
     .dept-label {
         font-weight: 700 !important;
-        margin-inline-start: 4px !important;
+        margin-left: 4px !important;
         opacity: 0.9;
     }
     .empty-slot {
@@ -403,17 +334,7 @@ def setup_style():
     /* Global Right Alignment for specific containers */
     .element-container, .stMarkdown {
         direction: rtl;
-        text-align: end;
-    }
-
-    /* Force RTL on Streamlit layout containers so columns render right→left */
-    [data-testid="stHorizontalBlock"],
-    [data-testid="stColumn"],
-    [data-testid="stVerticalBlock"],
-    [data-testid="stAppViewContainer"],
-    [data-testid="stMainBlockContainer"],
-    .stApp, .stMain {
-        direction: rtl;
+        text-align: right;
     }
 
     /* --- Universal Mobile Fixes --- */
@@ -488,7 +409,7 @@ def render_navbar(role):
     if st.session_state.current_nav_index >= len(items):
         st.session_state.current_nav_index = 0
 
-    st.markdown('<div dir="rtl" style="text-align: end;">', unsafe_allow_html=True)
+    st.markdown('<div dir="rtl" style="text-align: right;">', unsafe_allow_html=True)
     result = sac.tabs(
         items=items,
         index=st.session_state.current_nav_index,
