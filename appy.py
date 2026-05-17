@@ -204,6 +204,17 @@ def _generate_work_schedule(year_month, view_month):
     """
     try:
         year = 2026
+        # Always reload absence_requests and work_schedule_daily fresh from Sheets
+        # so data edited directly in Google Sheets is picked up immediately.
+        _ar_fresh = get_db_data("absence_requests")
+        if not _ar_fresh.empty and 'employee' in _ar_fresh.columns:
+            st.session_state.absence_requests = _ar_fresh
+        _wsd_fresh = get_db_data("work_schedule_daily")
+        if not _wsd_fresh.empty and 'date' in _wsd_fresh.columns:
+            _wsd_fresh = _wsd_fresh[_wsd_fresh['date'].astype(str).str.startswith('2026')]
+            st.session_state.work_schedule_daily = _wsd_fresh
+            _rebuild_wsd_index()
+
         # Inputs
         dr = st.session_state.dept_rotation.copy()
         ar = st.session_state.absence_requests.copy()
