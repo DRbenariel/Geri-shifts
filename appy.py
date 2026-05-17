@@ -24,6 +24,21 @@ import ui_components # Modular UI components
 st.set_page_config(page_title="מערכת סידור עבודה", layout="wide")
 ui_components.setup_style()
 
+# RTL fix — must run on every render (not guarded by session state).
+# st.html() injects inline into the page (not an iframe), so <style> tags
+# here apply globally. Uses class names + unicode-bidi:bidi-override,
+# which is what streamlit-arabic-support-wrapper proved works.
+st.html("""<style>
+.stMarkdown, .stMarkdownContainer, .stHeadingWithActionElements,
+.stAlert, .stCaptionContainer,
+.stTextInput, .stTextArea, .stSelectbox, .stMultiSelect,
+input, label, textarea {
+    direction: rtl !important;
+    unicode-bidi: bidi-override;
+    text-align: right !important;
+}
+</style>""")
+
 import hashlib
 from streamlit_gsheets import GSheetsConnection
 
