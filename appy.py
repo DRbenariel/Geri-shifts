@@ -5326,28 +5326,42 @@ elif role == "מנהל/ת":
                         st.session_state.absence_requests = new_adm_df
                         save_to_db("absence_requests", new_adm_df)
 
-                        # Also stamp work_schedule_daily for each day in range
+                        # Stamp work_schedule_daily per day, looking up daily_dept
+                        # from dept_rotation per month (range may span months).
+                        # Only write WSD when a valid daily_dept is found;
+                        # if not, the approved absence_request is enough —
+                        # צור סידור will apply it when the schedule is generated.
                         dr_df = st.session_state.dept_rotation
-                        emp_dept_wsd = emp_dept
-                        if not dr_df.empty and 'employee' in dr_df.columns:
-                            dr_match = dr_df[
-                                (dr_df['employee'].astype(str).str.strip() == adm_emp) &
-                                (dr_df['year_month'].astype(str) == f"2026-{adm_start.month:02d}")
-                            ]
-                            if not dr_match.empty:
-                                emp_dept_wsd = str(dr_match.iloc[0].get('daily_dept', emp_dept))
+                        _wsd_skipped = 0
                         d = adm_start
                         while d <= adm_end:
-                            _wsd_upsert(d.strftime('%Y-%m-%d'), adm_emp,
-                                        emp_dept_wsd, adm_type, is_manual=True,
-                                        note=adm_note.strip())
+                            ym = f"2026-{d.month:02d}"
+                            daily_dept_wsd = None
+                            if not dr_df.empty and 'employee' in dr_df.columns:
+                                dr_match = dr_df[
+                                    (dr_df['employee'].astype(str).str.strip() == adm_emp) &
+                                    (dr_df['year_month'].astype(str) == ym)
+                                ]
+                                if not dr_match.empty:
+                                    daily_dept_wsd = str(dr_match.iloc[0].get('daily_dept', ''))
+                            if daily_dept_wsd and daily_dept_wsd in DAILY_DEPTS_ALL:
+                                _wsd_upsert(d.strftime('%Y-%m-%d'), adm_emp,
+                                            daily_dept_wsd, adm_type, is_manual=True,
+                                            note=adm_note.strip())
+                            else:
+                                _wsd_skipped += 1
                             d += timedelta(days=1)
 
                         st.session_state['show_adm_abs_success'] = True
+                        st.session_state['adm_abs_skipped'] = _wsd_skipped
                         st.rerun()
 
             if st.session_state.pop('show_adm_abs_success', False):
-                st.success("✅ היעדרות נוספה ואושרה בהצלחה!")
+                _skipped = st.session_state.pop('adm_abs_skipped', 0)
+                if _skipped:
+                    st.success(f"✅ היעדרות נוספה ואושרה. {_skipped} ימים לא עודכנו בסידור היומי (עובד לא משובץ במחלקה יומית לחודש זה) — הפעל 'צור סידור' כדי להחיל."  )
+                else:
+                    st.success("✅ היעדרות נוספה ואושרה בהצלחה!")
             ar_all = st.session_state.absence_requests.copy()
             if ar_all.empty or 'status' not in ar_all.columns:
                 st.info("אין בקשות במערכת.")
