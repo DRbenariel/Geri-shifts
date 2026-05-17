@@ -5274,6 +5274,80 @@ elif role == "מנהל/ת":
         with sub_tabs[2]:
             st.markdown(f"#### כל בקשות ההיעדרות לחודש {hebrew_months[view_month-1]} 2026")
             st.caption("בקשות ממתינות בכל המחלקות. ניתן לאשר או לדחות ישירות.")
+
+            # ── Admin: add absence for any employee (auto-approved) ──────────
+            with st.expander("➕ הוסף היעדרות לעובד (מאושר אוטומטית)", expanded=False):
+                sf_all = st.session_state.staff
+                active_emps = sorted(
+                    sf_all[sf_all['type'].isin(['מתמחה', 'רופא בכיר', 'מנהל מחלקה'])]
+                    ['name'].astype(str).str.strip().tolist()
+                )
+                adm_emp = st.selectbox("עובד", active_emps, key="adm_abs_emp")
+                adm_col1, adm_col2 = st.columns(2)
+                with adm_col1:
+                    adm_start = st.date_input("מתאריך", key="adm_abs_start",
+                                              value=date(2026, view_month, 1),
+                                              min_value=date(2026, 1, 1),
+                                              max_value=date(2026, 12, 31))
+                with adm_col2:
+                    adm_end = st.date_input("עד תאריך", key="adm_abs_end",
+                                            value=date(2026, view_month, 1),
+                                            min_value=date(2026, 1, 1),
+                                            max_value=date(2026, 12, 31))
+                adm_type = st.selectbox("סוג היעדרות", ["חופש", "202", "היעדרות אחרת"], key="adm_abs_type")
+                adm_note = st.text_input("הערה (אופציונלי)", key="adm_abs_note")
+
+                if st.button("✅ הוסף היעדרות מאושרת", key="adm_abs_submit"):
+                    if adm_end < adm_start:
+                        st.error("תאריך סיום לפני תאריך התחלה.")
+                    else:
+                        # Look up employee dept
+                        emp_row = sf_all[sf_all['name'].astype(str).str.strip() == adm_emp]
+                        emp_dept = str(emp_row.iloc[0].get('dept', '')) if not emp_row.empty else ''
+
+                        new_adm_row = {
+                            'id':              str(uuid.uuid4()),
+                            'employee':        adm_emp,
+                            'start_date':      adm_start.strftime('%Y-%m-%d'),
+                            'end_date':        adm_end.strftime('%Y-%m-%d'),
+                            'type':            adm_type,
+                            'status':          'approved',
+                            'dept_at_request': emp_dept,
+                            'manager_email':   '',
+                            'approved_by':     str(user_name).strip(),
+                            'notes':           adm_note.strip(),
+                            'created_at':      datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'responded_at':    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        }
+                        new_adm_df = pd.concat(
+                            [st.session_state.absence_requests, pd.DataFrame([new_adm_row])],
+                            ignore_index=True
+                        )
+                        st.session_state.absence_requests = new_adm_df
+                        save_to_db("absence_requests", new_adm_df)
+
+                        # Also stamp work_schedule_daily for each day in range
+                        dr_df = st.session_state.dept_rotation
+                        emp_dept_wsd = emp_dept
+                        if not dr_df.empty and 'employee' in dr_df.columns:
+                            dr_match = dr_df[
+                                (dr_df['employee'].astype(str).str.strip() == adm_emp) &
+                                (dr_df['year_month'].astype(str) == f"2026-{adm_start.month:02d}")
+                            ]
+                            if not dr_match.empty:
+                                emp_dept_wsd = str(dr_match.iloc[0].get('daily_dept', emp_dept))
+                        d = adm_start
+                        while d <= adm_end:
+                            _wsd_upsert(d.strftime('%Y-%m-%d'), adm_emp,
+                                        emp_dept_wsd, adm_type, is_manual=True,
+                                        note=adm_note.strip())
+                            d += timedelta(days=1)
+
+                        st.session_state['show_adm_abs_success'] = True
+                        st.rerun()
+
+            if st.session_state.pop('show_adm_abs_success', False):
+                st.success("✅ היעדרות נוספה ואושרה בהצלחה!")
             ar_all = st.session_state.absence_requests.copy()
             if ar_all.empty or 'status' not in ar_all.columns:
                 st.info("אין בקשות במערכת.")
