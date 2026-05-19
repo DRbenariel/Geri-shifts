@@ -5104,7 +5104,9 @@ elif role == "מנהל/ת":
                              key="set_active_month", use_container_width=True):
                     _set_setting('daily_active_month', view_month)
                     _set_setting('daily_requests_open', 'True')
-                    st.success(f"חודש פעיל: {hebrew_months[view_month-1]}. הגשות נפתחו.")
+                    with st.spinner("מייצר סידור יומי..."):
+                        _generate_work_schedule(view_year_month, view_month)
+                    st.success(f"✅ סידור לחודש {hebrew_months[view_month-1]} נוצר. הגשות נפתחו.")
                     st.rerun()
         with col_top3:
             req_open_now = daily_requests_open if is_active else None
@@ -5409,14 +5411,7 @@ elif role == "מנהל/ת":
                 if result.get('error'):
                     st.error(result['error'])
                 else:
-                    st.success(
-                        f"✅ סידור נוצר! "
-                        f"{result['written']} שורות חדשות/מעודכנות, "
-                        f"{result['kept_manual']} שורות ידניות שמורות, "
-                        f"{result['employees']} עובדים, "
-                        f"{result['absences_applied']} ימי היעדרות הוחלו, "
-                        f"{result['post_shifts']} ימי 'אחרי תורנות' חושבו."
-                    )
+                    st.success(f"✅ סידור לחודש {hebrew_months[view_month-1]} נוצר.")
         with sub_tabs[4]:
             st.markdown(f"#### ייצוא סידור יומי — {hebrew_months[view_month-1]} 2026")
             st.caption("📥 Excel — הורדה מקומית | 📤 ייצא לקובץ הראשי — לשונית ב-Shifts_scheduler | 🆕 גיליון חדש — קובץ Google Sheets נפרד")
@@ -5507,13 +5502,7 @@ elif role == "מנהל/ת":
                     if result.get('error'):
                         st.error(result['error'])
                     else:
-                        st.success(
-                            f"✅ סידור נוצר! "
-                            f"{result['written']} שורות, "
-                            f"{result['kept_manual']} ידניות שמורות, "
-                            f"{result['absences_applied']} ימי היעדרות הוחלו, "
-                            f"{result['post_shifts']} ימי 'אחרי תורנות'."
-                        )
+                        st.success(f"✅ סידור לחודש {adm_hebrew_months[daily_active_month_int-1]} נוצר.")
             with col_cz2:
                 cur_wsd_count = 0
                 if not st.session_state.work_schedule_daily.empty:
