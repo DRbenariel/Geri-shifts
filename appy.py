@@ -5094,6 +5094,10 @@ elif role == "מנהל/ת":
         hebrew_months = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
                          "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
 
+        # Show deferred success message from "הפוך לחודש פעיל" button
+        if st.session_state.get('show_active_month_success'):
+            st.success(f"✅ סידור לחודש {st.session_state.pop('show_active_month_success')} נוצר. הגשות נפתחו.")
+
         # Build options: 6 months back + active + 6 months ahead (wrap around year)
         view_opts = [((daily_active_month_int - 1 + i) % 12) + 1 for i in range(-6, 7)]
 
@@ -5126,13 +5130,15 @@ elif role == "מנהל/ת":
                              key="set_active_month", use_container_width=True):
                     _set_setting('daily_active_month', view_month)
                     _set_setting('daily_requests_open', 'True')
-                    # Bypass TTL so next render re-reads settings from DB immediately
-                    st.session_state['_settings_fetched_at'] = 0
+                    # _set_setting already updated st.session_state.settings in memory.
+                    # Refresh TTL timestamp so the TTL block does NOT overwrite the
+                    # in-memory settings with a potentially-stale DB read on the next render.
+                    st.session_state['_settings_fetched_at'] = time.time()
                     # Sync month selector so both tabs open on the new month
                     st.session_state.daily_view_month = view_month
                     with st.spinner("מייצר סידור יומי..."):
                         _generate_work_schedule(view_year_month, view_month)
-                    st.success(f"✅ סידור לחודש {hebrew_months[view_month-1]} נוצר. הגשות נפתחו.")
+                    st.session_state['show_active_month_success'] = hebrew_months[view_month-1]
                     st.rerun()
         with col_top3:
             req_open_now = daily_requests_open if is_active else None
