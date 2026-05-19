@@ -5324,7 +5324,7 @@ elif role == "מנהל/ת":
             with st.expander("➕ הוסף היעדרות לעובד (מאושר אוטומטית)", expanded=False):
                 sf_all = st.session_state.staff
                 active_emps = sorted(
-                    sf_all[sf_all['type'].isin(['מתמחה', 'רופא בכיר', 'מנהל מחלקה'])]
+                    sf_all[sf_all['type'].isin(['מתמחה', 'רופא בכיר', 'מנהל מחלקה', 'מנהל/ת'])]
                     ['name'].astype(str).str.strip().tolist()
                 )
                 adm_emp = st.selectbox("עובד", active_emps, key="adm_abs_emp")
@@ -5340,6 +5340,9 @@ elif role == "מנהל/ת":
                                             min_value=date(2026, 1, 1),
                                             max_value=date(2026, 12, 31))
                 adm_type = st.selectbox("סוג היעדרות", ["חופש", "202", "היעדרות אחרת"], key="adm_abs_type")
+                # Explicit dept selector — no dependency on dept_rotation lookup.
+                # Admin always specifies the daily dept so WSD is written unconditionally.
+                adm_dept = st.selectbox("מחלקה יומית", DAILY_DEPTS_ALL, key="adm_abs_dept")
                 adm_note = st.text_input("הערה (אופציונלי)", key="adm_abs_note")
 
                 if st.button("✅ הוסף היעדרות מאושרת", key="adm_abs_submit"):
@@ -5371,50 +5374,14 @@ elif role == "מנהל/ת":
                         st.session_state.absence_requests = new_adm_df
                         save_to_db("absence_requests", new_adm_df)
 
-                        # Write directly to work_schedule_daily for each day — bypass
-                        # _generate_work_schedule which requires dept_rotation to exist.
-                        # dept lookup: dept_rotation → existing WSD rows → any other month's rotation.
-                        # Always reload dept_rotation fresh so future-month assignments are visible.
-                        _dr_fresh2 = get_db_data("dept_rotation")
-                        if not _dr_fresh2.empty and 'employee' in _dr_fresh2.columns:
-                            st.session_state.dept_rotation = _dr_fresh2
-                        dr_df  = st.session_state.dept_rotation
-                        wsd_df = st.session_state.work_schedule_daily
-                        _emp_n = adm_emp
-
-                        def _resolve_daily_dept(emp, ym):
-                            """Return daily_dept from dept_rotation, then from existing WSD, then any month."""
-                            if not dr_df.empty and 'employee' in dr_df.columns:
-                                m = ((dr_df['employee'].astype(str).str.strip() == emp) &
-                                     (dr_df['year_month'].astype(str) == ym))
-                                if m.any():
-                                    v = str(dr_df[m].iloc[0].get('daily_dept', ''))
-                                    if v in DAILY_DEPTS_ALL:
-                                        return v
-                            if not wsd_df.empty and 'employee' in wsd_df.columns:
-                                m = ((wsd_df['employee'].astype(str).str.strip() == emp) &
-                                     (wsd_df['date'].astype(str).str.startswith(ym)))
-                                if m.any():
-                                    v = str(wsd_df[m].iloc[0].get('daily_dept', ''))
-                                    if v in DAILY_DEPTS_ALL:
-                                        return v
-                            # Any month — last resort
-                            if not dr_df.empty and 'employee' in dr_df.columns:
-                                m = dr_df['employee'].astype(str).str.strip() == emp
-                                if m.any():
-                                    v = str(dr_df[m].iloc[0].get('daily_dept', ''))
-                                    if v in DAILY_DEPTS_ALL:
-                                        return v
-                            return None
-
+                        # Write directly to work_schedule_daily for each day using
+                        # the admin-selected dept. is_manual=True so it is never
+                        # overwritten by _generate_work_schedule.
                         d = adm_start
                         while d <= adm_end:
-                            ym = f"2026-{d.month:02d}"
-                            dept = _resolve_daily_dept(_emp_n, ym)
-                            if dept:
-                                _wsd_upsert(d.strftime('%Y-%m-%d'), _emp_n,
-                                            dept, adm_type, is_manual=True,
-                                            note=adm_note.strip())
+                            _wsd_upsert(d.strftime('%Y-%m-%d'), adm_emp,
+                                        adm_dept, adm_type, is_manual=True,
+                                        note=adm_note.strip())
                             d += timedelta(days=1)
 
                         st.session_state['show_adm_abs_success'] = True
