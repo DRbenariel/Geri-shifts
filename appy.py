@@ -5318,7 +5318,7 @@ elif role == "מנהל/ת":
                     if adm_end < adm_start:
                         st.error("תאריך סיום לפני תאריך התחלה.")
                     else:
-                        # Look up employee dept
+                        # Look up employee dept for absence_requests row
                         emp_row = sf_all[sf_all['name'].astype(str).str.strip() == adm_emp]
                         emp_dept = str(emp_row.iloc[0].get('dept', '')) if not emp_row.empty else ''
 
@@ -5343,15 +5343,47 @@ elif role == "מנהל/ת":
                         st.session_state.absence_requests = new_adm_df
                         save_to_db("absence_requests", new_adm_df)
 
-                        # Auto-regenerate the daily schedule for every affected month
-                        # so the absence shows up immediately without manual intervention.
-                        affected_months = sorted({
-                            (d.year, d.month)
-                            for d in (adm_start + timedelta(n)
-                                      for n in range((adm_end - adm_start).days + 1))
-                        })
-                        for _yr, _mo in affected_months:
-                            _generate_work_schedule(f"{_yr}-{_mo:02d}", _mo)
+                        # Write directly to work_schedule_daily for each day — bypass
+                        # _generate_work_schedule which requires dept_rotation to exist.
+                        # dept lookup: dept_rotation → existing WSD rows → any other month's rotation.
+                        dr_df  = st.session_state.dept_rotation
+                        wsd_df = st.session_state.work_schedule_daily
+                        _emp_n = adm_emp
+
+                        def _resolve_daily_dept(emp, ym):
+                            """Return daily_dept from dept_rotation, then from existing WSD, then any month."""
+                            if not dr_df.empty and 'employee' in dr_df.columns:
+                                m = ((dr_df['employee'].astype(str).str.strip() == emp) &
+                                     (dr_df['year_month'].astype(str) == ym))
+                                if m.any():
+                                    v = str(dr_df[m].iloc[0].get('daily_dept', ''))
+                                    if v in DAILY_DEPTS_ALL:
+                                        return v
+                            if not wsd_df.empty and 'employee' in wsd_df.columns:
+                                m = ((wsd_df['employee'].astype(str).str.strip() == emp) &
+                                     (wsd_df['date'].astype(str).str.startswith(ym)))
+                                if m.any():
+                                    v = str(wsd_df[m].iloc[0].get('daily_dept', ''))
+                                    if v in DAILY_DEPTS_ALL:
+                                        return v
+                            # Any month — last resort
+                            if not dr_df.empty and 'employee' in dr_df.columns:
+                                m = dr_df['employee'].astype(str).str.strip() == emp
+                                if m.any():
+                                    v = str(dr_df[m].iloc[0].get('daily_dept', ''))
+                                    if v in DAILY_DEPTS_ALL:
+                                        return v
+                            return None
+
+                        d = adm_start
+                        while d <= adm_end:
+                            ym = f"2026-{d.month:02d}"
+                            dept = _resolve_daily_dept(_emp_n, ym)
+                            if dept:
+                                _wsd_upsert(d.strftime('%Y-%m-%d'), _emp_n,
+                                            dept, adm_type, is_manual=True,
+                                            note=adm_note.strip())
+                            d += timedelta(days=1)
 
                         st.session_state['show_adm_abs_success'] = True
                         st.rerun()
