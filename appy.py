@@ -60,6 +60,28 @@ def _strip_cell(s):
         return s[1:-1]
     return s
 
+# Apostrophe/geresh normalisation map — any of these variants → standard ASCII apostrophe.
+# Google Sheets may store Hebrew dept names with geresh (׳ U+05F3), right-single-quote
+# (' U+2019), or modifier-letter-apostrophe (ʼ U+02BC) instead of plain ' (U+0027).
+_APOS_VARIANTS = str.maketrans({
+    '׳': "'",   # ׳ HEBREW PUNCTUATION GERESH
+    '’': "'",   # ' RIGHT SINGLE QUOTATION MARK
+    'ʼ': "'",   # ʼ MODIFIER LETTER APOSTROPHE
+    '‘': "'",   # ' LEFT SINGLE QUOTATION MARK
+    '`': "'",   # ` GRAVE ACCENT
+})
+
+def _norm_dept(v: str) -> str:
+    """Normalise a daily_dept string so apostrophe variants all compare equal."""
+    return str(v).strip().translate(_APOS_VARIANTS)
+
+def _norm_dr(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Normalise the daily_dept column of a dept_rotation DataFrame in-place."""
+    if not df.empty and 'daily_dept' in df.columns:
+        df = df.copy()
+        df['daily_dept'] = df['daily_dept'].astype(str).apply(_norm_dept)
+    return df
+
 def _clean_sheet_values(vals):
     """
     Convert raw get_all_values() output to a clean DataFrame.
@@ -235,7 +257,7 @@ def _generate_work_schedule(year_month, view_month):
             _rebuild_wsd_index()
         _dr_fresh = get_db_data("dept_rotation")
         if not _dr_fresh.empty and 'employee' in _dr_fresh.columns:
-            st.session_state.dept_rotation = _dr_fresh
+            st.session_state.dept_rotation = _norm_dr(_dr_fresh)
 
         # Inputs
         dr = st.session_state.dept_rotation.copy()
@@ -248,7 +270,7 @@ def _generate_work_schedule(year_month, view_month):
 
         dr['employee']   = dr['employee'].astype(str).str.strip()
         dr['year_month'] = dr['year_month'].astype(str)
-        dr['daily_dept'] = dr['daily_dept'].astype(str)
+        dr['daily_dept'] = dr['daily_dept'].astype(str).apply(_norm_dept)
         month_rotation = dr[dr['year_month'] == year_month]
         if month_rotation.empty:
             return {'error': f"אין שיבוצים לחודש {year_month}. אנא שבץ עובדים תחילה."}
@@ -2046,7 +2068,7 @@ if 'dept_rotation' not in st.session_state:
     df = get_db_data("dept_rotation")
     if df.empty or 'employee' not in df.columns:
         df = pd.DataFrame(columns=['employee', 'year_month', 'daily_dept'])
-    st.session_state.dept_rotation = df
+    st.session_state.dept_rotation = _norm_dr(df)
 
 if 'absence_requests' not in st.session_state:
     df = get_db_data("absence_requests")
@@ -5245,7 +5267,7 @@ elif role == "מנהל/ת":
                                 'year_month': view_year_month,
                                 'daily_dept': dept_n,
                             })
-                    new_dr = pd.concat([other_months, pd.DataFrame(new_rows)], ignore_index=True)
+                    new_dr = _norm_dr(pd.concat([other_months, pd.DataFrame(new_rows)], ignore_index=True))
                     st.session_state.dept_rotation = new_dr
                     save_to_db("dept_rotation", new_dr)
                     st.success(f"✅ נשמרו {len(new_rows)} שיבוצים לחודש {hebrew_months[view_month-1]}")
