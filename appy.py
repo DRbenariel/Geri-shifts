@@ -5104,6 +5104,10 @@ elif role == "מנהל/ת":
                              key="set_active_month", use_container_width=True):
                     _set_setting('daily_active_month', view_month)
                     _set_setting('daily_requests_open', 'True')
+                    # Bypass TTL so next render re-reads settings from DB immediately
+                    st.session_state['_settings_fetched_at'] = 0
+                    # Sync month selector so both tabs open on the new month
+                    st.session_state.daily_view_month = view_month
                     with st.spinner("מייצר סידור יומי..."):
                         _generate_work_schedule(view_year_month, view_month)
                     st.success(f"✅ סידור לחודש {hebrew_months[view_month-1]} נוצר. הגשות נפתחו.")
