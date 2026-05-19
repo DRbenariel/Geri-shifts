@@ -24,6 +24,25 @@ import ui_components # Modular UI components
 st.set_page_config(page_title="מערכת סידור עבודה", layout="wide")
 ui_components.setup_style()
 
+# RTL global fix — must run on every render (ungated).
+# Uses st.html() which injects inline (not sandboxed) so <style> applies globally.
+st.html("""<style>
+.stMarkdown, .stMarkdownContainer, .stHeadingWithActionElements,
+.stAlert, .stCaptionContainer {
+    direction: rtl !important;
+    unicode-bidi: bidi-override;
+    text-align: right !important;
+}
+.stTextInput, .stTextArea, .stSelectbox, .stMultiSelect {
+    direction: rtl !important;
+    text-align: right !important;
+}
+input, label, textarea {
+    direction: rtl !important;
+    text-align: right !important;
+}
+</style>""")
+
 import hashlib
 from streamlit_gsheets import GSheetsConnection
 
@@ -204,7 +223,7 @@ def _generate_work_schedule(year_month, view_month):
     """
     try:
         year = 2026
-        # Always reload absence_requests and work_schedule_daily fresh from Sheets
+        # Always reload absence_requests, work_schedule_daily, AND dept_rotation fresh from Sheets
         # so data edited directly in Google Sheets is picked up immediately.
         _ar_fresh = get_db_data("absence_requests")
         if not _ar_fresh.empty and 'employee' in _ar_fresh.columns:
@@ -214,6 +233,9 @@ def _generate_work_schedule(year_month, view_month):
             _wsd_fresh = _wsd_fresh[_wsd_fresh['date'].astype(str).str.startswith('2026')]
             st.session_state.work_schedule_daily = _wsd_fresh
             _rebuild_wsd_index()
+        _dr_fresh = get_db_data("dept_rotation")
+        if not _dr_fresh.empty and 'employee' in _dr_fresh.columns:
+            st.session_state.dept_rotation = _dr_fresh
 
         # Inputs
         dr = st.session_state.dept_rotation.copy()
@@ -5346,6 +5368,10 @@ elif role == "מנהל/ת":
                         # Write directly to work_schedule_daily for each day — bypass
                         # _generate_work_schedule which requires dept_rotation to exist.
                         # dept lookup: dept_rotation → existing WSD rows → any other month's rotation.
+                        # Always reload dept_rotation fresh so future-month assignments are visible.
+                        _dr_fresh2 = get_db_data("dept_rotation")
+                        if not _dr_fresh2.empty and 'employee' in _dr_fresh2.columns:
+                            st.session_state.dept_rotation = _dr_fresh2
                         dr_df  = st.session_state.dept_rotation
                         wsd_df = st.session_state.work_schedule_daily
                         _emp_n = adm_emp
