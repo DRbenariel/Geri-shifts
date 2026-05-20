@@ -5158,21 +5158,21 @@ elif role == "מנהל/ת":
         if st.session_state.get('show_active_month_success'):
             st.success(f"✅ סידור לחודש {st.session_state.pop('show_active_month_success')} נוצר. הגשות נפתחו.")
 
-        # Build options: 6 months back + active + 6 months ahead (wrap around year)
-        view_opts = [((daily_active_month_int - 1 + i) % 12) + 1 for i in range(-6, 7)]
+        # 12 distinct months in calendar order starting from the active month (no duplicates)
+        view_opts = [((daily_active_month_int - 1 + i) % 12) + 1 for i in range(12)]
 
-        if 'daily_view_month' not in st.session_state:
+        # Single session-state key — the selectbox IS the state; no double-assignment
+        if 'daily_view_month' not in st.session_state or \
+                st.session_state.daily_view_month not in view_opts:
             st.session_state.daily_view_month = daily_active_month_int
 
         col_top1, col_top2, col_top3 = st.columns([2, 2, 2])
         with col_top1:
-            st.session_state.daily_view_month = st.selectbox(
+            st.selectbox(
                 "🗓️ חודש לתכנון/עריכה:",
                 view_opts,
                 format_func=lambda m: f"{hebrew_months[m-1]} ({m})",
-                index=view_opts.index(st.session_state.daily_view_month)
-                       if st.session_state.daily_view_month in view_opts else 0,
-                key="daily_view_month_sel"
+                key="daily_view_month",   # session state IS the widget state
             )
         view_month = st.session_state.daily_view_month
         view_year_month = f"2026-{view_month:02d}"

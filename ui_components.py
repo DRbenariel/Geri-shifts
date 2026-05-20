@@ -358,25 +358,30 @@ def setup_style():
     }
 
     /* ── RTL date-picker popup ─────────────────────────────────── */
-    /* Flip week rows so Saturday (ש') is on the left, Sunday (א') on the right.
-       We target every plausible selector baseweb might use for a week row. */
+    /* Flip week rows: Saturday on left, Sunday on right.
+       Uses :has() to target the actual row container regardless of
+       whether baseweb adds [role="row"] or not.  */
 
-    /* ARIA-role approach (baseweb v9+) */
+    /* Target any div that directly contains day cells (the week row) */
+    [data-baseweb="calendar"] div:has(> [role="gridcell"]) {
+        display: flex !important;
+        flex-direction: row-reverse !important;
+    }
+    /* Target the day-name header row */
+    [data-baseweb="calendar"] div:has(> [role="columnheader"]) {
+        display: flex !important;
+        flex-direction: row-reverse !important;
+    }
+    /* Fallback: ARIA [role="row"] (baseweb v9+) */
     [data-baseweb="calendar"] [role="row"] {
         display: flex !important;
         flex-direction: row-reverse !important;
     }
-    /* Flex-child approach — any direct div children of the month grid */
-    [data-baseweb="calendar"] [role="grid"] > div,
-    [data-baseweb="calendar"] [role="rowgroup"] > div {
-        display: flex !important;
-        flex-direction: row-reverse !important;
-    }
-    /* RTL on the container so nav arrows and month title also mirror */
+    /* RTL on container so navigation header direction flips */
     [data-baseweb="calendar"] {
         direction: rtl !important;
     }
-    /* Keep individual day-number text LTR (numbers should not flip) */
+    /* Keep cell content LTR — day numbers must not appear mirrored */
     [data-baseweb="calendar"] [role="gridcell"],
     [data-baseweb="calendar"] [role="columnheader"] {
         direction: ltr !important;
