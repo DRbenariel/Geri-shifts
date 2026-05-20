@@ -365,41 +365,43 @@ def setup_style():
 def render_navbar(role):
     """Renders the responsive navigation bar.
     Role-based visibility:
-      - סידור תורנויות + הגשת בקשות: מתמחה / תורנ/ית חוץ / מנהל/ת (לא: מנהל מחלקה / רופא/ה בכירה)
-      - צוות + דוחות: מנהל/ת בלבד
-      - סידור יומי / סידור חודשי: כולם חוץ מ-תורן חוץ — תווית משתנה לפי תפקיד
+      - מנהל על  : כל הטאבים (super-admin)
+      - מנהל/ת   : הגדרות + סידור חודשי + סידור יומי בלבד
+      - מנהל מחלקה / רופא בכיר: הגדרות + הגשת בקשות + סידור יומי
+      - מתמחה / תורן חוץ: הגדרות + סידור תורנויות + הגשת בקשות + סידור יומי
     """
     items = []
 
     items.append(sac.TabsItem('הגדרות', icon='gear'))
 
-    # סידור תורנויות (תורנויות לילה) — מנהל מחלקה ורופא/ה בכירה לא רואים
-    if role not in ("מנהל מחלקה", "רופא בכיר"):
+    # סידור תורנויות — מנהל מחלקה, רופא בכיר, מנהל/ת לא רואים
+    if role not in ("מנהל מחלקה", "רופא בכיר", "מנהל/ת"):
         items.append(sac.TabsItem('סידור תורנויות', icon='calendar-week'))
 
-    # הגשת בקשות — לא לאדמין. מנהל/ת מחלקה רואה (היעדרות עצמית, מאושרת אוטומטית)
-    if role != "מנהל/ת":
+    # הגשת בקשות — לא למנהל/ת ולא למנהל על
+    if role not in ("מנהל/ת", "מנהל על"):
         items.append(sac.TabsItem('הגשת בקשות', icon='calendar-check'))
 
-    # אדמין-בלבד
-    if role == "מנהל/ת":
+    # צוות + דוחות — מנהל על ומנהל/ת (ישן) לא — רק מנהל על
+    if role == "מנהל על":
         items.append(sac.TabsItem('צוות', icon='people'))
         items.append(sac.TabsItem('דוחות וניהול', icon='bar-chart-line'))
 
-    # סידור יומי / סידור חודשי — תורן חוץ לא רואה
-    # אדמין רואה את שניהם: "סידור חודשי" (תכנון + 5 תתי-טאבים) + "סידור יומי" (תצוגת מנהל מחלקה)
-    if role == "מנהל/ת":
+    # סידור חודשי — מנהל על ומנהל/ת
+    if role in ("מנהל על", "מנהל/ת"):
         items.append(sac.TabsItem('סידור חודשי', icon='calendar3'))
-        items.append(sac.TabsItem('סידור יומי',  icon='calendar-day'))
-    elif role != "תורן חוץ":
-        items.append(sac.TabsItem('סידור יומי', icon='calendar3'))
+
+    # סידור יומי — כולם חוץ מ-תורן חוץ
+    if role != "תורן חוץ":
+        items.append(sac.TabsItem('סידור יומי', icon='calendar-day'))
 
     # ── Default index after first login ───────────────────────────
     if 'nav_initialized' not in st.session_state:
-        # Find the most useful default per role
         labels = [it.label for it in items]
-        if role == "מנהל/ת":
+        if role == "מנהל על":
             default = 'דוחות וניהול'
+        elif role == "מנהל/ת":
+            default = 'סידור חודשי'
         elif role in ("מנהל מחלקה", "רופא בכיר"):
             default = 'סידור יומי'
         else:

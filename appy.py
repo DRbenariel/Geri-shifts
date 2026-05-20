@@ -1257,14 +1257,13 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
                         f"padding:3px 1px;border-radius:6px;font-size:0.75rem;color:{_nfg}'>{d}</div>",
                         unsafe_allow_html=True)
 
-            # Employee rows: name banner (full width) + 7-col button row
+            # Employee rows: full-name banner (full width) + 7-col button row
             for emp in employees:
-                initials = _make_initials(emp)
                 st.markdown(
-                    f"<div style='font-weight:700;font-size:0.8rem;color:#0f172a;"
+                    f"<div style='font-weight:700;font-size:0.82rem;color:#0f172a;"
                     f"padding:2px 8px;background:#f1f5f9;border-radius:5px;"
                     f"border:1px solid #e2e8f0;text-align:right;margin:2px 0 1px'>"
-                    f"{initials} · {emp}</div>",
+                    f"{emp}</div>",
                     unsafe_allow_html=True)
                 row_cols = st.columns(7)
                 for _ci, d in enumerate(week_rtl):
@@ -1292,6 +1291,7 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
                             st.rerun()
 
             # Night-duty row (full-width label + 7 cols)
+            # Initials shown; clicking opens popover with full name
             st.markdown(
                 "<div style='background:#ede9fe;font-weight:700;text-align:right;"
                 "padding:2px 8px;border-radius:5px;font-size:0.75rem;"
@@ -1303,15 +1303,28 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
                     nd_cols[_ci].write("")
                     continue
                 nd = _get_night_duty(f"{year}-{view_month:02d}-{d:02d}", dept_name)
-                _nbg = "#fef2f2" if _WD_IS_WK[_ci] else "#f5f3ff"
-                nd_cols[_ci].markdown(
-                    f"<div style='background:{_nbg};text-align:center;padding:4px 1px;"
-                    f"border-radius:6px;font-size:0.68rem;color:#6d28d9;"
-                    f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
-                    f"{_make_initials(nd) if nd else '—'}</div>",
-                    unsafe_allow_html=True)
+                with nd_cols[_ci]:
+                    if nd:
+                        try:
+                            with st.popover(_make_initials(nd),
+                                            key=f"ndpop_{key_ns}_{d}_{_ci}",
+                                            use_container_width=True):
+                                st.markdown(f"**{nd}**")
+                        except Exception:
+                            _nbg = "#fef2f2" if _WD_IS_WK[_ci] else "#f5f3ff"
+                            st.markdown(
+                                f"<div style='background:{_nbg};text-align:center;"
+                                f"padding:4px 1px;border-radius:6px;font-size:0.68rem;"
+                                f"color:#6d28d9'>{_make_initials(nd)}</div>",
+                                unsafe_allow_html=True)
+                    else:
+                        st.markdown(
+                            "<div style='text-align:center;padding:4px 1px;"
+                            "font-size:0.68rem;color:#94a3b8'>—</div>",
+                            unsafe_allow_html=True)
 
             # Friday-morning row (full-width label + 7 cols)
+            # Initials shown; clicking opens popover with full name(s)
             st.markdown(
                 "<div style='background:#fef9c3;font-weight:700;text-align:right;"
                 "padding:2px 8px;border-radius:5px;font-size:0.75rem;"
@@ -1323,19 +1336,30 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
                     fri_cols[_ci].write("")
                     continue
                 date_str_fri = f"{year}-{view_month:02d}-{d:02d}"
-                if _ci == 1:
-                    fw = _get_fri_shift_workers(date_str_fri, dept_name)
-                    fw_txt      = " / ".join(_make_initials(n) for n in fw) if fw else "—"
-                    cell_bg_fri = "#fef3c7"
-                else:
-                    fw_txt      = ""
-                    cell_bg_fri = "#f8fafc"
-                fri_cols[_ci].markdown(
-                    f"<div style='background:{cell_bg_fri};text-align:center;padding:4px 1px;"
-                    f"border-radius:6px;font-size:0.68rem;color:#92400e;"
-                    f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
-                    f"{fw_txt}</div>",
-                    unsafe_allow_html=True)
+                with fri_cols[_ci]:
+                    if _ci == 1:
+                        fw = _get_fri_shift_workers(date_str_fri, dept_name)
+                        if fw:
+                            fw_initials = " / ".join(_make_initials(n) for n in fw)
+                            try:
+                                with st.popover(fw_initials,
+                                                key=f"fwpop_{key_ns}_{d}_{_ci}",
+                                                use_container_width=True):
+                                    for _fn in fw:
+                                        st.markdown(f"**{_fn}**")
+                            except Exception:
+                                st.markdown(
+                                    f"<div style='background:#fef3c7;text-align:center;"
+                                    f"padding:4px 1px;border-radius:6px;font-size:0.68rem;"
+                                    f"color:#92400e'>{fw_initials}</div>",
+                                    unsafe_allow_html=True)
+                        else:
+                            st.markdown(
+                                "<div style='text-align:center;padding:4px 1px;"
+                                "font-size:0.68rem;color:#94a3b8'>—</div>",
+                                unsafe_allow_html=True)
+                    else:
+                        st.write("")
 
     else:
         # ════════════════════════════════════════════════════════════════
@@ -2878,7 +2902,7 @@ def draw_calendar_view(year, month, role, user_name=None):
     show_availability = False
     date_availability = {}  # {date_str: [available_names]}
 
-    if role == "מנהל/ת":
+    if role in ("מנהל/ת", "מנהל על"):
         month_prefix = f"{year}-{month:02d}"
         active_staff = st.session_state.staff[
             st.session_state.staff['type'].isin(['מתמחה', 'תורן חוץ']) &
@@ -3100,12 +3124,12 @@ def draw_calendar_view(year, month, role, user_name=None):
                             if "שישי בוקר" in dept: label = "בוקר (" + ("שיקום" if "שיקום" in dept else "פנימית") + ")"
                             
                             html += f'<div class="slot {css}"><span class="dept-label">{label}</span> <span>{val}</span>'
-                            if role == "מנהל/ת" and reason:
+                            if role in ("מנהל/ת", "מנהל על") and reason:
                                 html += f'<span class="error-hint">❓ {reason}</span>'
                             html += '</div>'
-                    
+
                     # הצגת אילוצים ובקשות (למנהל בלבד או לעובד על עצמו)
-                    if role == "מנהל/ת":
+                    if role in ("מנהל/ת", "מנהל על"):
                         reqs = st.session_state.requests[st.session_state.requests['date'] == date_str]
                         for _, r in reqs.iterrows():
                             icon = "❌" if r['status'] == "אילוץ" else "⭐"
@@ -3136,7 +3160,7 @@ def draw_calendar_view(year, month, role, user_name=None):
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Smart Swap Assistant (Manager Only) ---
-    if role == "מנהל/ת":
+    if role in ("מנהל/ת", "מנהל על"):
         st.divider()
         st.subheader("🤖 עוזר החלפות חכם")
         st.caption("כלי זה מציע החלפות משמרת לפי חוקיות: פנויים, החלפות הדדיות, והחלפות משולשות.")
@@ -4060,8 +4084,8 @@ if selected_nav == 'הגדרות':
                                         st.success("הבקשה נשלחה למנהל/ת לאישור.")
                                 st.divider()
 
-    # --- Manage Special Days Section (Admin Only) ---
-    if role == "מנהל/ת":
+    # --- Manage Special Days Section (מנהל על only) ---
+    if role == "מנהל על":
         with st.expander("📅 ניהול ימים מיוחדים וחגים", expanded=False):
             st.caption("הוסף תאריכים מיוחדים כדי שמתמחים יראו אותם לפני הגשת אילוצים.")
             
@@ -4092,7 +4116,7 @@ if selected_nav == 'הגדרות':
                         save_to_db("special_days", st.session_state.special_days)
                         st.rerun()
 
-elif role == "מנהל/ת":
+elif role in ("מנהל/ת", "מנהל על"):
     if selected_nav == 'סידור תורנויות':
         
         # --- Month Selector for Schedule Tab (Admin Only) ---
