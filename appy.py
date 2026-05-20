@@ -6145,11 +6145,13 @@ else:
                     my_dept = str(my_row.iloc[0].get('daily_dept', '—'))
             st.caption(f"מחלקה יומית: **{my_dept}**")
 
-            # Render the personal month calendar — pure HTML table with direction:rtl
-            # RTL table: first column in DOM → renders on RIGHT (Sunday=א'=right ✓)
-            #            last column in DOM  → renders on LEFT  (Saturday=ש'=left ✓)
-            # No list-reversal needed — RTL layout is handled entirely by the browser.
-            _cal_pers = calendar.Calendar(firstweekday=6).monthdayscalendar(2026, view_m)
+            # Render the personal month calendar.
+            # Uses the EXACT same approach as render_modern_calendar (confirmed RTL-correct):
+            #   • st.columns(7) — always LTR regardless of page CSS; col 0 = physically leftmost
+            #   • list(reversed(week)) — Saturday lands in col 0 (left), Sunday in col 6 (right)
+            #   • Headers: ["ש'","ו'","ה'","ד'","ג'","ב'","א'"] — Saturday leftmost ✓
+            # No CSS direction tricks needed — physical placement does the work.
+            _cal_pers_raw = calendar.Calendar(firstweekday=6).monthdayscalendar(2026, view_m)
 
             _PERS_STATUS_COLORS = {
                 "עובד":        ("#dcfce7", "#166534"),
@@ -6161,9 +6163,9 @@ else:
                 "אחר":         ("#f1f5f9", "#475569"),
             }
 
-            # Compute all day statuses
+            # Compute all day statuses up front
             _day_status: dict[int, str] = {}
-            for _w in _cal_pers:
+            for _w in _cal_pers_raw:
                 for _d in _w:
                     if _d == 0:
                         continue
@@ -6175,42 +6177,44 @@ else:
                     else:
                         _day_status[_d] = _raw
 
-            # Build HTML table — direction:rtl makes column 0 appear on the RIGHT
-            # Headers DOM order: א',ב',ג',ד',ה',ו',ש' (Sun→Sat)
-            # Visual order (RTL):            ש',ו',ה',ד',ג',ב',א' (Sat←Sun) ✓
-            _PERS_HDR = [("א'", False), ("ב'", False), ("ג'", False),
-                         ("ד'", False), ("ה'", False), ("ו'", True), ("ש'", True)]
-            _tbl = [
-                "<table style='direction:rtl;width:100%;border-collapse:separate;"
-                "border-spacing:4px 4px;font-family:Rubik,sans-serif;margin-top:6px'>",
-                "<tr>"
-            ]
-            for _h, _is_wk in _PERS_HDR:
-                _hclr = "#7c3aed" if _is_wk else "#64748b"
-                _tbl.append(
-                    f"<th style='text-align:center;font-weight:700;color:{_hclr};"
-                    f"font-size:0.82rem;padding:4px 0;'>{_h}</th>")
-            _tbl.append("</tr>")
+            # ── Headers — identical order to render_modern_calendar ──────────
+            _PERS_HDRS = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
+            _hcols = st.columns(7)
+            for _i, _h in enumerate(_PERS_HDRS):
+                _is_wk = _i in [0, 1]   # col 0=Saturday, col 1=Friday
+                _hcols[_i].markdown(
+                    f"<div style='text-align:center;font-weight:700;"
+                    f"color:{'#7c3aed' if _is_wk else '#64748b'};"
+                    f"font-size:0.82rem;padding:4px 0 2px'>{_h}</div>",
+                    unsafe_allow_html=True)
 
-            for _week in _cal_pers:
-                _tbl.append("<tr>")
-                for _d in _week:
-                    if _d == 0:
-                        _tbl.append("<td style='padding:2px'></td>")
-                    else:
-                        _st = _day_status.get(_d, "עובד")
-                        _lbl = "עובד/ת" if _st == "עובד" else _st
-                        _bg, _fg = _PERS_STATUS_COLORS.get(_st, ("#f1f5f9", "#475569"))
-                        _tbl.append(
-                            f"<td style='background:{_bg};color:{_fg};text-align:center;"
-                            f"border-radius:8px;padding:6px 2px;font-weight:600;"
-                            f"font-size:0.82rem;min-width:42px;line-height:1.4;'>"
-                            f"{_d}<br>"
-                            f"<span style='font-size:0.68rem;font-weight:500'>{_lbl}</span>"
-                            f"</td>")
-                _tbl.append("</tr>")
-            _tbl.append("</table>")
-            st.markdown("".join(_tbl), unsafe_allow_html=True)
+            # ── Week rows — reversed so Saturday → col 0 (left) ─────────────
+            for _week in _cal_pers_raw:
+                _week_rtl = list(reversed(_week))   # [Sun…Sat] → [Sat…Sun]
+                _wcols = st.columns(7)
+                for _ci, _day in enumerate(_week_rtl):
+                    with _wcols[_ci]:
+                        if _day == 0:
+                            st.markdown("<div style='min-height:48px'></div>",
+                                        unsafe_allow_html=True)
+                        else:
+                            _st = _day_status.get(_day, "עובד")
+                            _lbl = "עובד/ת" if _st == "עובד" else _st
+                            _bg, _fg = _PERS_STATUS_COLORS.get(_st, ("#f1f5f9", "#475569"))
+                            # Determine weekend for border highlight
+                            _wd = date(2026, view_m, _day).weekday()
+                            _border = "#7c3aed" if _wd in (4, 5) else "#e2e8f0"
+                            st.markdown(
+                                f"<div style='background:{_bg};color:{_fg};"
+                                f"border-radius:8px;padding:4px 2px;"
+                                f"text-align:center;font-size:0.78rem;font-weight:600;"
+                                f"min-height:48px;display:flex;flex-direction:column;"
+                                f"align-items:center;justify-content:center;"
+                                f"border:1.5px solid {_border}'>"
+                                f"<b style='font-size:0.9rem'>{_day}</b>"
+                                f"<span style='font-size:0.65rem;margin-top:1px'>{_lbl}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True)
 
             st.markdown(
                 "<div style='direction:rtl;font-size:0.75rem;color:#64748b;margin-top:10px'>"
