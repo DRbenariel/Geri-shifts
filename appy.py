@@ -2909,8 +2909,8 @@ def draw_calendar_view(year, month, role, user_name=None):
 
     is_mobile_view = st.toggle("📱 תצוגת רשימה", value=st.session_state.mobile_detected_persistent, key="mobile_list_view")
 
-    cal = calendar.monthcalendar(year, month)
-    
+    cal = [list(reversed(w)) for w in calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)]
+
     if is_mobile_view:
         # ── Night-shift mobile: one collapsible card per day ────────────────
         WD_FULL_N = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
@@ -3008,19 +3008,20 @@ def draw_calendar_view(year, month, role, user_name=None):
                             unsafe_allow_html=True)
     else:
         # --- Standard Grid View ---
-        days_names = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
+        # RTL: col 0=Saturday, col 6=Sunday (reads right→left: Sun … Fri Sat)
+        days_names = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
         st.markdown('<div class="calendar-grid-container">', unsafe_allow_html=True)
         header_cols = st.columns(7)
         for i, name in enumerate(days_names):
             header_cols[i].markdown(f"<div style='text-align: center; font-weight: bold;'>{name}</div>", unsafe_allow_html=True)
-    
+
         for week in cal:
             cols = st.columns(7)
             for i, day in enumerate(week):
                 if day == 0: continue
                 with cols[i]:
                     date_str = f"{year}-{month:02d}-{day:02d}"
-                    is_weekend = "weekend-day" if i >= 5 else ""
+                    is_weekend = "weekend-day" if i <= 1 else ""  # col 0=Sat, col 1=Fri
                     day_sched = st.session_state.schedule[st.session_state.schedule['date'] == date_str]
                     
                     html = f'<div class="calendar-day {is_weekend}"><div class="day-number">{day}</div>'
@@ -6148,9 +6149,11 @@ else:
             st.caption(f"מחלקה יומית: **{my_dept}**")
 
             # Render the personal month calendar (read-only colored cells)
+            # RTL: col 0=Saturday (ש), col 6=Sunday (א) — reads right→left א…ש
             num_days_es = calendar.monthrange(2026, view_m)[1]
-            first_wd_es = (date(2026, view_m, 1).weekday() + 1) % 7
-            HEB_WEEK_ES = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
+            _cal_pers = [list(reversed(w)) for w in
+                         calendar.Calendar(firstweekday=6).monthdayscalendar(2026, view_m)]
+            HEB_WEEK_ES = ["ש", "ו", "ה", "ד", "ג", "ב", "א"]
 
             STATUS_COLOR = {
                 "עובד":         ("#dcfce7", "#166534"),
@@ -6171,16 +6174,11 @@ else:
                         f"font-size:0.82rem;padding-bottom:4px'>{h}</div>",
                         unsafe_allow_html=True)
 
-                grid = [None] * first_wd_es + list(range(1, num_days_es + 1))
-                while len(grid) % 7:
-                    grid.append(None)
-
-                for wi in range(0, len(grid), 7):
-                    week = grid[wi:wi+7]
+                for week in _cal_pers:
                     cols = st.columns(7)
                     for ci, day in enumerate(week):
                         with cols[ci]:
-                            if day is None:
+                            if day == 0:
                                 st.markdown("<div style='padding:5px 2px;min-height:42px'></div>",
                                             unsafe_allow_html=True)
                                 continue

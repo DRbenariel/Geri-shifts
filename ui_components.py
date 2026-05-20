@@ -358,26 +358,20 @@ def setup_style():
     }
 
     /* ── RTL date-picker popup ─────────────────────────────────── */
-    /* Force Streamlit's st.date_input calendar popup to RTL layout  */
+    /* Flip every week row so Saturday lands on the left, Sunday on the right */
+    [data-baseweb="calendar"] [role="row"] {
+        display: flex !important;
+        flex-direction: row-reverse !important;
+    }
+    /* Also flip the column-header row (day-name row) */
+    [data-baseweb="calendar"] [role="rowgroup"] > [role="row"]:first-child,
+    [data-baseweb="calendar"] [role="row"]:has([role="columnheader"]) {
+        display: flex !important;
+        flex-direction: row-reverse !important;
+    }
+    /* RTL text direction on the overall calendar and header */
     [data-baseweb="calendar"] {
         direction: rtl !important;
-    }
-    [data-baseweb="calendar"] [data-testid="calendar-header"] {
-        direction: rtl !important;
-    }
-    /* Week day header row inside the popup */
-    [data-baseweb="calendar"] [role="columnheader"],
-    [data-baseweb="calendar"] [role="gridcell"] {
-        direction: rtl !important;
-    }
-    /* Flip the prev/next month arrows so they point correctly in RTL */
-    [data-baseweb="calendar"] button[aria-label*="Previous"],
-    [data-baseweb="calendar"] button[aria-label*="previous"] {
-        order: 1 !important;
-    }
-    [data-baseweb="calendar"] button[aria-label*="Next"],
-    [data-baseweb="calendar"] button[aria-label*="next"] {
-        order: -1 !important;
     }
 
     </style>
