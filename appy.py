@@ -1165,11 +1165,29 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
     cal_weeks = [list(reversed(w))
                  for w in calendar.Calendar(firstweekday=6).monthdayscalendar(year, view_month)]
 
-    # Mobile toggle — defaults ON when mobile device detected
-    is_mobile = st.toggle(
-        "📱 תצוגת מובייל",
-        value=st.session_state.get('mobile_detected_persistent', False),
-        key=f"mob_toggle_{key_ns}")
+    # Mobile auto-detection: set the toggle's session-state key directly
+    # so it flips ON as soon as JS resolves the device type (render 2).
+    # Once detected, we stop overriding so manual user flips are preserved.
+    _tog_key      = f"mob_toggle_{key_ns}"
+    _detected_key = f"mob_det_{key_ns}"
+    if not st.session_state.get(_detected_key, False):
+        _dev = st.session_state.get('analytics_device_type', 'unknown')
+        _vp  = 0
+        try:
+            _vp = int(st.session_state.get('analytics_vp_width', 0) or 0)
+        except (ValueError, TypeError):
+            pass
+        _ua      = str(st.session_state.get('analytics_ua', '') or '')
+        _mob_ua  = any(x in _ua for x in ['Android', 'iPhone', 'iPad', 'Mobile', 'webOS'])
+        _mob_any = (_dev == 'mobile' or
+                    st.session_state.get('mobile_detected_persistent', False) or
+                    _mob_ua or (0 < _vp < 768))
+        if _dev != 'unknown':
+            # Device confirmed — lock the toggle and stop re-detecting
+            st.session_state[_tog_key]      = _mob_any
+            st.session_state[_detected_key] = True
+        # If still 'unknown': leave toggle at its default (False) until next render
+    is_mobile = st.toggle("📱 תצוגת מובייל", value=False, key=_tog_key)
 
     # ── CSS: colour every status button by key prefix (both modes) ───────
     _kn = key_ns
