@@ -357,36 +357,7 @@ def setup_style():
         }
     }
 
-    /* ── RTL date-picker popup ─────────────────────────────────── */
-    /* Flip week rows: Saturday on left, Sunday on right.
-       Uses :has() to target the actual row container regardless of
-       whether baseweb adds [role="row"] or not.  */
-
-    /* Target any div that directly contains day cells (the week row) */
-    [data-baseweb="calendar"] div:has(> [role="gridcell"]) {
-        display: flex !important;
-        flex-direction: row-reverse !important;
-    }
-    /* Target the day-name header row */
-    [data-baseweb="calendar"] div:has(> [role="columnheader"]) {
-        display: flex !important;
-        flex-direction: row-reverse !important;
-    }
-    /* Fallback: ARIA [role="row"] (baseweb v9+) */
-    [data-baseweb="calendar"] [role="row"] {
-        display: flex !important;
-        flex-direction: row-reverse !important;
-    }
-    /* RTL on container so navigation header direction flips */
-    [data-baseweb="calendar"] {
-        direction: rtl !important;
-    }
-    /* Keep cell content LTR — day numbers must not appear mirrored */
-    [data-baseweb="calendar"] [role="gridcell"],
-    [data-baseweb="calendar"] [role="columnheader"] {
-        direction: ltr !important;
-        text-align: center !important;
-    }
+    /* st.date_input popup — left as default (no Hebrew RTL component available) */
 
     </style>
     """, unsafe_allow_html=True)
