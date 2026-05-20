@@ -1154,6 +1154,16 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
         return
 
 
+    # Force all st.columns in this grid to stay horizontal and scroll on mobile
+    st.markdown(
+        "<style>"
+        "[data-testid='stHorizontalBlock']{"
+        "flex-wrap:nowrap!important;overflow-x:auto!important;"
+        "-webkit-overflow-scrolling:touch!important;}"
+        "[data-testid='column']{min-width:36px!important;}"
+        "</style>",
+        unsafe_allow_html=True)
+
     # Weekly grid — same RTL layout as render_modern_calendar
     # calendar.Calendar(firstweekday=6): each week = [Sun,Mon,Tue,Wed,Thu,Fri,Sat]
     # list(reversed(week))            : [Sat,Fri,Thu,Wed,Tue,Mon,Sun]
