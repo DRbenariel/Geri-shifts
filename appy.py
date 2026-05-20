@@ -6145,76 +6145,86 @@ else:
                     my_dept = str(my_row.iloc[0].get('daily_dept', '—'))
             st.caption(f"מחלקה יומית: **{my_dept}**")
 
-            # Render the personal month calendar.
-            # Uses the EXACT same approach as render_modern_calendar (confirmed RTL-correct):
-            #   • st.columns(7) — always LTR regardless of page CSS; col 0 = physically leftmost
-            #   • list(reversed(week)) — Saturday lands in col 0 (left), Sunday in col 6 (right)
-            #   • Headers: ["ש'","ו'","ה'","ד'","ג'","ב'","א'"] — Saturday leftmost ✓
-            # No CSS direction tricks needed — physical placement does the work.
-            _cal_pers_raw = calendar.Calendar(firstweekday=6).monthdayscalendar(2026, view_m)
+            # ── Personal calendar — mirrors render_modern_calendar exactly ────
+            # Same technique as the confirmed-working constraint calendar:
+            #   CSS targets "st-key-perscal_d{m}_" buttons (base) then per-day overrides.
+            #   st.button() with use_container_width=True — real widget, same as constraint cal.
+            #   list(reversed(week)) → Saturday in col 0 (leftmost), Sunday in col 6.
+            #   st.write("") for empty cells — exactly as render_modern_calendar.
+            #   No st.container wrapper — headers and rows at the same indent level.
+            _pfx_p  = "perscal"
+            _m_p    = view_m
+            _cal_pers_raw = calendar.Calendar(firstweekday=6).monthdayscalendar(2026, _m_p)
 
-            _PERS_STATUS_COLORS = {
-                "עובד":        ("#dcfce7", "#166534"),
-                "עובד/ת":      ("#dcfce7", "#166534"),
-                "חופש":        ("#dbeafe", "#1e40af"),
-                "202":         ("#fef9c3", "#854d0e"),
-                "אחרי תורנות": ("#ffedd5", "#9a3412"),
-                "תורנות":      ("#ede9fe", "#5b21b6"),
-                "אחר":         ("#f1f5f9", "#475569"),
+            # Status → (background gradient, text color)  — matches render_modern_calendar style
+            _PSTATUS = {
+                "עובד":        ("linear-gradient(135deg,#bbf7d0,#4ade80)", "#166534"),
+                "חופש":        ("linear-gradient(135deg,#bfdbfe,#60a5fa)", "#1e40af"),
+                "202":         ("linear-gradient(135deg,#fef08a,#facc15)", "#854d0e"),
+                "אחרי תורנות": ("linear-gradient(135deg,#fed7aa,#fb923c)", "#9a3412"),
+                "תורנות":      ("linear-gradient(135deg,#ddd6fe,#a78bfa)", "#5b21b6"),
+                "אחר":         ("linear-gradient(135deg,#e2e8f0,#cbd5e1)", "#475569"),
             }
 
-            # Compute all day statuses up front
-            _day_status: dict[int, str] = {}
+            # Compute day statuses
+            _day_status = {}
             for _w in _cal_pers_raw:
                 for _d in _w:
                     if _d == 0:
                         continue
-                    _ds = f"2026-{view_m:02d}-{_d:02d}"
+                    _ds = f"2026-{_m_p:02d}-{_d:02d}"
                     _raw = _wsd_get_status(_ds, user_name, default=None)
                     if _raw is None or (_raw == "עובד" and not _wsd_is_manual(_ds, user_name)):
-                        _day_status[_d] = _derive_auto_status(_ds, user_name,
-                                              daily_dept=my_dept if my_dept != "—" else None)
+                        _day_status[_d] = _derive_auto_status(
+                            _ds, user_name,
+                            daily_dept=my_dept if my_dept != "—" else None)
                     else:
                         _day_status[_d] = _raw
 
-            # ── Headers — identical order to render_modern_calendar ──────────
-            _PERS_HDRS = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
-            _hcols = st.columns(7)
-            for _i, _h in enumerate(_PERS_HDRS):
-                _is_wk = _i in [0, 1]   # col 0=Saturday, col 1=Friday
-                _hcols[_i].markdown(
+            # CSS injection — same pattern as render_modern_calendar
+            # Base rule colors all perscal buttons; per-day rules override with status color.
+            _pcss = [f"""
+            div[class*="st-key-{_pfx_p}_d{_m_p}_"] button {{
+                min-height: 42px !important; font-size: 0.85rem !important;
+                font-weight: 600 !important; border-radius: 10px !important;
+                padding: 4px 2px !important; border: none !important;
+                background: linear-gradient(135deg,#e2e8f0,#cbd5e1) !important;
+                color: #475569 !important;
+            }}"""]
+            for _d, _st in _day_status.items():
+                _bg, _fg = _PSTATUS.get(_st, ("linear-gradient(135deg,#f8fafc,#e2e8f0)", "#334155"))
+                _pcss.append(f"""
+            div[class*="st-key-{_pfx_p}_d{_m_p}_{_d}x"] button {{
+                background: {_bg} !important; color: {_fg} !important;
+            }}""")
+            st.markdown(f"<style>{''.join(_pcss)}</style>", unsafe_allow_html=True)
+
+            # Headers — identical to render_modern_calendar
+            _day_headers_p = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
+            _hcols_p = st.columns(7)
+            for _idx_p, _h_p in enumerate(_day_headers_p):
+                _is_wk_p = _idx_p in [0, 1]
+                _hcols_p[_idx_p].markdown(
                     f"<div style='text-align:center;font-weight:700;"
-                    f"color:{'#7c3aed' if _is_wk else '#64748b'};"
-                    f"font-size:0.82rem;padding:4px 0 2px'>{_h}</div>",
+                    f"color:{'#7c3aed' if _is_wk_p else '#64748b'};"
+                    f"font-size:0.8rem;padding:4px 0 2px;'>{_h_p}</div>",
                     unsafe_allow_html=True)
 
-            # ── Week rows — reversed so Saturday → col 0 (left) ─────────────
-            for _week in _cal_pers_raw:
-                _week_rtl = list(reversed(_week))   # [Sun…Sat] → [Sat…Sun]
-                _wcols = st.columns(7)
-                for _ci, _day in enumerate(_week_rtl):
-                    with _wcols[_ci]:
-                        if _day == 0:
-                            st.markdown("<div style='min-height:48px'></div>",
-                                        unsafe_allow_html=True)
+            # Grid rows — identical to render_modern_calendar
+            for _week_p in _cal_pers_raw:
+                _week_rtl_p = list(reversed(_week_p))   # Saturday→col 0, Sunday→col 6
+                _wcols_p = st.columns(7)
+                for _ci_p, _day_p in enumerate(_week_rtl_p):
+                    with _wcols_p[_ci_p]:
+                        if _day_p == 0:
+                            st.write("")
                         else:
-                            _st = _day_status.get(_day, "עובד")
-                            _lbl = "עובד/ת" if _st == "עובד" else _st
-                            _bg, _fg = _PERS_STATUS_COLORS.get(_st, ("#f1f5f9", "#475569"))
-                            # Determine weekend for border highlight
-                            _wd = date(2026, view_m, _day).weekday()
-                            _border = "#7c3aed" if _wd in (4, 5) else "#e2e8f0"
-                            st.markdown(
-                                f"<div style='background:{_bg};color:{_fg};"
-                                f"border-radius:8px;padding:4px 2px;"
-                                f"text-align:center;font-size:0.78rem;font-weight:600;"
-                                f"min-height:48px;display:flex;flex-direction:column;"
-                                f"align-items:center;justify-content:center;"
-                                f"border:1.5px solid {_border}'>"
-                                f"<b style='font-size:0.9rem'>{_day}</b>"
-                                f"<span style='font-size:0.65rem;margin-top:1px'>{_lbl}</span>"
-                                f"</div>",
-                                unsafe_allow_html=True)
+                            _st_p = _day_status.get(_day_p, "עובד")
+                            _lbl_p = "עובד/ת" if _st_p == "עובד" else _st_p
+                            st.button(
+                                f"{_day_p}\n{_lbl_p}",
+                                key=f"{_pfx_p}_d{_m_p}_{_day_p}x",
+                                use_container_width=True)
 
             st.markdown(
                 "<div style='direction:rtl;font-size:0.75rem;color:#64748b;margin-top:10px'>"
