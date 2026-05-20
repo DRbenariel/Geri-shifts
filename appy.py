@@ -231,10 +231,14 @@ def _update_absence_status(req_id, new_status, responder_name):
     return True
 
 def _approve_request(req_id, responder_name):
-    return _update_absence_status(req_id, 'approved', responder_name)
+    result = _update_absence_status(req_id, 'approved', responder_name)
+    _build_approved_map()   # keep cache in sync immediately
+    return result
 
 def _reject_request(req_id, responder_name):
-    return _update_absence_status(req_id, 'rejected', responder_name)
+    result = _update_absence_status(req_id, 'rejected', responder_name)
+    _build_approved_map()   # keep cache in sync immediately
+    return result
 
 def _generate_work_schedule(year_month, view_month):
     """
@@ -516,14 +520,8 @@ def _export_dept_grid(dept_name, year_month, view_month):
             date_str = f"{year}-{view_month:02d}-{d:02d}"
             working, absent = [], []
             for emp in employees:
-                raw    = _wsd_get_status(date_str, emp, default=None)
-                manual = _wsd_is_manual(date_str, emp)
-                # Same live-derive logic as the board
-                if raw is None or (raw == "עובד" and not manual):
-                    status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
-                else:
-                    status = raw
-                note = _wsd_get_note(date_str, emp)
+                status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
+                note   = _wsd_get_note(date_str, emp)
 
                 if status in _ABSENT_STATUSES:
                     # נעדרים: "name (reason)" or "name (reason — note)"
@@ -842,6 +840,35 @@ def _rebuild_wsd_index():
     st.session_state.wsd_index = idx
 
 
+def _build_approved_map():
+    """
+    Build {employee: [(start_date, end_date, type), ...]} from approved absence_requests.
+    Called at module level on every Streamlit rerun so it is always current.
+    Stored in st.session_state._approved_map for O(1) access inside _derive_auto_status.
+    Also called explicitly after any absence_requests mutation (approve/reject/admin-add).
+    """
+    result = {}
+    try:
+        ar = st.session_state.get('absence_requests', pd.DataFrame())
+        if not ar.empty and 'status' in ar.columns:
+            ar2 = ar.copy()
+            ar2['status']     = ar2['status'].astype(str).str.lower()
+            ar2['employee']   = ar2['employee'].astype(str).str.strip()
+            ar2['start_date'] = ar2['start_date'].astype(str)
+            ar2['end_date']   = ar2['end_date'].astype(str)
+            ar2['type']       = ar2['type'].astype(str)
+            for _, r in ar2[ar2['status'] == 'approved'].iterrows():
+                try:
+                    sd = datetime.strptime(r['start_date'], '%Y-%m-%d').date()
+                    ed = datetime.strptime(r['end_date'],   '%Y-%m-%d').date()
+                except Exception:
+                    continue
+                result.setdefault(r['employee'], []).append((sd, ed, r['type']))
+    except Exception:
+        pass
+    st.session_state._approved_map = result
+
+
 def _wsd_get_status(date_str, employee, default="עובד"):
     """O(1) status lookup via pre-built wsd_index."""
     idx = st.session_state.get('wsd_index')
@@ -936,15 +963,16 @@ _DAILY_DEPT_TO_NIGHT_DEPT = {
 
 def _derive_auto_status(date_str, employee, daily_dept=None):
     """
-    Derive the day-schedule status for (date, employee) without reading work_schedule_daily.
+    SINGLE SOURCE OF TRUTH for day-schedule status.
     Priority order:
-      0. Saturday (wd=6) → "חופש" (department closed)
-      0. Friday (wd=5) + daily_dept known → check שישי בוקר assignment;
-         עובד if assigned to mapped shift, חופש otherwise
-      1. Recurring weekly absence (recurring_absent_days in staff sheet) → "חופש"
-      2. Night shift today (schedule sheet) → "תורנות"
-      3. Night shift yesterday → "אחרי תורנות"
-      4. Default → "עובד"
+      0a. Saturday → "חופש"
+      0b. Friday + daily_dept known → check שישי בוקר assignment
+      1.  is_manual=True override in WSD → return stored status (human decision)
+      2.  Approved absence in absence_requests covers date → return type
+      3.  Recurring weekly absence (staff.recurring_absent_days) → "חופש"
+      4.  Night shift today → "תורנות"
+      5.  Night shift yesterday → "אחרי תורנות"
+      else → "עובד"
     """
     try:
         emp = str(employee).strip()
@@ -972,7 +1000,25 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
                 except Exception:
                     pass
 
-        # 1. Recurring weekly absence
+        # 1. Manual override in WSD (is_manual=True) — human decision, beats all auto logic
+        try:
+            idx = st.session_state.get('wsd_index', {})
+            entry = idx.get((date_str, emp), {})
+            if entry.get('is_manual'):
+                return entry['status']
+        except Exception:
+            pass
+
+        # 2. Approved absence covers this date
+        try:
+            approved_map = st.session_state.get('_approved_map', {})
+            for sd, ed, atype in approved_map.get(emp, []):
+                if sd <= date_obj <= ed:
+                    return atype if atype else "חופש"
+        except Exception:
+            pass
+
+        # 3. Recurring weekly absence
         try:
             sf = st.session_state.staff
             if not sf.empty and 'recurring_absent_days' in sf.columns:
@@ -980,24 +1026,26 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
                 if not emp_row.empty:
                     rec_raw = str(emp_row.iloc[0].get('recurring_absent_days', '') or '').strip()
                     if rec_raw:
-                        wd_heb_idx = wd_idx
                         for tok in rec_raw.split(','):
-                            if _HEB_DAY_TO_IDX.get(tok.strip()) == wd_heb_idx:
+                            if _HEB_DAY_TO_IDX.get(tok.strip()) == wd_idx:
                                 return "חופש"
         except Exception:
             pass
 
-        # 2 & 3. Night shift schedule
-        sch = st.session_state.schedule
-        if not sch.empty and 'date' in sch.columns:
-            night_sch = sch[~sch['dept'].astype(str).isin(_FRIDAY_SHIFT_DEPTS)]
-            names = night_sch['employee'].astype(str).str.strip()
-            dates = night_sch['date'].astype(str)
-            if ((dates == date_str) & (names == emp)).any():
-                return "תורנות"
-            prev = (date_obj - timedelta(days=1)).strftime("%Y-%m-%d")
-            if ((dates == prev) & (names == emp)).any():
-                return "אחרי תורנות"
+        # 4 & 5. Night shift schedule
+        try:
+            sch = st.session_state.schedule
+            if not sch.empty and 'date' in sch.columns:
+                night_sch = sch[~sch['dept'].astype(str).isin(_FRIDAY_SHIFT_DEPTS)]
+                names = night_sch['employee'].astype(str).str.strip()
+                dates = night_sch['date'].astype(str)
+                if ((dates == date_str) & (names == emp)).any():
+                    return "תורנות"
+                prev = (date_obj - timedelta(days=1)).strftime("%Y-%m-%d")
+                if ((dates == prev) & (names == emp)).any():
+                    return "אחרי תורנות"
+        except Exception:
+            pass
     except Exception:
         pass
     return "עובד"
@@ -1138,13 +1186,8 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
             # Compute status for every employee this day
             day_working, day_absent = [], []
             for emp in employees:
-                raw    = _wsd_get_status(date_str, emp, default=None)
-                manual = _wsd_is_manual(date_str, emp)
-                if raw is None or (raw == "עובד" and not manual):
-                    status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
-                else:
-                    status = raw
-                note = _wsd_get_note(date_str, emp)
+                status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
+                note   = _wsd_get_note(date_str, emp)
                 # Fri/Sat auto-חופש → show nothing (not working, not absent listed)
                 if is_wknd and status == "חופש" and not manual:
                     continue
@@ -1297,12 +1340,7 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                 unsafe_allow_html=True)
             for i, d in enumerate(days):
                 date_str = f"{year}-{view_month:02d}-{d:02d}"
-                _wsd_raw   = _wsd_get_status(date_str, emp, default=None)
-                # Re-derive when no entry or when non-manual "עובד" (picks up recurring days live)
-                if _wsd_raw is None or (_wsd_raw == "עובד" and not _wsd_is_manual(date_str, emp)):
-                    cur_status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
-                else:
-                    cur_status = _wsd_raw
+                cur_status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
                 cur_note   = _wsd_get_note(date_str, emp)
                 label_short = _GRID_STATUS_LABEL_SHORT.get(cur_status, cur_status[:4])
                 pfx = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
@@ -3766,6 +3804,10 @@ except Exception:
 
 daily_requests_open = str(_get_setting('daily_requests_open', 'True')).strip().lower() == 'true'
 
+# Rebuild approved-absence map on every render (Streamlit reruns full script on every interaction).
+# This ensures _derive_auto_status always sees current approved absences with O(1) per cell.
+_build_approved_map()
+
 # Render Navigation Bar
 selected_nav = ui_components.render_navbar(role)
 
@@ -5158,8 +5200,6 @@ elif role == "מנהל/ת":
                     st.session_state['_settings_fetched_at'] = time.time()
                     # Sync month selector so both tabs open on the new month
                     st.session_state.daily_view_month = view_month
-                    with st.spinner("מייצר סידור יומי..."):
-                        _generate_work_schedule(view_year_month, view_month)
                     st.session_state['show_active_month_success'] = hebrew_months[view_month-1]
                     st.rerun()
         with col_top3:
@@ -5396,15 +5436,9 @@ elif role == "מנהל/ת":
                         st.session_state.absence_requests = new_adm_df
                         save_to_db("absence_requests", new_adm_df)
 
-                        # Write directly to work_schedule_daily for each day using
-                        # the admin-selected dept. is_manual=True so it is never
-                        # overwritten by _generate_work_schedule.
-                        d = adm_start
-                        while d <= adm_end:
-                            _wsd_upsert(d.strftime('%Y-%m-%d'), adm_emp,
-                                        adm_dept, adm_type, is_manual=True,
-                                        note=adm_note.strip())
-                            d += timedelta(days=1)
+                        # absence_requests entry (status=approved) is the only write needed.
+                        # _derive_auto_status reads _approved_map live on every render.
+                        _build_approved_map()
 
                         st.session_state['show_adm_abs_success'] = True
                         st.rerun()
@@ -5441,34 +5475,12 @@ elif role == "מנהל/ת":
                             if row.get('notes'):
                                 st.caption(f"💬 {row['notes']}")
         with sub_tabs[3]:
-            st.markdown(f"#### יצירת סידור יומי לחודש {hebrew_months[view_month-1]} 2026")
-            st.markdown("""
-            **לוגיקת יצירה:**
-            - לכל עובד ב-`dept_rotation` של החודש → לכל יום בחודש (כולל שישי/שבת)
-            - **קדימות 1**: בקשת היעדרות מאושרת מכסה את היום? → status = סוג ההיעדרות
-            - **קדימות 2**: עשה תורנות לילה ביום הקודם? → status = "אחרי תורנות"
-            - אחרת → status = "עובד"
-            - **שורות עם `is_manual=True` לא נדרסות** (עריכות ידניות שמורות)
-            """)
-
-            col_g1, col_g2 = st.columns([1, 2])
-            with col_g1:
-                go = st.button(f"⚡ צור סידור לחודש {hebrew_months[view_month-1]}",
-                               key="generate_sched", use_container_width=True)
-            with col_g2:
-                cur_count = 0
-                if not st.session_state.work_schedule_daily.empty:
-                    cur_count = st.session_state.work_schedule_daily['date'].astype(str).str.startswith(view_year_month).sum()
-                if cur_count:
-                    st.caption(f"📊 כרגע: {cur_count} שורות קיימות לחודש זה")
-
-            if go:
-                with st.spinner("מייצר סידור..."):
-                    result = _generate_work_schedule(view_year_month, view_month)
-                if result.get('error'):
-                    st.error(result['error'])
-                else:
-                    st.success(f"✅ סידור לחודש {hebrew_months[view_month-1]} נוצר.")
+            st.markdown(f"#### סידור יומי — {hebrew_months[view_month-1]} 2026")
+            st.info(
+                "💡 הסידור נגזר אוטומטית בזמן אמת: היעדרויות מאושרות, ימי היעדרות קבועים, "
+                "ותורנויות לילה מחושבים ישירות מהנתונים. אין צורך ב'צור סידור'.\n\n"
+                "עריכה ידנית של תא בלוח שומרת is_manual=True ומשתקפת מיד."
+            )
         with sub_tabs[4]:
             st.markdown(f"#### ייצוא סידור יומי — {hebrew_months[view_month-1]} 2026")
             st.caption("📥 Excel — הורדה מקומית | 📤 ייצא לקובץ הראשי — לשונית ב-Shifts_scheduler | 🆕 גיליון חדש — קובץ Google Sheets נפרד")
@@ -5548,24 +5560,12 @@ elif role == "מנהל/ת":
                                 st.caption(f"💬 {row['notes']}")
 
         with adm_mgr_tabs[2]:
-            st.markdown(f"#### יצירת סידור יומי — {adm_hebrew_months[daily_active_month_int-1]} 2026")
-            st.caption("יוצר / מעדכן את לוח העבודה היומי לפי היעדרויות מאושרות ותורנויות לילה. שורות ידניות (is_manual) נשמרות.")
-            col_cz1, col_cz2 = st.columns([1, 2])
-            with col_cz1:
-                if st.button(f"⚡ צור סידור לחודש {adm_hebrew_months[daily_active_month_int-1]}",
-                             key="sy_generate_sched", use_container_width=True):
-                    with st.spinner("מייצר סידור..."):
-                        result = _generate_work_schedule(adm_y_m, daily_active_month_int)
-                    if result.get('error'):
-                        st.error(result['error'])
-                    else:
-                        st.success(f"✅ סידור לחודש {adm_hebrew_months[daily_active_month_int-1]} נוצר.")
-            with col_cz2:
-                cur_wsd_count = 0
-                if not st.session_state.work_schedule_daily.empty:
-                    cur_wsd_count = st.session_state.work_schedule_daily['date'].astype(str).str.startswith(adm_y_m).sum()
-                if cur_wsd_count:
-                    st.caption(f"📊 כרגע: {cur_wsd_count} שורות קיימות לחודש זה")
+            st.markdown(f"#### סידור יומי — {adm_hebrew_months[daily_active_month_int-1]} 2026")
+            st.info(
+                "💡 הסידור נגזר אוטומטית בזמן אמת: היעדרויות מאושרות, ימי היעדרות קבועים, "
+                "ותורנויות לילה מחושבים ישירות מהנתונים. אין צורך ב'צור סידור'.\n\n"
+                "עריכה ידנית של תא בלוח שומרת is_manual=True ומשתקפת מיד."
+            )
 
 
 else:
