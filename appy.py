@@ -1154,42 +1154,24 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
         return
 
 
-    # Force all st.columns in this grid to stay horizontal and scroll on mobile
-    st.markdown(
-        "<style>"
-        "[data-testid='stHorizontalBlock']{"
-        "flex-wrap:nowrap!important;overflow-x:auto!important;"
-        "-webkit-overflow-scrolling:touch!important;}"
-        "[data-testid='column']{min-width:36px!important;}"
-        "</style>",
-        unsafe_allow_html=True)
-
-    # Weekly grid — same RTL layout as render_modern_calendar
-    # calendar.Calendar(firstweekday=6): each week = [Sun,Mon,Tue,Wed,Thu,Fri,Sat]
-    # list(reversed(week))            : [Sat,Fri,Thu,Wed,Tue,Mon,Sun]
-    # col 0=Sat (leftmost) … col 6=Sun (rightmost) — matches Hebrew reading RTL
-    # Employee name in the LAST column (rightmost) — RTL convention
-    # day==0 → padding outside the month → empty cell
+    # Weekly RTL grid — 7 equal columns (Sat…Sun), employee name above each row.
+    # 7 columns matches render_modern_calendar and works on mobile without CSS hacks.
+    # Sat → col 0 (leftmost), Sun → col 6 (rightmost).
     _WD_HDRS  = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
-    _WD_IS_WK = [True, True, False, False, False, False, False]  # Sat,Fri = weekend
+    _WD_IS_WK = [True, True, False, False, False, False, False]  # Sat, Fri = weekend
 
     cal_weeks = [list(reversed(w))
                  for w in calendar.Calendar(firstweekday=6).monthdayscalendar(year, view_month)]
 
-    # ── Single day-name header row (drawn once above all weeks) ─────────
-    # Layout: [2]*7 day cols + [3] employee col  →  Sat…Sun | עובד/ת
-    hdr_cols = st.columns([2] * 7 + [3])
+    # ── Day-name header row (7 cols, drawn once) ────────────────────────
+    hdr_cols = st.columns(7)
     for _ci, (_h, _wk) in enumerate(zip(_WD_HDRS, _WD_IS_WK)):
         _hbg = "#fef2f2" if _wk else "#f1f5f9"
         _hfg = "#b91c1c" if _wk else "#334155"
         hdr_cols[_ci].markdown(
             f"<div style='background:{_hbg};font-weight:700;text-align:center;"
-            f"padding:6px 2px;border-radius:6px;font-size:0.8rem;color:{_hfg}'>{_h}</div>",
+            f"padding:6px 2px;border-radius:6px;font-size:0.85rem;color:{_hfg}'>{_h}</div>",
             unsafe_allow_html=True)
-    hdr_cols[7].markdown(
-        "<div style='background:#f1f5f9;font-weight:700;text-align:center;"
-        "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#334155'>עובד/ת</div>",
-        unsafe_allow_html=True)
 
     for week_rtl in cal_weeks:
         if all(d == 0 for d in week_rtl):
@@ -1197,8 +1179,8 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
 
         st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
-        # Day-number sub-header for this week
-        num_cols = st.columns([2] * 7 + [3])
+        # Day-number sub-header for this week (7 cols)
+        num_cols = st.columns(7)
         for _ci, d in enumerate(week_rtl):
             if d == 0:
                 num_cols[_ci].write("")
@@ -1209,17 +1191,17 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                     f"<div style='background:{_nbg};font-weight:700;text-align:center;"
                     f"padding:4px 2px;border-radius:6px;font-size:0.75rem;color:{_nfg}'>{d}</div>",
                     unsafe_allow_html=True)
-        num_cols[7].write("")
 
-        # ── One row per employee ─────────────────────────────────────────
+        # ── One section per employee: name banner then 7-col button row ──
         for emp in employees:
-            row_cols = st.columns([2] * 7 + [3])
-            # Employee name — rightmost column
-            row_cols[7].markdown(
+            # Employee name as full-width RTL banner (no extra column needed)
+            st.markdown(
                 f"<div style='font-weight:600;font-size:0.82rem;color:#0f172a;"
-                f"padding:4px 8px;background:white;border-radius:6px;"
-                f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>",
+                f"padding:3px 10px;background:#f8fafc;border-radius:6px;"
+                f"border:1px solid #e2e8f0;text-align:right;margin:2px 0 1px 0'>"
+                f"{emp}</div>",
                 unsafe_allow_html=True)
+            row_cols = st.columns(7)
             for _ci, d in enumerate(week_rtl):
                 with row_cols[_ci]:
                     if d == 0:
@@ -1272,12 +1254,13 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                     except Exception:
                         pass
 
-        # ── Night-duty row ───────────────────────────────────────────────
-        nd_cols = st.columns([2] * 7 + [3])
-        nd_cols[7].markdown(
-            "<div style='background:#ede9fe;font-weight:700;text-align:center;"
-            "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#5b21b6'>🌙 תורנ/ית</div>",
+        # ── Night-duty row (7 cols) ──────────────────────────────────────
+        st.markdown(
+            "<div style='background:#ede9fe;font-weight:700;text-align:right;"
+            "padding:3px 10px;border-radius:6px;font-size:0.75rem;"
+            "color:#5b21b6;margin:2px 0 1px 0'>🌙 תורנ/ית</div>",
             unsafe_allow_html=True)
+        nd_cols = st.columns(7)
         for _ci, d in enumerate(week_rtl):
             if d == 0:
                 nd_cols[_ci].write("")
@@ -1292,12 +1275,13 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
                 f"{nd or '—'}</div>",
                 unsafe_allow_html=True)
 
-        # ── Friday-morning row (col index 1 = Friday in Sat,Fri,… order) ─
-        fri_cols = st.columns([2] * 7 + [3])
-        fri_cols[7].markdown(
-            "<div style='background:#fef9c3;font-weight:700;text-align:center;"
-            "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#854d0e'>☀️ שישי בוקר</div>",
+        # ── Friday-morning row (7 cols; col 1 = Friday) ─────────────────
+        st.markdown(
+            "<div style='background:#fef9c3;font-weight:700;text-align:right;"
+            "padding:3px 10px;border-radius:6px;font-size:0.75rem;"
+            "color:#854d0e;margin:2px 0 1px 0'>☀️ שישי בוקר</div>",
             unsafe_allow_html=True)
+        fri_cols = st.columns(7)
         for _ci, d in enumerate(week_rtl):
             if d == 0:
                 fri_cols[_ci].write("")
