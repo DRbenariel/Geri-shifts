@@ -1082,13 +1082,12 @@ _TYPE_DISPLAY = {
 
 def _render_export_buttons(dept_name, year_month, view_month, key_ns, user_name=""):
     """
-    Render three export buttons for a dept:
-      1. 📥 Excel — download_button
-      2. 📤 ייצא לקובץ הראשי — write worksheet to same Shifts_scheduler spreadsheet
-      3. 🔗 פתח ב-Sheets — create standalone GSheet, open in new tab
+    Render two export buttons for a dept:
+      1. 📥 Excel — download_button (local download)
+      2. 🔗 פתח ב-Sheets — create standalone GSheet, open in new tab
     """
     import streamlit.components.v1 as _components
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
 
     # 1. Excel download
     with c1:
@@ -1106,22 +1105,12 @@ def _render_export_buttons(dept_name, year_month, view_month, key_ns, user_name=
             st.button("📥 Excel", key=f"xl_dl_{key_ns}_na", disabled=True,
                       use_container_width=True)
 
-    # 2. Export to main Shifts_scheduler spreadsheet
+    # 2. New standalone Google Sheet — auto-open in browser
     with c2:
-        if st.button("📤 ייצא לקובץ הראשי", key=f"exp_main_{key_ns}",
-                     use_container_width=True):
-            if _export_dept_grid(dept_name, year_month, view_month):
-                st.success(f"✅ {dept_name} יוצא לגיליון הראשי!")
-            else:
-                st.error("שגיאה בייצוא")
-
-    # 3. New standalone Google Sheet — auto-open in browser
-    with c3:
         if st.button("🔗 פתח ב-Sheets", key=f"exp_new_{key_ns}",
                      use_container_width=True):
             ok, url, err = _export_dept_to_new_gsheet(dept_name, year_month, view_month)
             if ok:
-                # Auto-open in new browser tab
                 _components.html(
                     f'<script>window.open("{url}", "_blank");</script>',
                     height=0)
@@ -2230,11 +2219,12 @@ def render_modern_calendar(year, month, default_constraint_days, default_wish_da
             except:
                 pass
 
-    # ── Day headers ────────────────────────────────────────────────
-    day_headers = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
+    # ── Day headers (RTL: Saturday on left col 0, Sunday on right col 6) ──
+    # DOM order left→right: ש' ו' ה' ד' ג' ב' א'  → reads right→left: א' ב' ג' ד' ה' ו' ש'
+    day_headers = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
     hcols = st.columns(7)
     for idx, h in enumerate(day_headers):
-        is_wk_col = idx in [5, 6]
+        is_wk_col = idx in [0, 1]   # col 0=Saturday, col 1=Friday
         hcols[idx].markdown(
             f"<div style='text-align:center;font-weight:700;"
             f"color:{'#7c3aed' if is_wk_col else '#64748b'};"
@@ -2243,10 +2233,14 @@ def render_modern_calendar(year, month, default_constraint_days, default_wish_da
         )
 
     # ── Calendar grid ──────────────────────────────────────────────
-    cal_weeks = calendar.monthcalendar(year, month)
+    # Use Calendar(6) so weeks start on Sunday (Python weekday 6).
+    # Then reverse each week so Saturday ends up in col 0 (left) and Sunday in col 6 (right),
+    # giving correct RTL visual order: read right→left = Sun … Fri Sat.
+    cal_weeks = calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)
     for week in cal_weeks:
+        week_rtl = list(reversed(week))   # Saturday→col 0, Sunday→col 6
         wcols = st.columns(7)
-        for col_idx, day_num in enumerate(week):
+        for col_idx, day_num in enumerate(week_rtl):
             with wcols[col_idx]:
                 if day_num == 0:
                     st.write("")
@@ -5220,291 +5214,148 @@ elif role == "מנהל/ת":
 
         st.divider()
 
-        # ── Sub-tabs (Phase 2 implements only the first; rest are stubs) ──
-        sub_tabs = st.tabs(["שיבוץ חודשי", "לוח עבודה כללי", "כל הבקשות", "צור סידור", "ייצוא"])
+        # ── שיבוץ חודשי — flat layout, no sub-tabs ───────────────────
+        st.markdown(f"#### שיוך עובדים למחלקות — {hebrew_months[view_month-1]} 2026")
+        st.caption("בחר לכל עובד את המחלקה היומית שלו לחודש זה. תורן חוץ ומנהלים אינם בטבלה.")
 
-        # ─── Tab 1: שיבוץ חודשי ─────────────────────────────────
-        with sub_tabs[0]:
-            st.markdown(f"#### שיוך עובדים למחלקות — {hebrew_months[view_month-1]} 2026")
-            st.caption("בחר לכל עובד את המחלקה היומית שלו לחודש זה. תורן חוץ ומנהלים אינם בטבלה.")
+        DAILY_DEPTS = list(DAILY_DEPTS_ALL) + ["— לא שובץ —"]
 
-            DAILY_DEPTS = list(DAILY_DEPTS_ALL) + ["— לא שובץ —"]
+        staff = st.session_state.staff.copy()
+        staff['name'] = staff['name'].astype(str).str.strip()
+        staff['type'] = staff['type'].astype(str).str.strip()
+        eligible = staff[staff['type'].isin(['מתמחה', 'רופא בכיר'])]
+        eligible = eligible[eligible['name'].str.len() > 0]
+        eligible = eligible[eligible['name'] != '---']
 
-            # Filter active staff: only מתמחה + רופא בכיר
-            staff = st.session_state.staff.copy()
-            staff['name'] = staff['name'].astype(str).str.strip()
-            staff['type'] = staff['type'].astype(str).str.strip()
-            eligible = staff[staff['type'].isin(['מתמחה', 'רופא בכיר'])]
-            eligible = eligible[eligible['name'].str.len() > 0]
-            eligible = eligible[eligible['name'] != '---']
-
-            if eligible.empty:
-                st.warning("אין עובדים פעילים מסוג מתמחה או רופא/ה בכיר/ה.")
+        if eligible.empty:
+            st.warning("אין עובדים פעילים מסוג מתמחה או רופא/ה בכיר/ה.")
+        else:
+            dr = st.session_state.dept_rotation.copy()
+            if 'employee' in dr.columns:
+                dr['employee']   = dr['employee'].astype(str).str.strip()
+                dr['year_month'] = dr['year_month'].astype(str)
+                dr['daily_dept'] = dr['daily_dept'].astype(str)
+                existing = dr[dr['year_month'] == view_year_month].set_index('employee')['daily_dept'].to_dict()
             else:
-                # Pre-fill from existing dept_rotation rows for this month
-                dr = st.session_state.dept_rotation.copy()
-                if 'employee' in dr.columns:
-                    dr['employee']   = dr['employee'].astype(str).str.strip()
-                    dr['year_month'] = dr['year_month'].astype(str)
-                    dr['daily_dept'] = dr['daily_dept'].astype(str)
-                    existing = dr[dr['year_month'] == view_year_month].set_index('employee')['daily_dept'].to_dict()
-                else:
-                    existing = {}
+                existing = {}
 
-                with st.form(f"rotation_form_{view_month}"):
-                    new_assignments = {}
-                    for _, emp_row in eligible.iterrows():
-                        emp_name = emp_row['name']
-                        emp_type = emp_row['type']
-                        current = existing.get(emp_name, "— לא שובץ —")
-                        if current not in DAILY_DEPTS:
-                            current = "— לא שובץ —"
-
-                        c1, c2 = st.columns([2, 3])
-                        c1.markdown(
-                            f"<div style='padding:6px 0;font-weight:500'>"
-                            f"{emp_name} <span style='color:#64748b;font-size:0.8rem'>({emp_type})</span></div>",
-                            unsafe_allow_html=True)
-                        new_assignments[emp_name] = c2.selectbox(
-                            "", DAILY_DEPTS,
-                            index=DAILY_DEPTS.index(current),
-                            key=f"rot_{emp_name}_{view_month}",
-                            label_visibility="collapsed"
-                        )
-
-                    submit = st.form_submit_button(f"💾 שמור שיבוץ לחודש {hebrew_months[view_month-1]}")
-
-                if submit:
-                    # Reassignment-warning check (Phase 4 will refine, here we just notify)
-                    abs_df = st.session_state.absence_requests.copy()
-                    warnings_for = []
-                    if not abs_df.empty and 'status' in abs_df.columns:
-                        approved_future = abs_df[
-                            (abs_df['status'].astype(str) == 'approved') &
-                            (abs_df['type'].astype(str) == 'חופש עתידי') &
-                            (abs_df['start_date'].astype(str).str.startswith(view_year_month))
-                        ]
-                        for _, ar in approved_future.iterrows():
-                            emp_n = str(ar['employee']).strip()
-                            old_dept = existing.get(emp_n, '')
-                            new_dept = new_assignments.get(emp_n, '')
-                            if old_dept and new_dept and old_dept != new_dept:
-                                warnings_for.append((emp_n, old_dept, new_dept))
-
-                    if warnings_for:
-                        for emp_n, old_d, new_d in warnings_for:
-                            st.warning(f"⚠️ {emp_n}: יש חופש עתידי מאושר. שינוי: {old_d} → {new_d}. "
-                                       f"שלח התראה למנהלי המחלקות הרלוונטיים.")
-
-                    # Persist: keep all rows from other months, replace this month
-                    other_months = dr[dr['year_month'] != view_year_month] if not dr.empty else pd.DataFrame(
-                        columns=['employee','year_month','daily_dept'])
-                    new_rows = []
-                    for emp_n, dept_n in new_assignments.items():
-                        if dept_n != "— לא שובץ —":
-                            new_rows.append({
-                                'employee': emp_n,
-                                'year_month': view_year_month,
-                                'daily_dept': dept_n,
-                            })
-                    new_dr = _norm_dr(pd.concat([other_months, pd.DataFrame(new_rows)], ignore_index=True))
-                    st.session_state.dept_rotation = new_dr
-                    save_to_db("dept_rotation", new_dr)
-                    st.success(f"✅ נשמרו {len(new_rows)} שיבוצים לחודש {hebrew_months[view_month-1]}")
-                    st.rerun()
-
-                # Summary panel
-                st.divider()
-                if not dr.empty:
-                    cur = dr[dr['year_month'] == view_year_month]
-                    if not cur.empty:
-                        st.caption(f"📊 שיבוצים נוכחיים בחודש: {len(cur)} עובדים")
-                        for d in DAILY_DEPTS[:-1]:
-                            cnt = (cur['daily_dept'] == d).sum()
-                            if cnt > 0:
-                                st.caption(f"   • {d}: {cnt} עובדים")
-
-        # ─── Tabs 2-5 stubs (future phases) ─────────────────────
-        with sub_tabs[1]:
-            st.markdown(f"#### לוח עבודה כללי — {hebrew_months[view_month-1]} 2026")
-            st.caption("לחיצה על תא מחזרת בין: עובד/ת → חופש → 202 → אחרי תורנות → אחר. שינויים נשמרים מיד עם is_manual=True.")
-            # Pre-build a map: dept_name → [מנהל מחלקה names] so their rows always appear
-            _staff_all = st.session_state.staff
-            _dept_mgr_map: dict[str, list[str]] = {d: [] for d in DAILY_DEPTS_ALL}
-            if not _staff_all.empty and 'type' in _staff_all.columns:
-                for _, _sr in _staff_all.iterrows():
-                    if str(_sr.get('type', '')).strip() != 'מנהל מחלקה':
-                        continue
-                    _mgr_name = str(_sr.get('name', '')).strip()
-                    if not _mgr_name:
-                        continue
-                    for _md in _parse_manage_depts(_sr.get('manage_depts', '')):
-                        if _md in _dept_mgr_map:
-                            _dept_mgr_map[_md].append(_mgr_name)
-
-            dept_inner = st.tabs(DAILY_DEPTS_ALL)
-            _ns_map = {d: f"dept_{i}" for i, d in enumerate(DAILY_DEPTS_ALL)}
-            for d_tab, d_name in zip(dept_inner, DAILY_DEPTS_ALL):
-                with d_tab:
-                    # Build employee list: dept_rotation for this month + managers of this dept
-                    _dr = st.session_state.dept_rotation
-                    _emps_base = []
-                    if not _dr.empty and 'employee' in _dr.columns:
-                        _mask = ((_dr['year_month'].astype(str) == view_year_month) &
-                                 (_dr['daily_dept'].astype(str) == d_name))
-                        _emps_base = _dr[_mask]['employee'].astype(str).str.strip().tolist()
-                    # Prepend managers (if not already in list from dept_rotation)
-                    for _mn in _dept_mgr_map.get(d_name, []):
-                        if _mn not in _emps_base:
-                            _emps_base = [_mn] + _emps_base
-                    _emps_base = _sort_employees_by_role(_emps_base)
-                    _render_dept_grid(d_name, view_year_month, view_month,
-                                      _ns_map[d_name], employees=_emps_base or None)
-                    st.markdown(
-                        "<div style='direction:rtl;font-size:0.75rem;color:#64748b;margin-top:6px'>"
-                        "<b>מקרא:</b> <span style='background:#16a34a;color:white;padding:1px 6px;border-radius:4px'>עובד/ת</span> &nbsp;"
-                        "<span style='background:#2563eb;color:white;padding:1px 6px;border-radius:4px'>חופש</span> &nbsp;"
-                        "<span style='background:#ca8a04;color:white;padding:1px 6px;border-radius:4px'>202</span> &nbsp;"
-                        "<span style='background:#f97316;color:white;padding:1px 6px;border-radius:4px'>אחרי תורנות</span> &nbsp;"
-                        "<span style='background:#94a3b8;color:white;padding:1px 6px;border-radius:4px'>אחר</span></div>",
+            with st.form(f"rotation_form_{view_month}"):
+                new_assignments = {}
+                for _, emp_row in eligible.iterrows():
+                    emp_name = emp_row['name']
+                    emp_type = emp_row['type']
+                    current = existing.get(emp_name, "— לא שובץ —")
+                    if current not in DAILY_DEPTS:
+                        current = "— לא שובץ —"
+                    c1, c2 = st.columns([2, 3])
+                    c1.markdown(
+                        f"<div style='padding:6px 0;font-weight:500'>"
+                        f"{emp_name} <span style='color:#64748b;font-size:0.8rem'>({emp_type})</span></div>",
                         unsafe_allow_html=True)
-                    st.divider()
-                    cl, _, cr = st.columns([3, 2, 1])
-                    cl.caption(f"ייצוא **{d_name}** — תאריכים בעמודות, עובדים/נעדרים בשורות")
-                    with cr:
-                        if st.button(f"📤 ייצא", key=f"exp_grid_{_ns_map[d_name]}", use_container_width=True):
-                            ok = _export_dept_grid(d_name, view_year_month, view_month)
-                            if ok:
-                                st.success(f"✅ {d_name} יוצא לגיליון!")
-                            else:
-                                st.error("שגיאה בייצוא")
-        with sub_tabs[2]:
-            st.markdown(f"#### כל בקשות ההיעדרות לחודש {hebrew_months[view_month-1]} 2026")
-            st.caption("בקשות ממתינות בכל המחלקות. ניתן לאשר או לדחות ישירות.")
+                    new_assignments[emp_name] = c2.selectbox(
+                        "", DAILY_DEPTS,
+                        index=DAILY_DEPTS.index(current),
+                        key=f"rot_{emp_name}_{view_month}",
+                        label_visibility="collapsed"
+                    )
+                submit = st.form_submit_button(f"💾 שמור שיבוץ לחודש {hebrew_months[view_month-1]}")
 
-            # ── Admin: add absence for any employee (auto-approved) ──────────
-            with st.expander("➕ הוסף היעדרות לעובד (מאושר אוטומטית)", expanded=False):
-                sf_all = st.session_state.staff
-                active_emps = sorted(
-                    sf_all[sf_all['type'].isin(['מתמחה', 'רופא בכיר', 'מנהל מחלקה', 'מנהל/ת'])]
-                    ['name'].astype(str).str.strip().tolist()
-                )
-                adm_emp = st.selectbox("עובד", active_emps, key="adm_abs_emp")
-                adm_col1, adm_col2 = st.columns(2)
-                with adm_col1:
-                    adm_start = st.date_input("מתאריך", key="adm_abs_start",
-                                              value=date(2026, view_month, 1),
-                                              min_value=date(2026, 1, 1),
-                                              max_value=date(2026, 12, 31))
-                with adm_col2:
-                    adm_end = st.date_input("עד תאריך", key="adm_abs_end",
-                                            value=date(2026, view_month, 1),
-                                            min_value=date(2026, 1, 1),
-                                            max_value=date(2026, 12, 31))
-                adm_type = st.selectbox("סוג היעדרות", ["חופש", "202", "היעדרות אחרת"], key="adm_abs_type")
-                # Explicit dept selector — no dependency on dept_rotation lookup.
-                # Admin always specifies the daily dept so WSD is written unconditionally.
-                adm_dept = st.selectbox("מחלקה יומית", DAILY_DEPTS_ALL, key="adm_abs_dept")
-                adm_note = st.text_input("הערה (אופציונלי)", key="adm_abs_note")
+            if submit:
+                abs_df = st.session_state.absence_requests.copy()
+                warnings_for = []
+                if not abs_df.empty and 'status' in abs_df.columns:
+                    approved_future = abs_df[
+                        (abs_df['status'].astype(str) == 'approved') &
+                        (abs_df['type'].astype(str) == 'חופש עתידי') &
+                        (abs_df['start_date'].astype(str).str.startswith(view_year_month))
+                    ]
+                    for _, ar in approved_future.iterrows():
+                        emp_n = str(ar['employee']).strip()
+                        old_dept = existing.get(emp_n, '')
+                        new_dept = new_assignments.get(emp_n, '')
+                        if old_dept and new_dept and old_dept != new_dept:
+                            warnings_for.append((emp_n, old_dept, new_dept))
+                if warnings_for:
+                    for emp_n, old_d, new_d in warnings_for:
+                        st.warning(f"⚠️ {emp_n}: יש חופש עתידי מאושר. שינוי: {old_d} → {new_d}.")
+                other_months = dr[dr['year_month'] != view_year_month] if not dr.empty else pd.DataFrame(
+                    columns=['employee','year_month','daily_dept'])
+                new_rows = []
+                for emp_n, dept_n in new_assignments.items():
+                    if dept_n != "— לא שובץ —":
+                        new_rows.append({'employee': emp_n, 'year_month': view_year_month, 'daily_dept': dept_n})
+                new_dr = _norm_dr(pd.concat([other_months, pd.DataFrame(new_rows)], ignore_index=True))
+                st.session_state.dept_rotation = new_dr
+                save_to_db("dept_rotation", new_dr)
+                st.success(f"✅ נשמרו {len(new_rows)} שיבוצים לחודש {hebrew_months[view_month-1]}")
+                st.rerun()
 
-                if st.button("✅ הוסף היעדרות מאושרת", key="adm_abs_submit"):
-                    if adm_end < adm_start:
-                        st.error("תאריך סיום לפני תאריך התחלה.")
-                    else:
-                        # Look up employee dept for absence_requests row
-                        emp_row = sf_all[sf_all['name'].astype(str).str.strip() == adm_emp]
-                        emp_dept = str(emp_row.iloc[0].get('dept', '')) if not emp_row.empty else ''
+            # Summary
+            st.divider()
+            if not dr.empty:
+                cur = dr[dr['year_month'] == view_year_month]
+                if not cur.empty:
+                    st.caption(f"📊 שיבוצים נוכחיים בחודש: {len(cur)} עובדים")
+                    for d in DAILY_DEPTS[:-1]:
+                        cnt = (cur['daily_dept'] == d).sum()
+                        if cnt > 0:
+                            st.caption(f"   • {d}: {cnt} עובדים")
 
-                        new_adm_row = {
-                            'id':              str(uuid.uuid4()),
-                            'employee':        adm_emp,
-                            'start_date':      adm_start.strftime('%Y-%m-%d'),
-                            'end_date':        adm_end.strftime('%Y-%m-%d'),
-                            'type':            adm_type,
-                            'status':          'approved',
-                            'dept_at_request': emp_dept,
-                            'manager_email':   '',
-                            'approved_by':     str(user_name).strip(),
-                            'notes':           adm_note.strip(),
-                            'created_at':      datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                            'responded_at':    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        }
-                        new_adm_df = pd.concat(
-                            [st.session_state.absence_requests, pd.DataFrame([new_adm_row])],
-                            ignore_index=True
-                        )
-                        st.session_state.absence_requests = new_adm_df
-                        save_to_db("absence_requests", new_adm_df)
+        # ── הוספת היעדרות מאושרת לעובד ───────────────────────────
+        st.divider()
+        st.markdown("##### ➕ הוסף היעדרות מאושרת לעובד")
+        sf_all = st.session_state.staff
+        active_emps = sorted(
+            sf_all[sf_all['type'].isin(['מתמחה', 'רופא בכיר', 'מנהל מחלקה', 'מנהל/ת'])]
+            ['name'].astype(str).str.strip().tolist()
+        )
+        adm_emp = st.selectbox("עובד", active_emps, key="adm_abs_emp")
+        adm_col1, adm_col2 = st.columns(2)
+        with adm_col1:
+            adm_start = st.date_input("מתאריך", key="adm_abs_start",
+                                      value=date(2026, view_month, 1),
+                                      min_value=date(2026, 1, 1),
+                                      max_value=date(2026, 12, 31))
+        with adm_col2:
+            adm_end = st.date_input("עד תאריך", key="adm_abs_end",
+                                    value=date(2026, view_month, 1),
+                                    min_value=date(2026, 1, 1),
+                                    max_value=date(2026, 12, 31))
+        adm_type = st.selectbox("סוג היעדרות", ["חופש", "202", "היעדרות אחרת"], key="adm_abs_type")
+        adm_note = st.text_input("הערה (אופציונלי)", key="adm_abs_note")
 
-                        # absence_requests entry (status=approved) is the only write needed.
-                        # _derive_auto_status reads _approved_map live on every render.
-                        _build_approved_map()
-
-                        st.session_state['show_adm_abs_success'] = True
-                        st.rerun()
-
-            if st.session_state.pop('show_adm_abs_success', False):
-                st.success("✅ היעדרות נוספה ואושרה — הסידור היומי עודכן אוטומטית.")
-            ar_all = st.session_state.absence_requests.copy()
-            if ar_all.empty or 'status' not in ar_all.columns:
-                st.info("אין בקשות במערכת.")
+        if st.button("✅ הוסף היעדרות מאושרת", key="adm_abs_submit"):
+            if adm_end < adm_start:
+                st.error("תאריך סיום לפני תאריך התחלה.")
             else:
-                ar_all['start_date'] = ar_all['start_date'].astype(str)
-                ar_all['end_date']   = ar_all['end_date'].astype(str)
-                ar_all['status']     = ar_all['status'].astype(str).str.lower()
-                # Show ALL pending requests regardless of month
-                pending = ar_all[ar_all['status'] == 'pending'].sort_values('start_date')
-                if pending.empty:
-                    st.success("אין בקשות ממתינות ✅")
-                else:
-                    st.caption(f"📋 {len(pending)} בקשות ממתינות")
-                    for idx, row in pending.iterrows():
-                        with st.container(border=True):
-                            cc1, cc2, cc3, cc4, cc5, cc6 = st.columns([2, 2, 2, 2, 1, 1])
-                            cc1.markdown(f"**{row.get('employee', '—')}**")
-                            cc2.write(f"{row['start_date']} – {row['end_date']}")
-                            cc3.write(row.get('type', '—'))
-                            cc4.write(row.get('dept_at_request', '—'))
-                            req_id = str(row.get('id', idx))
-                            if cc5.button("✅", key=f"adm_ap_{req_id}", use_container_width=True):
-                                _approve_request(req_id, str(user_name).strip())
-                                st.rerun()
-                            if cc6.button("❌", key=f"adm_rj_{req_id}", use_container_width=True):
-                                _reject_request(req_id, str(user_name).strip())
-                                st.rerun()
-                            if row.get('notes'):
-                                st.caption(f"💬 {row['notes']}")
-        with sub_tabs[3]:
-            st.markdown(f"#### סידור יומי — {hebrew_months[view_month-1]} 2026")
-            st.info(
-                "💡 הסידור נגזר אוטומטית בזמן אמת: היעדרויות מאושרות, ימי היעדרות קבועים, "
-                "ותורנויות לילה מחושבים ישירות מהנתונים. אין צורך ב'צור סידור'.\n\n"
-                "עריכה ידנית של תא בלוח שומרת is_manual=True ומשתקפת מיד."
-            )
-        with sub_tabs[4]:
-            st.markdown(f"#### ייצוא סידור יומי — {hebrew_months[view_month-1]} 2026")
-            st.caption("📥 Excel — הורדה מקומית | 📤 ייצא לקובץ הראשי — לשונית ב-Shifts_scheduler | 🆕 גיליון חדש — קובץ Google Sheets נפרד")
-            st.divider()
-            for d_name in DAILY_DEPTS_ALL:
-                st.markdown(f"**{d_name}**")
-                _render_export_buttons(d_name, view_year_month, view_month,
-                                       f"adm_exp_{d_name.replace(' ','_').replace(chr(39),'').replace(chr(34),'')}", user_name)
-                st.markdown("")
-            st.divider()
-            if st.button(f"📤 ייצא את כל {len(DAILY_DEPTS_ALL)} המחלקות לקובץ הראשי",
-                         key="exp_main_all", use_container_width=False):
-                results = []
-                for d_name in DAILY_DEPTS_ALL:
-                    ok = _export_dept_grid(d_name, view_year_month, view_month)
-                    results.append((d_name, ok))
-                ok_count = sum(1 for _, o in results if o)
-                if ok_count == len(DAILY_DEPTS_ALL):
-                    st.success(f"✅ כל {ok_count} המחלקות יוצאו!")
-                elif ok_count == 0:
-                    st.error("שגיאה בייצוא")
-                else:
-                    fail = [n for n, o in results if not o]
-                    st.warning(f"יוצאו {ok_count}/{len(DAILY_DEPTS_ALL)}. נכשלו: {', '.join(fail)}")
+                emp_row = sf_all[sf_all['name'].astype(str).str.strip() == adm_emp]
+                emp_dept = str(emp_row.iloc[0].get('dept', '')) if not emp_row.empty else ''
+                new_adm_row = {
+                    'id':              str(uuid.uuid4()),
+                    'employee':        adm_emp,
+                    'start_date':      adm_start.strftime('%Y-%m-%d'),
+                    'end_date':        adm_end.strftime('%Y-%m-%d'),
+                    'type':            adm_type,
+                    'status':          'approved',
+                    'dept_at_request': emp_dept,
+                    'manager_email':   '',
+                    'approved_by':     str(user_name).strip(),
+                    'notes':           adm_note.strip(),
+                    'created_at':      datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'responded_at':    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                }
+                new_adm_df = pd.concat(
+                    [st.session_state.absence_requests, pd.DataFrame([new_adm_row])],
+                    ignore_index=True
+                )
+                st.session_state.absence_requests = new_adm_df
+                save_to_db("absence_requests", new_adm_df)
+                _build_approved_map()
+                st.session_state['show_adm_abs_success'] = True
+                st.rerun()
+
+        if st.session_state.pop('show_adm_abs_success', False):
+            st.success("✅ היעדרות נוספה ואושרה — תופיע בלוח מיד.")
 
     # ── סידור יומי (אדמין) — same view as מנהל מחלקה but for any dept of choice ──
     if selected_nav == 'סידור יומי':
@@ -5518,7 +5369,7 @@ elif role == "מנהל/ת":
         st.caption(f"חודש פעיל: **{adm_hebrew_months[daily_active_month_int-1]} 2026**")
         adm_y_m = f"2026-{daily_active_month_int:02d}"
 
-        adm_mgr_tabs = st.tabs(["לוח מחלקה", "בקשות ממתינות", "צור סידור"])
+        adm_mgr_tabs = st.tabs(["לוח מחלקה", "בקשות ממתינות"])
         with adm_mgr_tabs[0]:
             st.markdown(f"#### לוח {sel_dept_admin}")
             _render_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int,
@@ -5559,13 +5410,6 @@ elif role == "מנהל/ת":
                             if row.get('notes'):
                                 st.caption(f"💬 {row['notes']}")
 
-        with adm_mgr_tabs[2]:
-            st.markdown(f"#### סידור יומי — {adm_hebrew_months[daily_active_month_int-1]} 2026")
-            st.info(
-                "💡 הסידור נגזר אוטומטית בזמן אמת: היעדרויות מאושרות, ימי היעדרות קבועים, "
-                "ותורנויות לילה מחושבים ישירות מהנתונים. אין צורך ב'צור סידור'.\n\n"
-                "עריכה ידנית של תא בלוח שומרת is_manual=True ומשתקפת מיד."
-            )
 
 
 else:

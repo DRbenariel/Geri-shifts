@@ -356,7 +356,30 @@ def setup_style():
             margin-bottom: 15px !important;
         }
     }
-    
+
+    /* ── RTL date-picker popup ─────────────────────────────────── */
+    /* Force Streamlit's st.date_input calendar popup to RTL layout  */
+    [data-baseweb="calendar"] {
+        direction: rtl !important;
+    }
+    [data-baseweb="calendar"] [data-testid="calendar-header"] {
+        direction: rtl !important;
+    }
+    /* Week day header row inside the popup */
+    [data-baseweb="calendar"] [role="columnheader"],
+    [data-baseweb="calendar"] [role="gridcell"] {
+        direction: rtl !important;
+    }
+    /* Flip the prev/next month arrows so they point correctly in RTL */
+    [data-baseweb="calendar"] button[aria-label*="Previous"],
+    [data-baseweb="calendar"] button[aria-label*="previous"] {
+        order: 1 !important;
+    }
+    [data-baseweb="calendar"] button[aria-label*="Next"],
+    [data-baseweb="calendar"] button[aria-label*="next"] {
+        order: -1 !important;
+    }
+
     </style>
     """, unsafe_allow_html=True)
 
