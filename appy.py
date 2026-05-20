@@ -917,13 +917,18 @@ _GRID_STATUS_CYCLE = {
     "תורנות":       "חופש",   # clicking overrides auto-derived night-shift status
 }
 _GRID_STATUS_LABEL_SHORT = {
-    "עובד":         "עובד/ת",
-    "חופש":         "חופש",
+    "עובד":         "ע",
+    "חופש":         "ח",
     "202":          "202",
-    "אחרי תורנות":  "אחרי",
-    "אחר":          "אחר",
-    "תורנות":       "תורנות",
+    "אחרי תורנות":  "א",
+    "אחר":          "+",
+    "תורנות":       "ת",
 }
+
+def _make_initials(name: str) -> str:
+    """Return first letter of each word: 'סלאמה קאסם' → 'ס ק'"""
+    parts = str(name).strip().split()
+    return " ".join(p[0] for p in parts if p)
 _GRID_STATUS_PFX = {
     "עובד":         "wsdcell_w",
     "חופש":         "wsdcell_h",
@@ -1154,152 +1159,303 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
         return
 
 
-    # Weekly RTL grid — 7 equal columns (Sat…Sun), employee name above each row.
-    # 7 columns matches render_modern_calendar and works on mobile without CSS hacks.
-    # Sat → col 0 (leftmost), Sun → col 6 (rightmost).
+    # ── Shared setup ────────────────────────────────────────────────────
     _WD_HDRS  = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
     _WD_IS_WK = [True, True, False, False, False, False, False]  # Sat, Fri = weekend
-
     cal_weeks = [list(reversed(w))
                  for w in calendar.Calendar(firstweekday=6).monthdayscalendar(year, view_month)]
+    is_mobile = st.session_state.get('mobile_detected_persistent', False)
 
-    # ── Day-name header row (7 cols, drawn once) ────────────────────────
-    hdr_cols = st.columns(7)
-    for _ci, (_h, _wk) in enumerate(zip(_WD_HDRS, _WD_IS_WK)):
-        _hbg = "#fef2f2" if _wk else "#f1f5f9"
-        _hfg = "#b91c1c" if _wk else "#334155"
-        hdr_cols[_ci].markdown(
-            f"<div style='background:{_hbg};font-weight:700;text-align:center;"
-            f"padding:6px 2px;border-radius:6px;font-size:0.85rem;color:{_hfg}'>{_h}</div>",
+    # ── CSS: colour every status button by key prefix (both modes) ───────
+    _kn = key_ns
+    st.markdown(f"""<style>
+div[class*="st-key-wsdcell_w_{_kn}"] button {{
+    background:linear-gradient(135deg,#6ee7b7,#059669)!important;
+    color:white!important;border:none!important;
+    min-height:36px!important;font-weight:700!important;
+    font-size:1rem!important;border-radius:8px!important;padding:2px!important;}}
+div[class*="st-key-wsdcell_h_{_kn}"] button {{
+    background:linear-gradient(135deg,#bfdbfe,#3b82f6)!important;
+    color:white!important;border:none!important;
+    min-height:36px!important;font-weight:700!important;
+    font-size:1rem!important;border-radius:8px!important;padding:2px!important;}}
+div[class*="st-key-wsdcell_2_{_kn}"] button {{
+    background:linear-gradient(135deg,#fef08a,#ca8a04)!important;
+    color:#713f12!important;border:none!important;
+    min-height:36px!important;font-weight:700!important;
+    font-size:1rem!important;border-radius:8px!important;padding:2px!important;}}
+div[class*="st-key-wsdcell_p_{_kn}"] button {{
+    background:linear-gradient(135deg,#fed7aa,#ea580c)!important;
+    color:white!important;border:none!important;
+    min-height:36px!important;font-weight:700!important;
+    font-size:1rem!important;border-radius:8px!important;padding:2px!important;}}
+div[class*="st-key-wsdcell_a_{_kn}"] button {{
+    background:linear-gradient(135deg,#e2e8f0,#64748b)!important;
+    color:white!important;border:none!important;
+    min-height:36px!important;font-weight:700!important;
+    font-size:1rem!important;border-radius:8px!important;padding:2px!important;}}
+div[class*="st-key-wsdcell_t_{_kn}"] button {{
+    background:linear-gradient(135deg,#ddd6fe,#7c3aed)!important;
+    color:white!important;border:none!important;
+    min-height:36px!important;font-weight:700!important;
+    font-size:1rem!important;border-radius:8px!important;padding:2px!important;}}
+</style>""", unsafe_allow_html=True)
+
+    if is_mobile:
+        # ════════════════════════════════════════════════════════════════
+        # MOBILE — 8 equal cols: initials on right, single button per cell
+        # ════════════════════════════════════════════════════════════════
+        _COL_W = [1] * 8   # cols 0-6 = days, col 7 = initials
+
+        # Day-name header
+        hdr_cols = st.columns(_COL_W)
+        for _ci, (_h, _wk) in enumerate(zip(_WD_HDRS, _WD_IS_WK)):
+            _hbg = "#fef2f2" if _wk else "#f1f5f9"
+            _hfg = "#b91c1c" if _wk else "#334155"
+            hdr_cols[_ci].markdown(
+                f"<div style='background:{_hbg};font-weight:700;text-align:center;"
+                f"padding:5px 1px;border-radius:6px;font-size:0.8rem;color:{_hfg}'>{_h}</div>",
+                unsafe_allow_html=True)
+        hdr_cols[7].markdown(
+            "<div style='background:#f1f5f9;font-weight:700;text-align:center;"
+            "padding:5px 1px;border-radius:6px;font-size:0.75rem;color:#334155'>👤</div>",
             unsafe_allow_html=True)
 
-    for week_rtl in cal_weeks:
-        if all(d == 0 for d in week_rtl):
-            continue
+        for week_rtl in cal_weeks:
+            if all(d == 0 for d in week_rtl):
+                continue
+            st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
 
-        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+            # Date-number row
+            num_cols = st.columns(_COL_W)
+            for _ci, d in enumerate(week_rtl):
+                if d == 0:
+                    num_cols[_ci].write("")
+                else:
+                    _nbg = "#fef2f2" if _WD_IS_WK[_ci] else "#f8fafc"
+                    _nfg = "#b91c1c" if _WD_IS_WK[_ci] else "#334155"
+                    num_cols[_ci].markdown(
+                        f"<div style='background:{_nbg};font-weight:700;text-align:center;"
+                        f"padding:3px 1px;border-radius:6px;font-size:0.72rem;color:{_nfg}'>{d}</div>",
+                        unsafe_allow_html=True)
+            num_cols[7].write("")
 
-        # Day-number sub-header for this week (7 cols)
-        num_cols = st.columns(7)
-        for _ci, d in enumerate(week_rtl):
-            if d == 0:
-                num_cols[_ci].write("")
-            else:
-                _nbg = "#fef2f2" if _WD_IS_WK[_ci] else "#f8fafc"
-                _nfg = "#b91c1c" if _WD_IS_WK[_ci] else "#334155"
-                num_cols[_ci].markdown(
-                    f"<div style='background:{_nbg};font-weight:700;text-align:center;"
-                    f"padding:4px 2px;border-radius:6px;font-size:0.75rem;color:{_nfg}'>{d}</div>",
+            # Employee rows
+            for emp in employees:
+                row_cols = st.columns(_COL_W)
+                row_cols[7].markdown(
+                    f"<div title='{emp}' style='font-weight:700;text-align:center;"
+                    f"font-size:0.75rem;color:#0f172a;padding:4px 1px;"
+                    f"background:#f1f5f9;border-radius:6px;border:1px solid #e2e8f0;"
+                    f"line-height:1.3'>{_make_initials(emp)}</div>",
+                    unsafe_allow_html=True)
+                for _ci, d in enumerate(week_rtl):
+                    with row_cols[_ci]:
+                        if d == 0:
+                            st.write("")
+                            continue
+                        date_str   = f"{year}-{view_month:02d}-{d:02d}"
+                        cur_status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
+                        cur_note   = _wsd_get_note(date_str, emp)
+                        lbl        = _GRID_STATUS_LABEL_SHORT.get(cur_status, "?")
+                        pfx        = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
+                        cell_key   = f"{pfx}_{key_ns}_{emp}_{d}"
+                        _is_wknd   = _WD_IS_WK[_ci]
+                        if _is_wknd and cur_status == "חופש" and not _wsd_is_manual(date_str, emp):
+                            st.markdown(
+                                "<div style='height:36px;background:#f8fafc;"
+                                "border-radius:8px;border:1px solid #e2e8f0'></div>",
+                                unsafe_allow_html=True)
+                            continue
+                        if st.button(lbl, key=cell_key, use_container_width=True,
+                                     help=cur_note if cur_note else None):
+                            _wsd_upsert(date_str, emp, dept_name,
+                                        _GRID_STATUS_CYCLE.get(cur_status, "חופש"),
+                                        is_manual=True, note=cur_note)
+                            st.rerun()
+
+            # Night-duty row
+            nd_cols = st.columns(_COL_W)
+            nd_cols[7].markdown(
+                "<div style='background:#ede9fe;font-weight:700;text-align:center;"
+                "padding:4px 1px;border-radius:6px;font-size:0.7rem;color:#5b21b6'>🌙</div>",
+                unsafe_allow_html=True)
+            for _ci, d in enumerate(week_rtl):
+                if d == 0:
+                    nd_cols[_ci].write("")
+                    continue
+                nd = _get_night_duty(f"{year}-{view_month:02d}-{d:02d}", dept_name)
+                _nbg = "#fef2f2" if _WD_IS_WK[_ci] else "#f5f3ff"
+                nd_cols[_ci].markdown(
+                    f"<div style='background:{_nbg};text-align:center;padding:4px 1px;"
+                    f"border-radius:6px;font-size:0.68rem;color:#6d28d9;"
+                    f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                    f"{_make_initials(nd) if nd else '—'}</div>",
                     unsafe_allow_html=True)
 
-        # ── One section per employee: name banner then 7-col button row ──
-        for emp in employees:
-            # Employee name as full-width RTL banner (no extra column needed)
-            st.markdown(
-                f"<div style='font-weight:600;font-size:0.82rem;color:#0f172a;"
-                f"padding:3px 10px;background:#f8fafc;border-radius:6px;"
-                f"border:1px solid #e2e8f0;text-align:right;margin:2px 0 1px 0'>"
-                f"{emp}</div>",
+            # Friday-morning row (col 1 = Friday)
+            fri_cols = st.columns(_COL_W)
+            fri_cols[7].markdown(
+                "<div style='background:#fef9c3;font-weight:700;text-align:center;"
+                "padding:4px 1px;border-radius:6px;font-size:0.7rem;color:#854d0e'>☀️</div>",
                 unsafe_allow_html=True)
-            row_cols = st.columns(7)
             for _ci, d in enumerate(week_rtl):
-                with row_cols[_ci]:
-                    if d == 0:
-                        st.write("")
-                        continue
-                    date_str    = f"{year}-{view_month:02d}-{d:02d}"
-                    cur_status  = _derive_auto_status(date_str, emp, daily_dept=dept_name)
-                    cur_note    = _wsd_get_note(date_str, emp)
-                    label_short = _GRID_STATUS_LABEL_SHORT.get(cur_status, cur_status[:4])
-                    pfx         = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
-                    cell_key    = f"{pfx}_{key_ns}_{emp}_{d}"
-                    _is_wknd_cell  = _WD_IS_WK[_ci]
-                    _is_empty_cell = (_is_wknd_cell and cur_status == "חופש"
-                                      and not _wsd_is_manual(date_str, emp))
-                    if _is_empty_cell:
-                        st.markdown(
-                            "<div style='height:32px;background:#f8fafc;"
-                            "border-radius:6px;border:1px solid #e2e8f0'></div>",
-                            unsafe_allow_html=True)
-                        continue
-                    if st.button(label_short, key=cell_key,
-                                 use_container_width=True,
-                                 help=cur_note if cur_note else None):
-                        nxt = _GRID_STATUS_CYCLE.get(cur_status, "חופש")
-                        _wsd_upsert(date_str, emp, dept_name, nxt,
-                                    is_manual=True, note=cur_note)
-                        st.rerun()
-                    note_icon = "💬" if cur_note else "+"
-                    try:
-                        with st.popover(note_icon,
-                                        key=f"notepop_{key_ns}_{emp}_{d}",
-                                        use_container_width=True):
-                            st.markdown(f"<b>{emp}</b> — {d}/{view_month}",
-                                        unsafe_allow_html=True)
-                            ps = st.selectbox(
-                                "סטטוס:", _MANUAL_STATUSES,
-                                index=_MANUAL_STATUSES.index(cur_status)
-                                       if cur_status in _MANUAL_STATUSES else 0,
-                                key=f"popst_{key_ns}_{emp}_{d}")
-                            new_note = st.text_input(
-                                "הערה:", value=cur_note,
-                                placeholder="הוסף הערה",
-                                key=f"popnote_{key_ns}_{emp}_{d}")
-                            if st.button("💾 שמור",
-                                         key=f"popsave_{key_ns}_{emp}_{d}",
-                                         use_container_width=True):
-                                _wsd_upsert(date_str, emp, dept_name, ps,
-                                            is_manual=True, note=new_note.strip())
-                                st.rerun()
-                    except Exception:
-                        pass
+                if d == 0:
+                    fri_cols[_ci].write("")
+                    continue
+                date_str_fri = f"{year}-{view_month:02d}-{d:02d}"
+                if _ci == 1:
+                    fw = _get_fri_shift_workers(date_str_fri, dept_name)
+                    fw_txt = " / ".join(_make_initials(n) for n in fw) if fw else "—"
+                    cell_bg_fri = "#fef3c7"
+                else:
+                    fw_txt = ""
+                    cell_bg_fri = "#f8fafc"
+                fri_cols[_ci].markdown(
+                    f"<div style='background:{cell_bg_fri};text-align:center;padding:4px 1px;"
+                    f"border-radius:6px;font-size:0.68rem;color:#92400e;"
+                    f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                    f"{fw_txt}</div>",
+                    unsafe_allow_html=True)
 
-        # ── Night-duty row (7 cols) ──────────────────────────────────────
-        st.markdown(
-            "<div style='background:#ede9fe;font-weight:700;text-align:right;"
-            "padding:3px 10px;border-radius:6px;font-size:0.75rem;"
-            "color:#5b21b6;margin:2px 0 1px 0'>🌙 תורנ/ית</div>",
-            unsafe_allow_html=True)
-        nd_cols = st.columns(7)
-        for _ci, d in enumerate(week_rtl):
-            if d == 0:
-                nd_cols[_ci].write("")
-                continue
-            date_str_nd = f"{year}-{view_month:02d}-{d:02d}"
-            nd   = _get_night_duty(date_str_nd, dept_name)
-            _nbg = "#fef2f2" if _WD_IS_WK[_ci] else "#f5f3ff"
-            nd_cols[_ci].markdown(
-                f"<div style='background:{_nbg};text-align:center;padding:4px 2px;"
-                f"border-radius:6px;font-size:0.7rem;color:#6d28d9;"
-                f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
-                f"{nd or '—'}</div>",
-                unsafe_allow_html=True)
+    else:
+        # ════════════════════════════════════════════════════════════════
+        # DESKTOP — 8 cols: full name on right, button + popover per cell
+        # ════════════════════════════════════════════════════════════════
+        _COL_W_D = [2] * 7 + [3]   # day cols narrow, name col wider
 
-        # ── Friday-morning row (7 cols; col 1 = Friday) ─────────────────
-        st.markdown(
-            "<div style='background:#fef9c3;font-weight:700;text-align:right;"
-            "padding:3px 10px;border-radius:6px;font-size:0.75rem;"
-            "color:#854d0e;margin:2px 0 1px 0'>☀️ שישי בוקר</div>",
-            unsafe_allow_html=True)
-        fri_cols = st.columns(7)
-        for _ci, d in enumerate(week_rtl):
-            if d == 0:
-                fri_cols[_ci].write("")
-                continue
-            date_str_fri = f"{year}-{view_month:02d}-{d:02d}"
-            if _ci == 1:   # col 1 = Friday
-                fw = _get_fri_shift_workers(date_str_fri, dept_name)
-                cell_txt    = " / ".join(fw) if fw else "—"
-                cell_bg_fri = "#fef3c7"
-            else:
-                cell_txt    = ""
-                cell_bg_fri = "#f8fafc"
-            fri_cols[_ci].markdown(
-                f"<div style='background:{cell_bg_fri};text-align:center;padding:4px 2px;"
-                f"border-radius:6px;font-size:0.68rem;color:#92400e;"
-                f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
-                f"{cell_txt}</div>",
+        # Day-name header
+        hdr_cols = st.columns(_COL_W_D)
+        for _ci, (_h, _wk) in enumerate(zip(_WD_HDRS, _WD_IS_WK)):
+            _hbg = "#fef2f2" if _wk else "#f1f5f9"
+            _hfg = "#b91c1c" if _wk else "#334155"
+            hdr_cols[_ci].markdown(
+                f"<div style='background:{_hbg};font-weight:700;text-align:center;"
+                f"padding:6px 2px;border-radius:6px;font-size:0.8rem;color:{_hfg}'>{_h}</div>",
                 unsafe_allow_html=True)
+        hdr_cols[7].markdown(
+            "<div style='background:#f1f5f9;font-weight:700;text-align:center;"
+            "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#334155'>עובד/ת</div>",
+            unsafe_allow_html=True)
+
+        for week_rtl in cal_weeks:
+            if all(d == 0 for d in week_rtl):
+                continue
+            st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+            # Date-number row
+            num_cols = st.columns(_COL_W_D)
+            for _ci, d in enumerate(week_rtl):
+                if d == 0:
+                    num_cols[_ci].write("")
+                else:
+                    _nbg = "#fef2f2" if _WD_IS_WK[_ci] else "#f8fafc"
+                    _nfg = "#b91c1c" if _WD_IS_WK[_ci] else "#334155"
+                    num_cols[_ci].markdown(
+                        f"<div style='background:{_nbg};font-weight:700;text-align:center;"
+                        f"padding:4px 2px;border-radius:6px;font-size:0.75rem;color:{_nfg}'>{d}</div>",
+                        unsafe_allow_html=True)
+            num_cols[7].write("")
+
+            # Employee rows
+            for emp in employees:
+                row_cols = st.columns(_COL_W_D)
+                row_cols[7].markdown(
+                    f"<div style='font-weight:600;font-size:0.82rem;color:#0f172a;"
+                    f"padding:4px 8px;background:white;border-radius:6px;"
+                    f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>",
+                    unsafe_allow_html=True)
+                for _ci, d in enumerate(week_rtl):
+                    with row_cols[_ci]:
+                        if d == 0:
+                            st.write("")
+                            continue
+                        date_str   = f"{year}-{view_month:02d}-{d:02d}"
+                        cur_status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
+                        cur_note   = _wsd_get_note(date_str, emp)
+                        lbl        = _GRID_STATUS_LABEL_SHORT.get(cur_status, "?")
+                        pfx        = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
+                        cell_key   = f"{pfx}_{key_ns}_{emp}_{d}"
+                        _is_wknd   = _WD_IS_WK[_ci]
+                        if _is_wknd and cur_status == "חופש" and not _wsd_is_manual(date_str, emp):
+                            st.markdown(
+                                "<div style='height:32px;background:#f8fafc;"
+                                "border-radius:6px;border:1px solid #e2e8f0'></div>",
+                                unsafe_allow_html=True)
+                            continue
+                        if st.button(lbl, key=cell_key, use_container_width=True,
+                                     help=cur_note if cur_note else None):
+                            _wsd_upsert(date_str, emp, dept_name,
+                                        _GRID_STATUS_CYCLE.get(cur_status, "חופש"),
+                                        is_manual=True, note=cur_note)
+                            st.rerun()
+                        try:
+                            with st.popover("💬" if cur_note else "+",
+                                            key=f"notepop_{key_ns}_{emp}_{d}",
+                                            use_container_width=True):
+                                st.markdown(f"<b>{emp}</b> — {d}/{view_month}",
+                                            unsafe_allow_html=True)
+                                ps = st.selectbox(
+                                    "סטטוס:", _MANUAL_STATUSES,
+                                    index=_MANUAL_STATUSES.index(cur_status)
+                                           if cur_status in _MANUAL_STATUSES else 0,
+                                    key=f"popst_{key_ns}_{emp}_{d}")
+                                new_note = st.text_input(
+                                    "הערה:", value=cur_note,
+                                    placeholder="הוסף הערה",
+                                    key=f"popnote_{key_ns}_{emp}_{d}")
+                                if st.button("💾 שמור",
+                                             key=f"popsave_{key_ns}_{emp}_{d}",
+                                             use_container_width=True):
+                                    _wsd_upsert(date_str, emp, dept_name, ps,
+                                                is_manual=True, note=new_note.strip())
+                                    st.rerun()
+                        except Exception:
+                            pass
+
+            # Night-duty row
+            nd_cols = st.columns(_COL_W_D)
+            nd_cols[7].markdown(
+                "<div style='background:#ede9fe;font-weight:700;text-align:center;"
+                "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#5b21b6'>🌙 תורנ/ית</div>",
+                unsafe_allow_html=True)
+            for _ci, d in enumerate(week_rtl):
+                if d == 0:
+                    nd_cols[_ci].write("")
+                    continue
+                nd = _get_night_duty(f"{year}-{view_month:02d}-{d:02d}", dept_name)
+                _nbg = "#fef2f2" if _WD_IS_WK[_ci] else "#f5f3ff"
+                nd_cols[_ci].markdown(
+                    f"<div style='background:{_nbg};text-align:center;padding:4px 2px;"
+                    f"border-radius:6px;font-size:0.7rem;color:#6d28d9;"
+                    f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                    f"{nd or '—'}</div>",
+                    unsafe_allow_html=True)
+
+            # Friday-morning row (col 1 = Friday)
+            fri_cols = st.columns(_COL_W_D)
+            fri_cols[7].markdown(
+                "<div style='background:#fef9c3;font-weight:700;text-align:center;"
+                "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#854d0e'>☀️ שישי בוקר</div>",
+                unsafe_allow_html=True)
+            for _ci, d in enumerate(week_rtl):
+                if d == 0:
+                    fri_cols[_ci].write("")
+                    continue
+                date_str_fri = f"{year}-{view_month:02d}-{d:02d}"
+                if _ci == 1:
+                    fw = _get_fri_shift_workers(date_str_fri, dept_name)
+                    cell_txt    = " / ".join(fw) if fw else "—"
+                    cell_bg_fri = "#fef3c7"
+                else:
+                    cell_txt    = ""
+                    cell_bg_fri = "#f8fafc"
+                fri_cols[_ci].markdown(
+                    f"<div style='background:{cell_bg_fri};text-align:center;padding:4px 2px;"
+                    f"border-radius:6px;font-size:0.68rem;color:#92400e;"
+                    f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                    f"{cell_txt}</div>",
+                    unsafe_allow_html=True)
 
 
 def log_event(event_type, detail_1='', detail_2=''):
