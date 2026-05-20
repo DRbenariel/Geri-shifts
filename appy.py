@@ -1164,7 +1164,12 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None,
     _WD_IS_WK = [True, True, False, False, False, False, False]  # Sat, Fri = weekend
     cal_weeks = [list(reversed(w))
                  for w in calendar.Calendar(firstweekday=6).monthdayscalendar(year, view_month)]
-    is_mobile = st.session_state.get('mobile_detected_persistent', False)
+
+    # Mobile toggle — defaults ON when mobile device detected
+    is_mobile = st.toggle(
+        "📱 תצוגת מובייל",
+        value=st.session_state.get('mobile_detected_persistent', False),
+        key=f"mob_toggle_{key_ns}")
 
     # ── CSS: colour every status button by key prefix (both modes) ───────
     _kn = key_ns
@@ -1202,10 +1207,8 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
 </style>""", unsafe_allow_html=True)
 
     if is_mobile:
-        # ════════════════════════════════════════════════════════════════
-        # MOBILE — 8 equal cols: initials on right, single button per cell
-        # ════════════════════════════════════════════════════════════════
-        _COL_W = [1] * 8   # cols 0-6 = days, col 7 = initials
+        # ── MOBILE: 8 equal cols, initials right, one button per cell ────
+        _COL_W = [1] * 8
 
         # Day-name header
         hdr_cols = st.columns(_COL_W)
