@@ -358,20 +358,29 @@ def setup_style():
     }
 
     /* ── RTL date-picker popup ─────────────────────────────────── */
-    /* Flip every week row so Saturday lands on the left, Sunday on the right */
+    /* Flip week rows so Saturday (ש') is on the left, Sunday (א') on the right.
+       We target every plausible selector baseweb might use for a week row. */
+
+    /* ARIA-role approach (baseweb v9+) */
     [data-baseweb="calendar"] [role="row"] {
         display: flex !important;
         flex-direction: row-reverse !important;
     }
-    /* Also flip the column-header row (day-name row) */
-    [data-baseweb="calendar"] [role="rowgroup"] > [role="row"]:first-child,
-    [data-baseweb="calendar"] [role="row"]:has([role="columnheader"]) {
+    /* Flex-child approach — any direct div children of the month grid */
+    [data-baseweb="calendar"] [role="grid"] > div,
+    [data-baseweb="calendar"] [role="rowgroup"] > div {
         display: flex !important;
         flex-direction: row-reverse !important;
     }
-    /* RTL text direction on the overall calendar and header */
+    /* RTL on the container so nav arrows and month title also mirror */
     [data-baseweb="calendar"] {
         direction: rtl !important;
+    }
+    /* Keep individual day-number text LTR (numbers should not flip) */
+    [data-baseweb="calendar"] [role="gridcell"],
+    [data-baseweb="calendar"] [role="columnheader"] {
+        direction: ltr !important;
+        text-align: center !important;
     }
 
     </style>

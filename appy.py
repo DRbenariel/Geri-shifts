@@ -5696,30 +5696,26 @@ else:
                 if next_d.month == daily_active_month_int and next_d.year == 2026:
                     post_shift_days.add(next_d.day)
 
-        # Build calendar grid (Hebrew week: Sun..Sat)
-        HEB_WEEK = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
+        # Build calendar grid — RTL: col 0=Saturday (ש), col 6=Sunday (א)
+        HEB_WEEK = ["ש", "ו", "ה", "ד", "ג", "ב", "א"]
+        _cal_da = [list(reversed(w)) for w in
+                   calendar.Calendar(firstweekday=6).monthdayscalendar(2026, daily_active_month_int)]
         with st.container(border=True):
             # Header row
             cols_h = st.columns(7)
             for i, h in enumerate(HEB_WEEK):
                 cols_h[i].markdown(f"<div class='dayabs-hdr'>{h}</div>", unsafe_allow_html=True)
 
-            # Build 6 weeks max
-            grid = [None] * da_first_wd + list(range(1, da_num_days + 1))
-            while len(grid) % 7:
-                grid.append(None)
-
             # Compute current selection range
             ss = st.session_state[sel_start_key]
             se = st.session_state[sel_end_key]
             in_range = set(range(min(ss, se), max(ss, se) + 1)) if ss and se else set()
 
-            for wi in range(0, len(grid), 7):
-                week = grid[wi:wi + 7]
+            for week in _cal_da:
                 cols = st.columns(7)
                 for ci, day in enumerate(week):
                     with cols[ci]:
-                        if day is None:
+                        if day == 0:
                             st.markdown("<div class='dayabs-empty'></div>", unsafe_allow_html=True)
                             continue
                         # Pre-colored fixed states (non-clickable)
