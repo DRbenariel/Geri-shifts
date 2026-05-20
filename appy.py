@@ -891,16 +891,17 @@ def _wsd_upsert(date_str, employee, daily_dept, status, is_manual=True, note="")
     if wsd.empty or 'date' not in wsd.columns:
         wsd = pd.DataFrame(columns=['date','employee','daily_dept','status','note','is_manual'])
     emp_n = str(employee).strip()
+    is_manual_str = str(is_manual)   # ArrowString columns reject bool; store "True"/"False"
     m = (wsd['date'].astype(str) == date_str) & (wsd['employee'].astype(str).str.strip() == emp_n)
     if m.any():
         wsd.loc[m, 'status']     = status
-        wsd.loc[m, 'is_manual']  = is_manual
+        wsd.loc[m, 'is_manual']  = is_manual_str
         wsd.loc[m, 'daily_dept'] = daily_dept
         wsd.loc[m, 'note']       = note  # always update — empty string clears the note
     else:
         wsd = pd.concat([wsd, pd.DataFrame([{
             'date': date_str, 'employee': emp_n, 'daily_dept': daily_dept,
-            'status': status, 'note': note, 'is_manual': is_manual,
+            'status': status, 'note': note, 'is_manual': is_manual_str,
         }])], ignore_index=True)
     st.session_state.work_schedule_daily = wsd
     _rebuild_wsd_index()   # keep O(1) index in sync
