@@ -1207,30 +1207,27 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
 </style>""", unsafe_allow_html=True)
 
     if is_mobile:
-        # ── MOBILE: 8 equal cols, initials right, one button per cell ────
-        _COL_W = [1] * 8
+        # ── MOBILE: exactly 7 cols (proven to work — same as constraint calendar)
+        # Employee name shown as full-width RTL banner above each button row.
+        # One st.button() per cell, no popover inside cell.
 
-        # Day-name header
-        hdr_cols = st.columns(_COL_W)
+        # Day-name header (7 cols)
+        hdr_cols = st.columns(7)
         for _ci, (_h, _wk) in enumerate(zip(_WD_HDRS, _WD_IS_WK)):
             _hbg = "#fef2f2" if _wk else "#f1f5f9"
             _hfg = "#b91c1c" if _wk else "#334155"
             hdr_cols[_ci].markdown(
                 f"<div style='background:{_hbg};font-weight:700;text-align:center;"
-                f"padding:5px 1px;border-radius:6px;font-size:0.8rem;color:{_hfg}'>{_h}</div>",
+                f"padding:5px 1px;border-radius:6px;font-size:0.85rem;color:{_hfg}'>{_h}</div>",
                 unsafe_allow_html=True)
-        hdr_cols[7].markdown(
-            "<div style='background:#f1f5f9;font-weight:700;text-align:center;"
-            "padding:5px 1px;border-radius:6px;font-size:0.75rem;color:#334155'>👤</div>",
-            unsafe_allow_html=True)
 
         for week_rtl in cal_weeks:
             if all(d == 0 for d in week_rtl):
                 continue
             st.markdown("<div style='height:3px'></div>", unsafe_allow_html=True)
 
-            # Date-number row
-            num_cols = st.columns(_COL_W)
+            # Date-number row (7 cols)
+            num_cols = st.columns(7)
             for _ci, d in enumerate(week_rtl):
                 if d == 0:
                     num_cols[_ci].write("")
@@ -1239,19 +1236,19 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
                     _nfg = "#b91c1c" if _WD_IS_WK[_ci] else "#334155"
                     num_cols[_ci].markdown(
                         f"<div style='background:{_nbg};font-weight:700;text-align:center;"
-                        f"padding:3px 1px;border-radius:6px;font-size:0.72rem;color:{_nfg}'>{d}</div>",
+                        f"padding:3px 1px;border-radius:6px;font-size:0.75rem;color:{_nfg}'>{d}</div>",
                         unsafe_allow_html=True)
-            num_cols[7].write("")
 
-            # Employee rows
+            # Employee rows: name banner (full width) + 7-col button row
             for emp in employees:
-                row_cols = st.columns(_COL_W)
-                row_cols[7].markdown(
-                    f"<div title='{emp}' style='font-weight:700;text-align:center;"
-                    f"font-size:0.75rem;color:#0f172a;padding:4px 1px;"
-                    f"background:#f1f5f9;border-radius:6px;border:1px solid #e2e8f0;"
-                    f"line-height:1.3'>{_make_initials(emp)}</div>",
+                initials = _make_initials(emp)
+                st.markdown(
+                    f"<div style='font-weight:700;font-size:0.8rem;color:#0f172a;"
+                    f"padding:2px 8px;background:#f1f5f9;border-radius:5px;"
+                    f"border:1px solid #e2e8f0;text-align:right;margin:2px 0 1px'>"
+                    f"{initials} · {emp}</div>",
                     unsafe_allow_html=True)
+                row_cols = st.columns(7)
                 for _ci, d in enumerate(week_rtl):
                     with row_cols[_ci]:
                         if d == 0:
@@ -1263,8 +1260,7 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
                         lbl        = _GRID_STATUS_LABEL_SHORT.get(cur_status, "?")
                         pfx        = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
                         cell_key   = f"{pfx}_{key_ns}_{emp}_{d}"
-                        _is_wknd   = _WD_IS_WK[_ci]
-                        if _is_wknd and cur_status == "חופש" and not _wsd_is_manual(date_str, emp):
+                        if _WD_IS_WK[_ci] and cur_status == "חופש" and not _wsd_is_manual(date_str, emp):
                             st.markdown(
                                 "<div style='height:36px;background:#f8fafc;"
                                 "border-radius:8px;border:1px solid #e2e8f0'></div>",
@@ -1277,12 +1273,13 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
                                         is_manual=True, note=cur_note)
                             st.rerun()
 
-            # Night-duty row
-            nd_cols = st.columns(_COL_W)
-            nd_cols[7].markdown(
-                "<div style='background:#ede9fe;font-weight:700;text-align:center;"
-                "padding:4px 1px;border-radius:6px;font-size:0.7rem;color:#5b21b6'>🌙</div>",
+            # Night-duty row (full-width label + 7 cols)
+            st.markdown(
+                "<div style='background:#ede9fe;font-weight:700;text-align:right;"
+                "padding:2px 8px;border-radius:5px;font-size:0.75rem;"
+                "color:#5b21b6;margin:2px 0 1px'>🌙 תורנ/ית</div>",
                 unsafe_allow_html=True)
+            nd_cols = st.columns(7)
             for _ci, d in enumerate(week_rtl):
                 if d == 0:
                     nd_cols[_ci].write("")
@@ -1296,12 +1293,13 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
                     f"{_make_initials(nd) if nd else '—'}</div>",
                     unsafe_allow_html=True)
 
-            # Friday-morning row (col 1 = Friday)
-            fri_cols = st.columns(_COL_W)
-            fri_cols[7].markdown(
-                "<div style='background:#fef9c3;font-weight:700;text-align:center;"
-                "padding:4px 1px;border-radius:6px;font-size:0.7rem;color:#854d0e'>☀️</div>",
+            # Friday-morning row (full-width label + 7 cols)
+            st.markdown(
+                "<div style='background:#fef9c3;font-weight:700;text-align:right;"
+                "padding:2px 8px;border-radius:5px;font-size:0.75rem;"
+                "color:#854d0e;margin:2px 0 1px'>☀️ שישי בוקר</div>",
                 unsafe_allow_html=True)
+            fri_cols = st.columns(7)
             for _ci, d in enumerate(week_rtl):
                 if d == 0:
                     fri_cols[_ci].write("")
@@ -1309,10 +1307,10 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
                 date_str_fri = f"{year}-{view_month:02d}-{d:02d}"
                 if _ci == 1:
                     fw = _get_fri_shift_workers(date_str_fri, dept_name)
-                    fw_txt = " / ".join(_make_initials(n) for n in fw) if fw else "—"
+                    fw_txt      = " / ".join(_make_initials(n) for n in fw) if fw else "—"
                     cell_bg_fri = "#fef3c7"
                 else:
-                    fw_txt = ""
+                    fw_txt      = ""
                     cell_bg_fri = "#f8fafc"
                 fri_cols[_ci].markdown(
                     f"<div style='background:{cell_bg_fri};text-align:center;padding:4px 1px;"
