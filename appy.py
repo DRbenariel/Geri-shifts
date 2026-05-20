@@ -6145,25 +6145,23 @@ else:
                     my_dept = str(my_row.iloc[0].get('daily_dept', '—'))
             st.caption(f"מחלקה יומית: **{my_dept}**")
 
-            # Render the personal month calendar — same button+CSS pattern as render_modern_calendar
-            # RTL: col 0=Saturday (ש) left, col 6=Sunday (א) right → reads right→left א…ש
-            num_days_es = calendar.monthrange(2026, view_m)[1]
-            _cal_pers = [list(reversed(w)) for w in
-                         calendar.Calendar(firstweekday=6).monthdayscalendar(2026, view_m)]
+            # Render the personal month calendar — pure HTML table with direction:rtl
+            # RTL table: first column in DOM → renders on RIGHT (Sunday=א'=right ✓)
+            #            last column in DOM  → renders on LEFT  (Saturday=ש'=left ✓)
+            # No list-reversal needed — RTL layout is handled entirely by the browser.
+            _cal_pers = calendar.Calendar(firstweekday=6).monthdayscalendar(2026, view_m)
 
-            # Build per-day status map and CSS in one pass
-            _PERS_STATUS_BG = {
-                "עובד":        ("linear-gradient(135deg,#bbf7d0,#4ade80)", "#166534"),
-                "עובד/ת":      ("linear-gradient(135deg,#bbf7d0,#4ade80)", "#166534"),
-                "חופש":        ("linear-gradient(135deg,#bfdbfe,#60a5fa)", "#1e40af"),
-                "202":         ("linear-gradient(135deg,#fef08a,#facc15)", "#854d0e"),
-                "אחרי תורנות": ("linear-gradient(135deg,#fed7aa,#fb923c)", "#9a3412"),
-                "תורנות":      ("linear-gradient(135deg,#ddd6fe,#a78bfa)", "#5b21b6"),
-                "אחר":         ("linear-gradient(135deg,#e2e8f0,#cbd5e1)", "#475569"),
+            _PERS_STATUS_COLORS = {
+                "עובד":        ("#dcfce7", "#166534"),
+                "עובד/ת":      ("#dcfce7", "#166534"),
+                "חופש":        ("#dbeafe", "#1e40af"),
+                "202":         ("#fef9c3", "#854d0e"),
+                "אחרי תורנות": ("#ffedd5", "#9a3412"),
+                "תורנות":      ("#ede9fe", "#5b21b6"),
+                "אחר":         ("#f1f5f9", "#475569"),
             }
-            _pfx_pers = f"perscal_{view_m}"
 
-            # Compute all day statuses up front (needed for CSS injection)
+            # Compute all day statuses
             _day_status: dict[int, str] = {}
             for _w in _cal_pers:
                 for _d in _w:
@@ -6177,49 +6175,42 @@ else:
                     else:
                         _day_status[_d] = _raw
 
-            # Inject CSS — same key pattern as render_modern_calendar
-            _pers_css = [f"""
-            div[class*="st-key-{_pfx_pers}_"] button {{
-                min-height: 42px !important; font-size: 0.82rem !important;
-                font-weight: 600 !important; border-radius: 10px !important;
-                padding: 2px 1px !important; border: none !important;
-                background: linear-gradient(135deg,#e2e8f0,#cbd5e1) !important;
-                color: #475569 !important;
-            }}"""]
-            for _d, _st in _day_status.items():
-                _bg, _fg = _PERS_STATUS_BG.get(_st, ("linear-gradient(135deg,#f8fafc,#e2e8f0)", "#334155"))
-                _pers_css.append(f"""
-            div[class*="st-key-{_pfx_pers}_{_d}x"] button {{
-                background: {_bg} !important; color: {_fg} !important;
-            }}""")
-            st.markdown(f"<style>{''.join(_pers_css)}</style>", unsafe_allow_html=True)
+            # Build HTML table — direction:rtl makes column 0 appear on the RIGHT
+            # Headers DOM order: א',ב',ג',ד',ה',ו',ש' (Sun→Sat)
+            # Visual order (RTL):            ש',ו',ה',ד',ג',ב',א' (Sat←Sun) ✓
+            _PERS_HDR = [("א'", False), ("ב'", False), ("ג'", False),
+                         ("ד'", False), ("ה'", False), ("ו'", True), ("ש'", True)]
+            _tbl = [
+                "<table style='direction:rtl;width:100%;border-collapse:separate;"
+                "border-spacing:4px 4px;font-family:Rubik,sans-serif;margin-top:6px'>",
+                "<tr>"
+            ]
+            for _h, _is_wk in _PERS_HDR:
+                _hclr = "#7c3aed" if _is_wk else "#64748b"
+                _tbl.append(
+                    f"<th style='text-align:center;font-weight:700;color:{_hclr};"
+                    f"font-size:0.82rem;padding:4px 0;'>{_h}</th>")
+            _tbl.append("</tr>")
 
-            # Headers — identical to render_modern_calendar
-            _PERS_HEADERS = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
-            hdr = st.columns(7)
-            for _i, _h in enumerate(_PERS_HEADERS):
-                hdr[_i].markdown(
-                    f"<div style='text-align:center;font-weight:700;"
-                    f"color:{'#7c3aed' if _i in [0,1] else '#64748b'};"
-                    f"font-size:0.8rem;padding:4px 0 2px;'>{_h}</div>",
-                    unsafe_allow_html=True)
-
-            # Week rows — identical structure to render_modern_calendar
-            with st.container(border=True):
-                for _week in _cal_pers:
-                    _wcols = st.columns(7)
-                    for _ci, _day in enumerate(_week):
-                        with _wcols[_ci]:
-                            if _day == 0:
-                                st.write("")
-                            else:
-                                _st = _day_status.get(_day, "עובד")
-                                _lbl = "עובד/ת" if _st == "עובד" else _st
-                                # Read-only button — click has no effect
-                                st.button(f"{_day}\n{_lbl}",
-                                          key=f"{_pfx_pers}_{_day}x",
-                                          use_container_width=True,
-                                          disabled=False)  # enabled so CSS applies
+            for _week in _cal_pers:
+                _tbl.append("<tr>")
+                for _d in _week:
+                    if _d == 0:
+                        _tbl.append("<td style='padding:2px'></td>")
+                    else:
+                        _st = _day_status.get(_d, "עובד")
+                        _lbl = "עובד/ת" if _st == "עובד" else _st
+                        _bg, _fg = _PERS_STATUS_COLORS.get(_st, ("#f1f5f9", "#475569"))
+                        _tbl.append(
+                            f"<td style='background:{_bg};color:{_fg};text-align:center;"
+                            f"border-radius:8px;padding:6px 2px;font-weight:600;"
+                            f"font-size:0.82rem;min-width:42px;line-height:1.4;'>"
+                            f"{_d}<br>"
+                            f"<span style='font-size:0.68rem;font-weight:500'>{_lbl}</span>"
+                            f"</td>")
+                _tbl.append("</tr>")
+            _tbl.append("</table>")
+            st.markdown("".join(_tbl), unsafe_allow_html=True)
 
             st.markdown(
                 "<div style='direction:rtl;font-size:0.75rem;color:#64748b;margin-top:10px'>"
