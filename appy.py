@@ -1403,6 +1403,122 @@ def _render_export_buttons(dept_name, year_month, view_month, key_ns, user_name=
             else:
                 st.error(f"שגיאה: {err}")
 
+def _render_dept_grid_readonly(dept_name, year_month, view_month, highlight_user=None):
+    """
+    Read-only department schedule grid — used in the employee סידור יומי view.
+    Shows all employees in dept_rotation for the month, color-coded by status.
+    No editable buttons; renders as colored HTML divs.
+    highlight_user: name to bold/highlight (the viewing employee).
+    """
+    year = 2026
+    num_days = calendar.monthrange(year, view_month)[1]
+    WD_SHORT  = ["ש", "ו", "ה", "ד", "ג", "ב", "א"]   # col 0=Sat … col 6=Sun
+
+    # Employees
+    dr = st.session_state.dept_rotation
+    employees: list[str] = []
+    if not dr.empty and 'employee' in dr.columns:
+        mask = ((dr['year_month'].astype(str) == year_month) &
+                (dr['daily_dept'].astype(str) == dept_name))
+        employees = dr[mask]['employee'].astype(str).str.strip().tolist()
+    employees = _sort_employees_by_role(employees)
+    if not employees:
+        st.info(f"אין עובדים משובצים ל-{dept_name} בחודש זה.")
+        return
+
+    # Status → bg/text colors
+    _SC = {
+        "עובד":        ("#dcfce7", "#166534"),
+        "חופש":        ("#dbeafe", "#1e40af"),
+        "202":         ("#fef9c3", "#854d0e"),
+        "אחרי תורנות": ("#ffedd5", "#9a3412"),
+        "תורנות":      ("#ede9fe", "#5b21b6"),
+        "אחר":         ("#f1f5f9", "#475569"),
+    }
+    # Status → short label
+    _SL = {
+        "עובד": "ע", "חופש": "ח", "202": "202",
+        "אחרי תורנות": "אח", "תורנות": "ת", "אחר": "+",
+    }
+
+    # Pre-compute statuses for all employees × all days
+    _statuses: dict[tuple[str, int], str] = {}
+    for emp in employees:
+        for d in range(1, num_days + 1):
+            ds = f"{year}-{view_month:02d}-{d:02d}"
+            raw = _wsd_get_status(ds, emp, default=None)
+            if raw is None or (raw == "עובד" and not _wsd_is_manual(ds, emp)):
+                _statuses[(emp, d)] = _derive_auto_status(ds, emp, daily_dept=dept_name)
+            else:
+                _statuses[(emp, d)] = raw
+
+    # Render per 10-day segment so columns don't overflow
+    seg1 = list(range(1, 11))
+    seg2 = list(range(11, 21))
+    seg3 = list(range(21, num_days + 1))
+    for seg in [s for s in [seg1, seg2, seg3] if s]:
+        # Header row: empty label col + day-number cols
+        cal_weeks_seg = []
+        # Build week-indexed day structure for this segment
+        _days_in_seg = seg
+        # Column widths: name col (2) + one col per day
+        n_days = len(_days_in_seg)
+        col_w  = [2] + [1] * n_days
+        # Day header
+        hdr_cols = st.columns(col_w)
+        hdr_cols[0].markdown(
+            "<div style='font-size:0.72rem;color:#64748b;text-align:right;"
+            "font-weight:700;padding:2px 4px'>עובד/ת</div>",
+            unsafe_allow_html=True)
+        for ci, d in enumerate(_days_in_seg):
+            date_obj = date(year, view_month, d)
+            wd_idx   = (date_obj.weekday() + 1) % 7  # 0=Sun … 6=Sat
+            is_wk    = wd_idx in (5, 6)              # Fri or Sat
+            hdr_cols[ci + 1].markdown(
+                f"<div style='text-align:center;font-size:0.7rem;"
+                f"font-weight:700;color:{'#7c3aed' if is_wk else '#64748b'};"
+                f"padding:1px 0'>{d}<br><span style='font-size:0.62rem'>"
+                f"{WD_SHORT[wd_idx]}</span></div>",
+                unsafe_allow_html=True)
+
+        # Employee rows
+        for emp in employees:
+            is_me = (str(emp).strip() == str(highlight_user or '').strip())
+            row_cols = st.columns(col_w)
+            _name_style = (
+                "font-weight:700;color:#0f172a" if is_me
+                else "color:#374151"
+            )
+            row_cols[0].markdown(
+                f"<div style='font-size:0.75rem;{_name_style};"
+                f"text-align:right;padding:2px 4px;white-space:nowrap;"
+                f"overflow:hidden;text-overflow:ellipsis'>"
+                f"{'▶ ' if is_me else ''}{emp}</div>",
+                unsafe_allow_html=True)
+            for ci, d in enumerate(_days_in_seg):
+                st_val = _statuses.get((emp, d), "עובד")
+                bg, fg = _SC.get(st_val, ("#f1f5f9", "#475569"))
+                lbl    = _SL.get(st_val, st_val[:2])
+                row_cols[ci + 1].markdown(
+                    f"<div style='background:{bg};color:{fg};border-radius:5px;"
+                    f"text-align:center;font-size:0.72rem;font-weight:600;"
+                    f"padding:4px 1px;min-height:28px;line-height:1.2'>{lbl}</div>",
+                    unsafe_allow_html=True)
+        st.markdown("<div style='margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+    # Legend
+    st.markdown(
+        "<div style='direction:rtl;font-size:0.72rem;color:#64748b;"
+        "margin-top:6px;line-height:2.2'>"
+        "<span style='background:#dcfce7;color:#166534;border-radius:3px;padding:1px 6px'>ע</span> עובד/ת &nbsp;|&nbsp;"
+        "<span style='background:#dbeafe;color:#1e40af;border-radius:3px;padding:1px 6px'>ח</span> חופש &nbsp;|&nbsp;"
+        "<span style='background:#fef9c3;color:#854d0e;border-radius:3px;padding:1px 6px'>202</span> 202 &nbsp;|&nbsp;"
+        "<span style='background:#ffedd5;color:#9a3412;border-radius:3px;padding:1px 6px'>אח</span> אחרי תורנות &nbsp;|&nbsp;"
+        "<span style='background:#ede9fe;color:#5b21b6;border-radius:3px;padding:1px 6px'>ת</span> תורנות"
+        "</div>",
+        unsafe_allow_html=True)
+
+
 def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None, max_days=None):
     """
     Render an editable grid for a single dept and month.
@@ -6317,7 +6433,7 @@ else:
         if st.session_state.pop('show_dayabs_saved', False):
             st.success("✅ הבקשות נשמרו!")
         elif not (_vac_sel or _202_sel):
-            st.caption("💡 לחץ על יום פנוי — פעם אחת לחופש, פעמיים ל-202, שלוש לביטול.")
+            st.caption("לחץ על יום כדי לבקש חופש או 202")
 
         # ── History table ──
         st.divider()
@@ -6547,115 +6663,33 @@ else:
                                     if row.get('notes'):
                                         st.caption(f"💬 {row['notes']}")
         else:
-            # מתמחה / רופא בכיר — read-only personal calendar
+            # מתמחה / רופא בכיר — read-only full department calendar
             hebrew_months_es = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
                                 "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
             view_m = daily_active_month_int
             es_year_month = f"2026-{view_m:02d}"
-            st.subheader(f"🗓️ לוח עבודה שלי — {hebrew_months_es[view_m-1]} 2026")
 
-            # Show dept rotation
+            # Resolve the user's daily dept for this month
             dr = st.session_state.dept_rotation
             my_dept = "—"
             if not dr.empty and 'employee' in dr.columns:
-                my_row = dr[(dr['employee'].astype(str).str.strip() == str(user_name).strip()) &
-                            (dr['year_month'].astype(str) == es_year_month)]
+                my_row = dr[
+                    (dr['employee'].astype(str).str.strip() == str(user_name).strip()) &
+                    (dr['year_month'].astype(str) == es_year_month)
+                ]
                 if not my_row.empty:
                     my_dept = str(my_row.iloc[0].get('daily_dept', '—'))
-            st.caption(f"מחלקה יומית: **{my_dept}**")
 
-            # ── Personal calendar — mirrors render_modern_calendar exactly ────
-            # Same technique as the confirmed-working constraint calendar:
-            #   CSS targets "st-key-perscal_d{m}_" buttons (base) then per-day overrides.
-            #   st.button() with use_container_width=True — real widget, same as constraint cal.
-            #   list(reversed(week)) → Saturday in col 0 (leftmost), Sunday in col 6.
-            #   st.write("") for empty cells — exactly as render_modern_calendar.
-            #   No st.container wrapper — headers and rows at the same indent level.
-            _pfx_p  = "perscal"
-            _m_p    = view_m
-            _cal_pers_raw = calendar.Calendar(firstweekday=6).monthdayscalendar(2026, _m_p)
+            st.subheader(f"🗓️ לוח מחלקה — {hebrew_months_es[view_m-1]} 2026")
+            if my_dept == "—":
+                st.info("טרם שובצת למחלקה בחודש זה. פנה/י למנהל המערכת.")
+            else:
+                st.caption(f"מחלקתך: **{my_dept}**")
+                _render_dept_grid_readonly(
+                    my_dept, es_year_month, view_m,
+                    highlight_user=user_name)
 
-            # Status → (background gradient, text color)  — matches render_modern_calendar style
-            _PSTATUS = {
-                "עובד":        ("linear-gradient(135deg,#bbf7d0,#4ade80)", "#166534"),
-                "חופש":        ("linear-gradient(135deg,#bfdbfe,#60a5fa)", "#1e40af"),
-                "202":         ("linear-gradient(135deg,#fef08a,#facc15)", "#854d0e"),
-                "אחרי תורנות": ("linear-gradient(135deg,#fed7aa,#fb923c)", "#9a3412"),
-                "תורנות":      ("linear-gradient(135deg,#ddd6fe,#a78bfa)", "#5b21b6"),
-                "אחר":         ("linear-gradient(135deg,#e2e8f0,#cbd5e1)", "#475569"),
-            }
-
-            # Compute day statuses
-            _day_status = {}
-            for _w in _cal_pers_raw:
-                for _d in _w:
-                    if _d == 0:
-                        continue
-                    _ds = f"2026-{_m_p:02d}-{_d:02d}"
-                    _raw = _wsd_get_status(_ds, user_name, default=None)
-                    if _raw is None or (_raw == "עובד" and not _wsd_is_manual(_ds, user_name)):
-                        _day_status[_d] = _derive_auto_status(
-                            _ds, user_name,
-                            daily_dept=my_dept if my_dept != "—" else None)
-                    else:
-                        _day_status[_d] = _raw
-
-            # CSS injection — same pattern as render_modern_calendar
-            # Base rule colors all perscal buttons; per-day rules override with status color.
-            _pcss = [f"""
-            div[class*="st-key-{_pfx_p}_d{_m_p}_"] button {{
-                min-height: 42px !important; font-size: 0.85rem !important;
-                font-weight: 600 !important; border-radius: 10px !important;
-                padding: 4px 2px !important; border: none !important;
-                background: linear-gradient(135deg,#e2e8f0,#cbd5e1) !important;
-                color: #475569 !important;
-            }}"""]
-            for _d, _st in _day_status.items():
-                _bg, _fg = _PSTATUS.get(_st, ("linear-gradient(135deg,#f8fafc,#e2e8f0)", "#334155"))
-                _pcss.append(f"""
-            div[class*="st-key-{_pfx_p}_d{_m_p}_{_d}x"] button {{
-                background: {_bg} !important; color: {_fg} !important;
-            }}""")
-            st.markdown(f"<style>{''.join(_pcss)}</style>", unsafe_allow_html=True)
-
-            # Headers — identical to render_modern_calendar
-            _day_headers_p = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
-            _hcols_p = st.columns(7)
-            for _idx_p, _h_p in enumerate(_day_headers_p):
-                _is_wk_p = _idx_p in [0, 1]
-                _hcols_p[_idx_p].markdown(
-                    f"<div style='text-align:center;font-weight:700;"
-                    f"color:{'#7c3aed' if _is_wk_p else '#64748b'};"
-                    f"font-size:0.8rem;padding:4px 0 2px;'>{_h_p}</div>",
-                    unsafe_allow_html=True)
-
-            # Grid rows — identical to render_modern_calendar
-            for _week_p in _cal_pers_raw:
-                _week_rtl_p = list(reversed(_week_p))   # Saturday→col 0, Sunday→col 6
-                _wcols_p = st.columns(7)
-                for _ci_p, _day_p in enumerate(_week_rtl_p):
-                    with _wcols_p[_ci_p]:
-                        if _day_p == 0:
-                            st.write("")
-                        else:
-                            _st_p = _day_status.get(_day_p, "עובד")
-                            _lbl_p = "עובד/ת" if _st_p == "עובד" else _st_p
-                            st.button(
-                                f"{_day_p}\n{_lbl_p}",
-                                key=f"{_pfx_p}_d{_m_p}_{_day_p}x",
-                                use_container_width=True)
-
-            st.markdown(
-                "<div style='direction:rtl;font-size:0.75rem;color:#64748b;margin-top:10px'>"
-                "<span style='background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px'>עובד/ת</span> &nbsp;"
-                "<span style='background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:4px'>חופש</span> &nbsp;"
-                "<span style='background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:4px'>202</span> &nbsp;"
-                "<span style='background:#ffedd5;color:#9a3412;padding:2px 8px;border-radius:4px'>אחרי תורנות</span> &nbsp;"
-                "<span style='background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:4px'>תורנות</span> &nbsp;"
-                "<span style='background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:4px'>אחר</span>"
-                "</div>", unsafe_allow_html=True)
-
-            # ── Personal schedule Excel download ────────────────────────────
+            # ── Personal schedule Excel download ──────────────────────────
             st.markdown("---")
             _pers_bytes, _pers_fname = _export_personal_schedule_excel(
                 user_name, view_m,
