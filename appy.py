@@ -6067,6 +6067,25 @@ else:
                 if next_d.month == daily_active_month_int and next_d.year == 2026:
                     post_shift_days.add(next_d.day)
 
+        # ── Type selector — always visible ABOVE the calendar ──────────
+        abs_type_key = f"dayabs_type_{daily_active_month_int}"
+        if abs_type_key not in st.session_state:
+            st.session_state[abs_type_key] = "חופש"
+
+        _tc1, _tc2 = st.columns([2, 3])
+        with _tc1:
+            abs_type_disp = st.radio(
+                "סוג בקשה:",
+                ["חופש", "202"],
+                horizontal=True,
+                key=abs_type_key,
+            )
+        with _tc2:
+            if abs_type_disp == "202":
+                st.info("🔄 **202** — יום פיצוי עבור עבודה בסוף שבוע", icon=None)
+            else:
+                st.info("☀️ **חופש** — ימי חופשה רגילים", icon=None)
+
         # Build calendar grid — RTL: col 0=Saturday (ש), col 6=Sunday (א)
         HEB_WEEK = ["ש", "ו", "ה", "ד", "ג", "ב", "א"]
         _cal_da = [list(reversed(w)) for w in
@@ -6156,22 +6175,22 @@ else:
             se = st.session_state[sel_end_key]
             if ss and se:
                 lo, hi = min(ss, se), max(ss, se)
-                c1, c2, c3, c4 = st.columns([2, 2, 3, 2])
+                abs_type_disp = st.session_state.get(abs_type_key, "חופש")
+                _type_color = "#ca8a04" if abs_type_disp == "202" else "#2563eb"
+                c1, c2, c3 = st.columns([3, 3, 2])
                 with c1:
-                    st.markdown(f"**נבחר:** {lo:02d}/{daily_active_month_int:02d} – {hi:02d}/{daily_active_month_int:02d}")
+                    st.markdown(
+                        f"**נבחר:** {lo:02d}/{daily_active_month_int:02d} – {hi:02d}/{daily_active_month_int:02d} &nbsp;"
+                        f"<span style='background:{_type_color};color:white;border-radius:4px;"
+                        f"padding:2px 8px;font-size:0.8rem'>{abs_type_disp}</span>",
+                        unsafe_allow_html=True)
                 with c2:
-                    abs_type_disp = st.selectbox(
-                        "סוג:", ["חופש", "202"],
-                        label_visibility="collapsed",
-                        key=f"dayabs_type_{daily_active_month_int}"
-                    )
-                with c3:
                     abs_note = st.text_input(
                         "הערה:", placeholder="הערה (רשות)...",
                         label_visibility="collapsed",
                         key=f"dayabs_note_{daily_active_month_int}"
                     )
-                with c4:
+                with c3:
                     # מנהל מחלקה bypasses the open/close gate (auto-approved)
                     can_submit = daily_requests_open or role == 'מנהל מחלקה'
                     if st.button("✅ הגש בקשה", use_container_width=True,
