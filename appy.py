@@ -595,7 +595,7 @@ def _export_dept_grid(dept_name, year_month, view_month):
 _XL_STATUS_FILL = {
     "עובד":         "DCFCE7",
     "חופש":         "DBEAFE",
-    "202":          "FEF9C3",
+    "202":          "FDE047",   # bright yellow — matches #eab308 on screen
     "אחרי תורנות":  "FFEDD5",
     "תורנות":       "EDE9FE",
     "אחר":          "F1F5F9",
@@ -4129,7 +4129,7 @@ st.markdown("""
     .dayabs-vac   { background:#16a34a; color:white; border-radius:8px; padding:5px 2px;
                     text-align:center; font-size:0.78rem; min-height:34px;
                     display:flex; align-items:center; justify-content:center; }
-    .dayabs-202   { background:#ca8a04; color:white; border-radius:8px; padding:5px 2px;
+    .dayabs-202   { background:#eab308; color:white; border-radius:8px; padding:5px 2px;
                     text-align:center; font-size:0.78rem; min-height:34px;
                     display:flex; align-items:center; justify-content:center; }
     .dayabs-night { background:#1e3a5f; color:white; border-radius:8px; padding:5px 2px;
@@ -6283,20 +6283,20 @@ else:
             st.markdown(
                 "<div style='direction:rtl;font-size:0.77rem;color:#475569;"
                 "margin:8px 0 2px 0;line-height:2.2'>"
-                "<span style='background:#1e3a5f;color:white;border-radius:4px;"
-                "padding:1px 7px'>27</span> תורנות &nbsp;|&nbsp; "
-                "<span style='background:#f97316;color:white;border-radius:4px;"
-                "padding:1px 7px'>27</span> אחרי תורנות &nbsp;|&nbsp; "
-                "<span style='background:#bbf7d0;color:#166534;border-radius:4px;"
-                "padding:1px 7px;border:1px solid #86efac'>27</span> בקשה לחופש &nbsp;|&nbsp; "
-                "<span style='background:#16a34a;color:white;border-radius:4px;"
-                "padding:1px 7px'>27</span> חופש מאושר &nbsp;|&nbsp; "
-                "<span style='background:#fef9c3;color:#854d0e;border-radius:4px;"
-                "padding:1px 7px;border:1px solid #fde68a'>27</span> בקשה ל-202 &nbsp;|&nbsp; "
-                "<span style='background:#ca8a04;color:white;border-radius:4px;"
-                "padding:1px 7px'>27</span> 202 מאושר &nbsp;|&nbsp; "
-                "<span style='border:1px solid #e2e8f0;padding:1px 7px;border-radius:4px;"
-                "background:white;color:#334155'>27</span> פנוי"
+                "<span style='background:#1e3a5f;color:#1e3a5f;border-radius:4px;"
+                "padding:1px 10px'>&nbsp;</span> תורנות &nbsp;|&nbsp; "
+                "<span style='background:#f97316;color:#f97316;border-radius:4px;"
+                "padding:1px 10px'>&nbsp;</span> אחרי תורנות &nbsp;|&nbsp; "
+                "<span style='background:#bbf7d0;border-radius:4px;"
+                "padding:1px 10px;border:1px solid #86efac'>&nbsp;</span> בקשה לחופש &nbsp;|&nbsp; "
+                "<span style='background:#16a34a;color:#16a34a;border-radius:4px;"
+                "padding:1px 10px'>&nbsp;</span> חופש מאושר &nbsp;|&nbsp; "
+                "<span style='background:#fef9c3;border-radius:4px;"
+                "padding:1px 10px;border:1px solid #fde68a'>&nbsp;</span> בקשה ל-202 &nbsp;|&nbsp; "
+                "<span style='background:#eab308;color:#eab308;border-radius:4px;"
+                "padding:1px 10px'>&nbsp;</span> 202 מאושר &nbsp;|&nbsp; "
+                "<span style='border:1px solid #e2e8f0;padding:1px 10px;border-radius:4px;"
+                "background:white'>&nbsp;</span> פנוי"
                 "</div>",
                 unsafe_allow_html=True)
 
