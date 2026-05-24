@@ -483,88 +483,68 @@ def _export_schedule_wide(view_month):
 
 def _export_dept_grid(dept_name, year_month, view_month):
     """
-    Export the dept grid for a given month — PIVOTED format.
-
-    Status resolution: same logic as the board display —
-      manual override → use stored status
-      non-manual "עובד" (or no entry) → re-derive (recurring days, תורנות, אחרי תורנות)
-
-    Section נמצאים: עובד (with note if any) + תורנות
-    Section נעדרים: חופש / 202 / אחרי תורנות / אחר — each cell "name (reason)"
-
-    Worksheet is set to RTL after writing.
-    Worksheet name: 'WSD_<dept>_<year_month>'. Returns True on success.
+    Export the dept grid to a Google Sheets worksheet `WSD_<dept>_<year_month>`,
+    matching the same 3-section batched layout as the Excel export
+    (uses `_build_batched_day_data`):
+      Row 1 : day-number + weekday-letter header
+      Row 2 : עובדים section label
+      Row 3+: worker slots
+      Row N : תורן row (label + names)
+      Row N+1: לא נמצאים section label
+      Row N+2+: absent slots
+    Friday: workers = שישי בוקר only; absences hidden.
+    Saturday: only תורן (workers + absences hidden).
     """
     try:
         year = 2026
         num_days = calendar.monthrange(year, view_month)[1]
         days = list(range(1, num_days + 1))
-
-        # Employees from dept_rotation
-        dr = st.session_state.dept_rotation
-        if dr.empty or 'employee' not in dr.columns:
-            return False
-        mask = ((dr['year_month'].astype(str) == year_month) &
-                (dr['daily_dept'].astype(str) == dept_name))
-        employees = dr[mask]['employee'].astype(str).str.strip().tolist()
-        if not employees:
-            return False
-
-        _ABSENT_STATUSES = {"חופש", "202", "אחרי תורנות", "אחר"}
-
         WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
-        per_day_working = {}   # day → list[str]  — נמצאים
-        per_day_absent  = {}   # day → list[str]  — נעדרים
 
-        for d in days:
-            date_str = f"{year}-{view_month:02d}-{d:02d}"
-            working, absent = [], []
-            for emp in employees:
-                status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
-                note   = _wsd_get_note(date_str, emp)
+        result = _build_batched_day_data(dept_name, year_month, view_month)
+        if not result or result[0] is None:
+            return False
+        _employees, per_day_workers, per_day_toranet, per_day_absent = result
 
-                if status in _ABSENT_STATUSES:
-                    # נעדרים: "name (reason)" or "name (reason — note)"
-                    reason = f"{status} — {note}" if note else status
-                    absent.append(f"{emp} ({reason})")
-                else:
-                    # נמצאים: עובד or תורנות — show note or status tag if not plain עובד
-                    if status == "תורנות":
-                        working.append(f"{emp} (תורנות)")
-                    elif note:
-                        working.append(f"{emp} ({note})")
-                    else:
-                        working.append(emp)
+        toranet_label = "תורן פנגר" if dept_name == "פנימית גריאטרית" else "תורן שיקום"
 
-            per_day_working[d] = working
-            per_day_absent[d]  = absent
-
-        max_work_rows = max((len(v) for v in per_day_working.values()), default=0)
+        max_work_rows = max((len(v) for v in per_day_workers.values()), default=1)
         max_abs_rows  = max((len(v) for v in per_day_absent.values()),  default=0)
 
         col_names = ['#'] + [str(d) for d in days]
         rows = []
 
-        # Weekday-letter header row
-        rows.append({'#': 'יום', **{str(d): WD[(date(year, view_month, d).weekday() + 1) % 7] for d in days}})
+        # Row 1: day-number + weekday letter (one cell, e.g. "15 / ה")
+        rows.append({
+            '#': f"{dept_name} — {year_month}",
+            **{str(d): f"{d} / {WD[(date(year, view_month, d).weekday() + 1) % 7]}"
+               for d in days}
+        })
 
-        # Section נמצאים
-        rows.append({'#': '— נמצאים —', **{str(d): '' for d in days}})
+        # Section עובדים
+        rows.append({'#': '— עובדים —', **{str(d): '' for d in days}})
         for i in range(max_work_rows):
             row = {'#': ''}
             for d in days:
-                lst = per_day_working.get(d, [])
+                lst = per_day_workers.get(d, [])
                 row[str(d)] = lst[i] if i < len(lst) else ''
             rows.append(row)
 
-        # Section נעדרים
-        rows.append({'#': '— נעדרים —', **{str(d): '' for d in days}})
-        for i in range(max_abs_rows):
-            row = {'#': ''}
-            for d in days:
-                lst = per_day_absent.get(d, [])
-                row[str(d)] = lst[i] if i < len(lst) else ''
-            rows.append(row)
+        # תורן row (single data row)
+        row_t = {'#': toranet_label}
+        for d in days:
+            row_t[str(d)] = per_day_toranet.get(d) or ''
+        rows.append(row_t)
+
+        # Section לא נמצאים (only Sun–Thu have entries; Fri/Sat have empty per the builder)
+        if max_abs_rows > 0:
+            rows.append({'#': '— לא נמצאים —', **{str(d): '' for d in days}})
+            for i in range(max_abs_rows):
+                row = {'#': ''}
+                for d in days:
+                    lst = per_day_absent.get(d, [])
+                    row[str(d)] = lst[i] if i < len(lst) else ''
+                rows.append(row)
 
         export_df = pd.DataFrame(rows, columns=col_names)
 
@@ -841,22 +821,19 @@ def _build_batched_day_data(dept_name, year_month, view_month):
         workers, absent = [], []
 
         if is_saturday:
-            # Saturday: no workers for any dept (שיקום has nothing, פנימית shows only תורן)
-            for emp in employees:
-                status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
-                if status in _BATCHED_ABSENT_STATUSES:
-                    absent.append(emp)
+            # Saturday: only תורן row populated (workers + absences hidden — it's a given)
+            pass
         elif is_friday:
-            # Friday: workers = שישי בוקר workers (may be from outside dept_rotation)
+            # Friday: workers = שישי בוקר workers for this dept.
+            # Absences hidden (it's a given).
             workers = _get_fri_shift_workers(date_str, dept_name)
-            for emp in employees:
-                status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
-                if status in _BATCHED_ABSENT_STATUSES:
-                    absent.append(emp)
         else:
-            # Regular day
+            # Regular weekday (Sun–Thu)
             for emp in employees:
                 status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
+                if status == "":
+                    # מנהל מחלקה not planted on this day → skip
+                    continue
                 if status in _BATCHED_ABSENT_STATUSES:
                     absent.append(emp)
                 else:
@@ -1187,14 +1164,16 @@ def _wsd_upsert(date_str, employee, daily_dept, status, is_manual=True, note="")
 
 # Status cycle for in-grid editing (clicks rotate through these)
 _GRID_STATUS_CYCLE = {
+    "":             "עובד",    # empty (manager-unplanted) → first click plants עובד
     "עובד":         "חופש",
     "חופש":         "202",
     "202":          "אחרי תורנות",
     "אחרי תורנות":  "אחר",
-    "אחר":          "עובד",
+    "אחר":          "",          # clears back to empty (un-plant)
     "תורנות":       "חופש",   # clicking overrides auto-derived night-shift status
 }
 _GRID_STATUS_LABEL_SHORT = {
+    "":             "·",   # plant-me dot for empty
     "עובד":         "ע",
     "חופש":         "ח",
     "202":          "202",
@@ -1208,6 +1187,7 @@ def _make_initials(name: str) -> str:
     parts = str(name).strip().split()
     return " ".join(p[0] for p in parts if p)
 _GRID_STATUS_PFX = {
+    "":             "wsdcell_e",   # empty/unplanted manager cell
     "עובד":         "wsdcell_w",
     "חופש":         "wsdcell_h",
     "202":          "wsdcell_2",
@@ -1262,6 +1242,19 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
         emp = str(employee).strip()
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         wd_idx = (date_obj.weekday() + 1) % 7  # Sun=0 … Sat=6
+
+        # 0c. מנהל מחלקה rows default to empty unless explicitly planted via is_manual
+        try:
+            sf = st.session_state.staff
+            _erow = sf[sf['name'].astype(str).str.strip() == emp]
+            if not _erow.empty and str(_erow.iloc[0].get('type', '')).strip() == 'מנהל מחלקה':
+                _idx = st.session_state.get('wsd_index', {})
+                _ent = _idx.get((date_str, emp), {})
+                if _ent.get('is_manual'):
+                    return _ent.get('status', '')
+                return ""   # empty by default
+        except Exception:
+            pass
 
         # 0a. Saturday: department closed
         if wd_idx == 6:
@@ -1403,7 +1396,8 @@ def _render_export_buttons(dept_name, year_month, view_month, key_ns, user_name=
             else:
                 st.error(f"שגיאה: {err}")
 
-def _render_dept_grid_readonly(dept_name, year_month, view_month, highlight_user=None):
+# DEPRECATED: replaced by _render_dept_grid(..., readonly=True)
+def _render_dept_grid_readonly_DEPRECATED(dept_name, year_month, view_month, highlight_user=None):
     """
     Read-only department schedule grid — used in the employee סידור יומי view.
     Shows all employees in dept_rotation for the month, color-coded by status.
@@ -1558,18 +1552,53 @@ def _render_dept_grid_readonly(dept_name, year_month, view_month, highlight_user
         unsafe_allow_html=True)
 
 
-def _render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None, max_days=None):
+def _render_dept_grid(dept_name, year_month, view_month, key_ns,
+                      employees=None, max_days=None,
+                      readonly=False, highlight_user=None):
     """
-    Render an editable grid for a single dept and month.
+    Render a dept × month grid.
 
-    Each cell has:
-      - A **status button** (left-click cycles through statuses; CSS-coloured).
-        If a note exists it is shown as a tooltip on this button.
-      - A tiny **💬 note button** (right of each cell) that opens a popover
-        for typing / clearing the note.  No checkbox or edit-mode toggle.
-
-    The month is shown in three segments: 1-10, 11-20, 21-end.
+    readonly=False (default): editable — buttons cycle status, popover notes.
+    readonly=True            : same visual layout but cells are styled <div>s
+                               (no clicking, no notes popover). Used in the
+                               employee's סידור יומי view.
+    highlight_user           : if set, that employee's name gets ▶ + bold.
     """
+    # Inline gradient styles for readonly mode (must match the CSS keyed by prefix)
+    _RO_CELL_STYLES = {
+        "wsdcell_w": "background:linear-gradient(135deg,#6ee7b7,#059669);color:#fff;",
+        "wsdcell_h": "background:linear-gradient(135deg,#bfdbfe,#3b82f6);color:#fff;",
+        "wsdcell_2": "background:linear-gradient(135deg,#fef08a,#ca8a04);color:#713f12;",
+        "wsdcell_p": "background:linear-gradient(135deg,#fed7aa,#ea580c);color:#fff;",
+        "wsdcell_a": "background:linear-gradient(135deg,#e2e8f0,#64748b);color:#fff;",
+        "wsdcell_t": "background:linear-gradient(135deg,#ddd6fe,#7c3aed);color:#fff;",
+        "wsdcell_e": "background:#f8fafc;color:#cbd5e1;border:1.5px dashed #cbd5e1;",
+    }
+
+    def _ro_cell(lbl, pfx, cur_note=""):
+        """Render a readonly-mode cell that visually matches the editable button."""
+        sty = _RO_CELL_STYLES.get(pfx, "background:#f1f5f9;color:#475569;")
+        _tt = f" title=\"{str(cur_note).replace(chr(34), '')}\"" if cur_note else ""
+        st.markdown(
+            f"<div{_tt} style='{sty}min-height:36px;border-radius:8px;"
+            f"text-align:center;font-weight:700;font-size:1rem;display:flex;"
+            f"align-items:center;justify-content:center;padding:2px'>"
+            f"{lbl}</div>",
+            unsafe_allow_html=True)
+
+    def _emp_name_html(emp, font_size="0.82rem"):
+        """Render an employee-name cell, with ▶ + bold when emp matches highlight_user."""
+        is_me = (highlight_user is not None and
+                 str(emp).strip() == str(highlight_user).strip())
+        if is_me:
+            return (f"<div style='font-weight:800;font-size:{font_size};"
+                    f"color:#0f172a;padding:4px 8px;background:#fef3c7;"
+                    f"border-radius:6px;border:1px solid #fde68a;"
+                    f"text-align:right'>▶ {emp}</div>")
+        return (f"<div style='font-weight:600;font-size:{font_size};color:#0f172a;"
+                f"padding:4px 8px;background:white;border-radius:6px;"
+                f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>")
+
     year = 2026
     num_days = calendar.monthrange(year, view_month)[1]
     seg1 = list(range(1, 11))
@@ -1655,6 +1684,11 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
     color:white!important;border:none!important;
     min-height:36px!important;font-weight:700!important;
     font-size:1rem!important;border-radius:8px!important;padding:2px!important;}}
+div[class*="st-key-wsdcell_e_{_kn}"] button {{
+    background:#f8fafc!important;
+    color:#cbd5e1!important;border:1.5px dashed #cbd5e1!important;
+    min-height:36px!important;font-weight:400!important;
+    font-size:1rem!important;border-radius:8px!important;padding:2px!important;}}
 </style>""", unsafe_allow_html=True)
 
     if is_mobile:
@@ -1692,11 +1726,17 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
 
             # Employee rows: full-name banner (full width) + 7-col button row
             for emp in employees:
+                _is_me_m = (highlight_user is not None and
+                            str(emp).strip() == str(highlight_user).strip())
+                _name_bg = "#fef3c7" if _is_me_m else "#f1f5f9"
+                _name_bd = "#fde68a" if _is_me_m else "#e2e8f0"
+                _name_pre = "▶ " if _is_me_m else ""
+                _name_fw  = 800 if _is_me_m else 700
                 st.markdown(
-                    f"<div style='font-weight:700;font-size:0.82rem;color:#0f172a;"
-                    f"padding:2px 8px;background:#f1f5f9;border-radius:5px;"
-                    f"border:1px solid #e2e8f0;text-align:right;margin:2px 0 1px'>"
-                    f"{emp}</div>",
+                    f"<div style='font-weight:{_name_fw};font-size:0.82rem;color:#0f172a;"
+                    f"padding:2px 8px;background:{_name_bg};border-radius:5px;"
+                    f"border:1px solid {_name_bd};text-align:right;margin:2px 0 1px'>"
+                    f"{_name_pre}{emp}</div>",
                     unsafe_allow_html=True)
                 row_cols = st.columns(7)
                 for _ci, d in enumerate(week_rtl):
@@ -1715,6 +1755,9 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
                                 "<div style='height:36px;background:#f8fafc;"
                                 "border-radius:8px;border:1px solid #e2e8f0'></div>",
                                 unsafe_allow_html=True)
+                            continue
+                        if readonly:
+                            _ro_cell(lbl, pfx, cur_note)
                             continue
                         if st.button(lbl, key=cell_key, use_container_width=True,
                                      help=cur_note if cur_note else None):
@@ -1836,11 +1879,7 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
             # Employee rows
             for emp in employees:
                 row_cols = st.columns(_COL_W_D)
-                row_cols[7].markdown(
-                    f"<div style='font-weight:600;font-size:0.82rem;color:#0f172a;"
-                    f"padding:4px 8px;background:white;border-radius:6px;"
-                    f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>",
-                    unsafe_allow_html=True)
+                row_cols[7].markdown(_emp_name_html(emp), unsafe_allow_html=True)
                 for _ci, d in enumerate(week_rtl):
                     with row_cols[_ci]:
                         if d == 0:
@@ -1858,6 +1897,9 @@ div[class*="st-key-wsdcell_t_{_kn}"] button {{
                                 "<div style='height:32px;background:#f8fafc;"
                                 "border-radius:6px;border:1px solid #e2e8f0'></div>",
                                 unsafe_allow_html=True)
+                            continue
+                        if readonly:
+                            _ro_cell(lbl, pfx, cur_note)
                             continue
                         if st.button(lbl, key=cell_key, use_container_width=True,
                                      help=cur_note if cur_note else None):
@@ -4261,6 +4303,21 @@ def _parse_manage_depts(raw):
     normalised = str(raw).strip().replace('׳', "'").replace('״', '״')
     return [d.strip() for d in normalised.split(',') if d.strip()]
 
+
+def _get_dept_managers(dept_name: str) -> list[str]:
+    """Return all מנהל מחלקה staff names whose manage_depts includes dept_name."""
+    try:
+        sf = st.session_state.staff.copy()
+        sf['name'] = sf['name'].astype(str).str.strip()
+        sf['type'] = sf['type'].astype(str).str.strip()
+        out = []
+        for _, r in sf[sf['type'] == 'מנהל מחלקה'].iterrows():
+            if dept_name in _parse_manage_depts(r.get('manage_depts', '')):
+                out.append(str(r['name']).strip())
+        return out
+    except Exception:
+        return []
+
 _ROLE_ORDER = {'מנהל מחלקה': 0, 'רופא בכיר': 1, 'מתמחה': 2}
 
 def _sort_employees_by_role(emp_list: list[str]) -> list[str]:
@@ -5904,67 +5961,23 @@ elif role in ("מנהל/ת", "מנהל על"):
         with adm_mgr_tabs[0]:
             st.markdown(f"#### לוח {sel_dept_admin}")
 
-            # Build employees list: dept_rotation + managers of this dept (always shown)
+            # Build employees: dept_rotation + ALL managers of this dept.
+            # Managers always appear as rows; their cells default to empty
+            # (via _derive_auto_status) — click any cell to "plant" them.
             _adm_dr = st.session_state.dept_rotation
             _adm_emps = []
             if not _adm_dr.empty and 'employee' in _adm_dr.columns:
                 _adm_mask = ((_adm_dr['year_month'].astype(str) == adm_y_m) &
                              (_adm_dr['daily_dept'].astype(str) == sel_dept_admin))
                 _adm_emps = _adm_dr[_adm_mask]['employee'].astype(str).str.strip().tolist()
-
-            # Find managers for this dept
-            _adm_staff = st.session_state.staff.copy()
-            _adm_staff['name'] = _adm_staff['name'].astype(str).str.strip()
-            _dept_managers = []
-            for _, _sr in _adm_staff[_adm_staff['type'] == 'מנהל מחלקה'].iterrows():
-                _m_depts = _parse_manage_depts(_sr.get('manage_depts', ''))
-                if sel_dept_admin in _m_depts:
-                    _dept_managers.append(str(_sr['name']).strip())
-
-            # Grid shows only dept_rotation employees (+ managers already added to dept_rotation).
-            # Unscheduled managers appear BELOW the grid with ➕ button — default empty.
-            _mgrs_not_in_dr = [m for m in _dept_managers if m not in _adm_emps]
-            _all_adm_emps = _sort_employees_by_role(_adm_emps)
+            _dept_managers = _get_dept_managers(sel_dept_admin)
+            _all_adm_emps = _sort_employees_by_role(
+                _dept_managers + [e for e in _adm_emps if e not in _dept_managers]
+            )
 
             _render_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int,
                               "adm_mgrview", employees=_all_adm_emps)
 
-            # ── Section: add/remove dept manager from this month's schedule ──
-            if _dept_managers:
-                st.divider()
-                st.markdown("**👔 מנהלי המחלקה**")
-                for _mgr in _dept_managers:
-                    _mgr_in_dr = _mgr in _adm_emps
-                    _mc1, _mc2 = st.columns([3, 2])
-                    _mc1.markdown(
-                        f"<div style='padding:6px 0;font-size:0.9rem'>"
-                        f"{'✅' if _mgr_in_dr else '⬜'} **{_mgr}**"
-                        f"{'&nbsp;&nbsp;<span style=\"color:#16a34a;font-size:0.8rem\">משובץ לחודש</span>' if _mgr_in_dr else ''}"
-                        f"</div>",
-                        unsafe_allow_html=True)
-                    if not _mgr_in_dr:
-                        if _mc2.button(f"➕ הוסף לסידור", key=f"adm_add_mgr_{_mgr}_{adm_y_m}",
-                                       use_container_width=True):
-                            _new_dr_row = {'employee': _mgr, 'year_month': adm_y_m,
-                                           'daily_dept': sel_dept_admin}
-                            _new_dr_df = pd.concat(
-                                [st.session_state.dept_rotation, pd.DataFrame([_new_dr_row])],
-                                ignore_index=True)
-                            st.session_state.dept_rotation = _new_dr_df
-                            save_to_db("dept_rotation", _new_dr_df)
-                            st.rerun()
-                    else:
-                        if _mc2.button(f"➖ הסר מסידור", key=f"adm_rem_mgr_{_mgr}_{adm_y_m}",
-                                       use_container_width=True):
-                            _filt_dr = st.session_state.dept_rotation
-                            _filt_dr = _filt_dr[~(
-                                (_filt_dr['employee'].astype(str).str.strip() == _mgr) &
-                                (_filt_dr['year_month'].astype(str) == adm_y_m) &
-                                (_filt_dr['daily_dept'].astype(str) == sel_dept_admin)
-                            )]
-                            st.session_state.dept_rotation = _filt_dr.reset_index(drop=True)
-                            save_to_db("dept_rotation", st.session_state.dept_rotation)
-                            st.rerun()
 
             st.divider()
             _render_export_buttons(sel_dept_admin, adm_y_m, daily_active_month_int,
@@ -6671,20 +6684,26 @@ else:
                     da_y_m = f"2026-{daily_active_month_int:02d}"
                     st.markdown(f"#### לוח מחלקה — {hebrew_months_da[daily_active_month_int-1]} 2026")
                     st.caption("עורך/ת מחלקה: לחץ/י על תא לשינוי סטטוס. שורתך מצורפת לכל מחלקה — עריכה ישירה.")
+                    def _compose_mgr_emps(d_name):
+                        dr = st.session_state.dept_rotation
+                        emps = []
+                        if not dr.empty and 'employee' in dr.columns:
+                            mask = ((dr['year_month'].astype(str) == da_y_m) &
+                                    (dr['daily_dept'].astype(str) == d_name))
+                            emps = dr[mask]['employee'].astype(str).str.strip().tolist()
+                        mgrs = _get_dept_managers(d_name)
+                        # ensure current user is included even if not in manage_depts list
+                        if user_name not in mgrs:
+                            mgrs = [user_name] + mgrs
+                        return _sort_employees_by_role(
+                            mgrs + [e for e in emps if e not in mgrs]
+                        )
+
                     if len(managed_depts) > 1:
                         sub_dept_tabs = st.tabs(managed_depts)
                         for di, d_name in enumerate(managed_depts):
                             with sub_dept_tabs[di]:
-                                # Compose employees: dept_rotation + the manager themselves
-                                dr = st.session_state.dept_rotation
-                                emps = []
-                                if not dr.empty and 'employee' in dr.columns:
-                                    mask = ((dr['year_month'].astype(str) == da_y_m) &
-                                            (dr['daily_dept'].astype(str) == d_name))
-                                    emps = dr[mask]['employee'].astype(str).str.strip().tolist()
-                                if user_name not in emps:
-                                    emps = [user_name] + emps
-                                emps = _sort_employees_by_role(emps)
+                                emps = _compose_mgr_emps(d_name)
                                 _render_dept_grid(d_name, da_y_m, daily_active_month_int,
                                                   f"mgr_{di}", employees=emps)
                                 st.divider()
@@ -6692,15 +6711,7 @@ else:
                                                        f"mgr_{di}", user_name)
                     else:
                         d_name = managed_depts[0]
-                        dr = st.session_state.dept_rotation
-                        emps = []
-                        if not dr.empty and 'employee' in dr.columns:
-                            mask = ((dr['year_month'].astype(str) == da_y_m) &
-                                    (dr['daily_dept'].astype(str) == d_name))
-                            emps = dr[mask]['employee'].astype(str).str.strip().tolist()
-                        if user_name not in emps:
-                            emps = [user_name] + emps
-                        emps = _sort_employees_by_role(emps)
+                        emps = _compose_mgr_emps(d_name)
                         _render_dept_grid(d_name, da_y_m, daily_active_month_int,
                                           "mgr_solo", employees=emps)
                         st.divider()
@@ -6785,9 +6796,20 @@ else:
                 st.info("טרם שובצת למחלקה בחודש זה. פנה/י למנהל המערכת.")
             else:
                 st.caption(f"מחלקתך: **{my_dept}**")
-                _render_dept_grid_readonly(
-                    my_dept, es_year_month, view_m,
-                    highlight_user=user_name)
+                # Build employees: dept_rotation + all managers of this dept
+                _u_dr = st.session_state.dept_rotation
+                _u_emps = []
+                if not _u_dr.empty and 'employee' in _u_dr.columns:
+                    _u_mask = ((_u_dr['year_month'].astype(str) == es_year_month) &
+                               (_u_dr['daily_dept'].astype(str) == my_dept))
+                    _u_emps = _u_dr[_u_mask]['employee'].astype(str).str.strip().tolist()
+                _u_mgrs = _get_dept_managers(my_dept)
+                _u_all  = _sort_employees_by_role(
+                    _u_mgrs + [e for e in _u_emps if e not in _u_mgrs]
+                )
+                _render_dept_grid(my_dept, es_year_month, view_m,
+                                  "user_view", employees=_u_all,
+                                  readonly=True, highlight_user=user_name)
 
             # ── Personal schedule Excel download ──────────────────────────
             st.markdown("---")
