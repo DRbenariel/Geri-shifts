@@ -3998,15 +3998,18 @@ st.markdown("""
         border: 1px solid #86efac !important;
         font-size: 0.78rem !important; min-height: 34px !important;
     }
-    .dayabs-vac  { background:#2563eb; color:white; border-radius:8px; padding:5px 2px;
-                   text-align:center; font-size:0.78rem; min-height:34px;
-                   display:flex; align-items:center; justify-content:center; }
-    .dayabs-202  { background:#ca8a04; color:white; border-radius:8px; padding:5px 2px;
-                   text-align:center; font-size:0.78rem; min-height:34px;
-                   display:flex; align-items:center; justify-content:center; }
-    .dayabs-pend { background:#94a3b8; color:white; border-radius:8px; padding:5px 2px;
-                   text-align:center; font-size:0.78rem; min-height:34px;
-                   display:flex; align-items:center; justify-content:center; }
+    .dayabs-vac    { background:#2563eb; color:white; border-radius:8px; padding:5px 2px;
+                     text-align:center; font-size:0.78rem; min-height:34px;
+                     display:flex; align-items:center; justify-content:center; }
+    .dayabs-202    { background:#ca8a04; color:white; border-radius:8px; padding:5px 2px;
+                     text-align:center; font-size:0.78rem; min-height:34px;
+                     display:flex; align-items:center; justify-content:center; }
+    .dayabs-future { background:#16a34a; color:white; border-radius:8px; padding:5px 2px;
+                     text-align:center; font-size:0.78rem; min-height:34px;
+                     display:flex; align-items:center; justify-content:center; }
+    .dayabs-pend   { background:#94a3b8; color:white; border-radius:8px; padding:5px 2px;
+                     text-align:center; font-size:0.78rem; min-height:34px;
+                     display:flex; align-items:center; justify-content:center; }
     .dayabs-night{ background:#1e3a5f; color:white; border-radius:8px; padding:5px 2px;
                    text-align:center; font-size:0.78rem; min-height:34px;
                    display:flex; align-items:center; justify-content:center; }
@@ -6013,7 +6016,7 @@ else:
 
         # Pre-color sets from absence_requests for this user × this month
         ar_df = st.session_state.absence_requests.copy()
-        approved_vac_days, approved_202_days, pending_days = set(), set(), set()
+        approved_vac_days, approved_202_days, approved_future_days, pending_days = set(), set(), set(), set()
         if not ar_df.empty and 'employee' in ar_df.columns:
             ar_df['employee'] = ar_df['employee'].astype(str).str.strip()
             user_n = str(user_name).strip()
@@ -6033,7 +6036,9 @@ else:
                         if status == 'approved':
                             if atype == '202':
                                 approved_202_days.add(d_iter.day)
-                            else:  # חופש / חופש עתידי / היעדרות אחרת all show as 🔵
+                            elif atype == 'חופש עתידי':
+                                approved_future_days.add(d_iter.day)
+                            else:  # חופש / היעדרות אחרת → 🔵
                                 approved_vac_days.add(d_iter.day)
                         elif status == 'pending':
                             pending_days.add(d_iter.day)
@@ -6092,6 +6097,9 @@ else:
                         elif day in post_shift_days:
                             st.markdown(f"<div class='dayabs-post'>🔶 {day}</div>",
                                         unsafe_allow_html=True)
+                        elif day in approved_future_days:
+                            st.markdown(f"<div class='dayabs-future'>▲ {day}</div>",
+                                        unsafe_allow_html=True)
                         elif day in approved_vac_days:
                             st.markdown(f"<div class='dayabs-vac'>🔵 {day}</div>",
                                         unsafe_allow_html=True)
@@ -6133,6 +6141,8 @@ else:
                 "<div style='direction:rtl;font-size:0.77rem;color:#64748b;"
                 "margin:8px 0 0 0;line-height:2'>"
                 "🌙 תורנות לילה &nbsp;|&nbsp; 🔶 אחרי תורנות &nbsp;|&nbsp; "
+                "<span style='background:#16a34a;color:white;border-radius:4px;"
+                "padding:1px 6px;font-size:0.72rem'>▲</span> חופש עתידי מאושר &nbsp;|&nbsp; "
                 "🔵 חופש מאושר &nbsp;|&nbsp; 🟡 202 מאושר &nbsp;|&nbsp; 🔘 בקשה ממתינה &nbsp;|&nbsp; "
                 "<span style='border:1px solid #e2e8f0;padding:1px 8px;border-radius:5px;"
                 "background:white;color:#334155'>27</span> פנוי (לחיצה לבחירה)"
