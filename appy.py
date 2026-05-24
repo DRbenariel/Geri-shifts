@@ -5921,10 +5921,10 @@ elif role in ("מנהל/ת", "מנהל על"):
                 if sel_dept_admin in _m_depts:
                     _dept_managers.append(str(_sr['name']).strip())
 
-            # Add managers not already in the list (prepend, flagged separately)
+            # Grid shows only dept_rotation employees (+ managers already added to dept_rotation).
+            # Unscheduled managers appear BELOW the grid with ➕ button — default empty.
             _mgrs_not_in_dr = [m for m in _dept_managers if m not in _adm_emps]
-            _all_adm_emps = _adm_emps + _mgrs_not_in_dr  # managers at bottom
-            _all_adm_emps = _sort_employees_by_role(_all_adm_emps)
+            _all_adm_emps = _sort_employees_by_role(_adm_emps)
 
             _render_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int,
                               "adm_mgrview", employees=_all_adm_emps)
