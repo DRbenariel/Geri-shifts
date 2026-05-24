@@ -3978,7 +3978,8 @@ st.markdown("""
          background-color: #6366f1 !important;
     }
 
-    /* ── Day-absence calendar (Phase 3) ── */
+    /* ── Day-absence calendar ── */
+    /* free / clickable day */
     div[class*="st-key-dayabs_free_"] > div[data-testid="stButton"] > button {
         background: white !important; color: #334155 !important;
         border: 1px solid #e2e8f0 !important;
@@ -3988,37 +3989,42 @@ st.markdown("""
         background: #f0fdf4 !important; border-color: #86efac !important;
         color: #166534 !important; transform: none !important;
     }
-    div[class*="st-key-dayabs_start_"] > div[data-testid="stButton"] > button {
-        background: #16a34a !important; color: white !important;
-        border: 2px solid #15803d !important;
-        font-size: 0.78rem !important; min-height: 34px !important;
-    }
-    div[class*="st-key-dayabs_range_"] > div[data-testid="stButton"] > button {
+    /* light green — pending חופש request */
+    div[class*="st-key-dayabs_vac_"] > div[data-testid="stButton"] > button {
         background: #bbf7d0 !important; color: #166534 !important;
         border: 1px solid #86efac !important;
-        font-size: 0.78rem !important; min-height: 34px !important;
+        font-size: 0.78rem !important; min-height: 34px !important; font-weight: 600 !important;
     }
-    .dayabs-vac    { background:#2563eb; color:white; border-radius:8px; padding:5px 2px;
-                     text-align:center; font-size:0.78rem; min-height:34px;
-                     display:flex; align-items:center; justify-content:center; }
-    .dayabs-202    { background:#ca8a04; color:white; border-radius:8px; padding:5px 2px;
-                     text-align:center; font-size:0.78rem; min-height:34px;
-                     display:flex; align-items:center; justify-content:center; }
-    .dayabs-future { background:#16a34a; color:white; border-radius:8px; padding:5px 2px;
-                     text-align:center; font-size:0.78rem; min-height:34px;
-                     display:flex; align-items:center; justify-content:center; }
-    .dayabs-pend   { background:#94a3b8; color:white; border-radius:8px; padding:5px 2px;
-                     text-align:center; font-size:0.78rem; min-height:34px;
-                     display:flex; align-items:center; justify-content:center; }
-    .dayabs-night{ background:#1e3a5f; color:white; border-radius:8px; padding:5px 2px;
-                   text-align:center; font-size:0.78rem; min-height:34px;
-                   display:flex; align-items:center; justify-content:center; }
-    .dayabs-post { background:#f97316; color:white; border-radius:8px; padding:5px 2px;
-                   text-align:center; font-size:0.78rem; min-height:34px;
-                   display:flex; align-items:center; justify-content:center; }
-    .dayabs-empty{ padding:5px 2px; min-height:34px; }
-    .dayabs-hdr  { text-align:center; font-weight:700; color:#475569;
-                   font-size:0.82rem; padding-bottom:4px; }
+    div[class*="st-key-dayabs_vac_"] > div[data-testid="stButton"] > button:hover {
+        background: #fef9c3 !important; border-color: #fde68a !important;
+        color: #854d0e !important; transform: none !important;
+    }
+    /* light yellow — pending 202 request */
+    div[class*="st-key-dayabs_202_"] > div[data-testid="stButton"] > button {
+        background: #fef9c3 !important; color: #854d0e !important;
+        border: 1px solid #fde68a !important;
+        font-size: 0.78rem !important; min-height: 34px !important; font-weight: 600 !important;
+    }
+    div[class*="st-key-dayabs_202_"] > div[data-testid="stButton"] > button:hover {
+        background: white !important; border-color: #e2e8f0 !important;
+        color: #334155 !important; transform: none !important;
+    }
+    /* non-clickable fixed states */
+    .dayabs-vac   { background:#16a34a; color:white; border-radius:8px; padding:5px 2px;
+                    text-align:center; font-size:0.78rem; min-height:34px;
+                    display:flex; align-items:center; justify-content:center; }
+    .dayabs-202   { background:#ca8a04; color:white; border-radius:8px; padding:5px 2px;
+                    text-align:center; font-size:0.78rem; min-height:34px;
+                    display:flex; align-items:center; justify-content:center; }
+    .dayabs-night { background:#1e3a5f; color:white; border-radius:8px; padding:5px 2px;
+                    text-align:center; font-size:0.78rem; min-height:34px;
+                    display:flex; align-items:center; justify-content:center; }
+    .dayabs-post  { background:#f97316; color:white; border-radius:8px; padding:5px 2px;
+                    text-align:center; font-size:0.78rem; min-height:34px;
+                    display:flex; align-items:center; justify-content:center; }
+    .dayabs-empty { padding:5px 2px; min-height:34px; }
+    .dayabs-hdr   { text-align:center; font-weight:700; color:#475569;
+                    font-size:0.82rem; padding-bottom:4px; }
 
     /* ── WSD dept-grid cell coloring (Phase 6) ── */
     div[class*="st-key-wsdcell_"] > div[data-testid="stButton"] > button {
@@ -6067,39 +6073,47 @@ else:
                 if next_d.month == daily_active_month_int and next_d.year == 2026:
                     post_shift_days.add(next_d.day)
 
-        # ── Type selector — always visible ABOVE the calendar ──────────
-        abs_type_key = f"dayabs_type_{daily_active_month_int}"
-        if abs_type_key not in st.session_state:
-            st.session_state[abs_type_key] = "חופש"
+        # ── Click-cycle state: 0=free  1=חופש request (light green)  2=202 request (light yellow)
+        _cycle_ns = f"dayabs_cycle_{daily_active_month_int}"
+        _init_key = f"dayabs_cyc_init_{daily_active_month_int}"
 
-        _tc1, _tc2 = st.columns([2, 3])
-        with _tc1:
-            abs_type_disp = st.radio(
-                "סוג בקשה:",
-                ["חופש", "202"],
-                horizontal=True,
-                key=abs_type_key,
-            )
-        with _tc2:
-            if abs_type_disp == "202":
-                st.info("🔄 **202** — יום פיצוי עבור עבודה בסוף שבוע", icon=None)
-            else:
-                st.info("☀️ **חופש** — ימי חופשה רגילים", icon=None)
+        # Pre-populate cycle from existing pending requests (once per session/month)
+        if not st.session_state.get(_init_key, False):
+            _cyc_init: dict[int, int] = {}
+            _ar_init = st.session_state.absence_requests
+            if not _ar_init.empty and 'employee' in _ar_init.columns:
+                _user_n = str(user_name).strip()
+                _mine_init = _ar_init[_ar_init['employee'].astype(str).str.strip() == _user_n]
+                for _, _r in _mine_init.iterrows():
+                    if str(_r.get('status', '')).strip().lower() != 'pending':
+                        continue
+                    try:
+                        _sd = datetime.strptime(str(_r['start_date']), '%Y-%m-%d').date()
+                        _ed = datetime.strptime(str(_r['end_date']),   '%Y-%m-%d').date()
+                    except Exception:
+                        continue
+                    _atype = str(_r.get('type', '')).strip()
+                    _val   = 2 if _atype == '202' else 1
+                    _di    = _sd
+                    while _di <= _ed:
+                        if _di.month == daily_active_month_int and _di.year == 2026:
+                            _cyc_init[_di.day] = _val
+                        _di += timedelta(days=1)
+            st.session_state[_cycle_ns] = _cyc_init
+            st.session_state[_init_key] = True
 
-        # Build calendar grid — RTL: col 0=Saturday (ש), col 6=Sunday (א)
+        _cycle: dict[int, int] = st.session_state.get(_cycle_ns, {})
+
+        # ── Calendar grid — RTL: col 0=Saturday (ש), col 6=Sunday (א) ──
         HEB_WEEK = ["ש", "ו", "ה", "ד", "ג", "ב", "א"]
         _cal_da = [list(reversed(w)) for w in
                    calendar.Calendar(firstweekday=6).monthdayscalendar(2026, daily_active_month_int)]
+
         with st.container(border=True):
             # Header row
             cols_h = st.columns(7)
             for i, h in enumerate(HEB_WEEK):
                 cols_h[i].markdown(f"<div class='dayabs-hdr'>{h}</div>", unsafe_allow_html=True)
-
-            # Compute current selection range
-            ss = st.session_state[sel_start_key]
-            se = st.session_state[sel_end_key]
-            in_range = set(range(min(ss, se), max(ss, se) + 1)) if ss and se else set()
 
             for week in _cal_da:
                 cols = st.columns(7)
@@ -6108,191 +6122,202 @@ else:
                         if day == 0:
                             st.markdown("<div class='dayabs-empty'></div>", unsafe_allow_html=True)
                             continue
-                        # Pre-colored fixed states (non-clickable)
-                        # Highest priority: night shifts + post-shift (informational; not clickable)
+                        # ── Fixed non-clickable states ───────────────
                         if day in night_shift_days:
-                            st.markdown(f"<div class='dayabs-night'>🌙 {day}</div>",
+                            st.markdown(f"<div class='dayabs-night'>{day}</div>",
                                         unsafe_allow_html=True)
                         elif day in post_shift_days:
-                            st.markdown(f"<div class='dayabs-post'>🔶 {day}</div>",
+                            st.markdown(f"<div class='dayabs-post'>{day}</div>",
                                         unsafe_allow_html=True)
-                        elif day in approved_future_days:
-                            st.markdown(f"<div class='dayabs-future'>▲ {day}</div>",
-                                        unsafe_allow_html=True)
-                        elif day in approved_vac_days:
-                            st.markdown(f"<div class='dayabs-vac'>🔵 {day}</div>",
+                        elif day in approved_future_days or day in approved_vac_days:
+                            st.markdown(f"<div class='dayabs-vac'>{day}</div>",
                                         unsafe_allow_html=True)
                         elif day in approved_202_days:
-                            st.markdown(f"<div class='dayabs-202'>🟡 {day}</div>",
+                            st.markdown(f"<div class='dayabs-202'>{day}</div>",
                                         unsafe_allow_html=True)
-                        elif day in pending_days:
-                            st.markdown(f"<div class='dayabs-pend'>🔘 {day}</div>",
-                                        unsafe_allow_html=True)
-                        # Selecting start
-                        elif day == ss and not se:
-                            if st.button(f"▶{day}", key=f"dayabs_start_{day}",
-                                         use_container_width=True):
-                                st.session_state[sel_start_key] = None
-                                st.rerun()
-                        # In selected range
-                        elif day in in_range:
-                            if st.button(f"✓{day}", key=f"dayabs_range_{day}",
-                                         use_container_width=True):
-                                st.session_state[sel_start_key] = day
-                                st.session_state[sel_end_key]   = None
-                                st.rerun()
-                        # Free / clickable
+                        # ── Clickable: 3-state cycle ─────────────────
                         else:
-                            if st.button(str(day), key=f"dayabs_free_{day}",
-                                         use_container_width=True):
-                                if st.session_state[sel_start_key] is None:
-                                    st.session_state[sel_start_key] = day
-                                elif (st.session_state[sel_end_key] is None
-                                      and day != st.session_state[sel_start_key]):
-                                    st.session_state[sel_end_key] = day
-                                else:
-                                    st.session_state[sel_start_key] = day
-                                    st.session_state[sel_end_key]   = None
-                                st.rerun()
+                            _state = _cycle.get(day, 0)
+                            if _state == 1:
+                                # Light green — בקשה לחופש; click → 202
+                                if st.button(str(day),
+                                             key=f"dayabs_vac_{daily_active_month_int}_{day}",
+                                             use_container_width=True):
+                                    _cycle[day] = 2
+                                    st.session_state[_cycle_ns] = _cycle
+                                    st.rerun()
+                            elif _state == 2:
+                                # Light yellow — בקשה ל-202; click → free
+                                if st.button(str(day),
+                                             key=f"dayabs_202_{daily_active_month_int}_{day}",
+                                             use_container_width=True):
+                                    _cycle[day] = 0
+                                    st.session_state[_cycle_ns] = _cycle
+                                    st.rerun()
+                            else:
+                                # White — free; click → חופש request
+                                if st.button(str(day),
+                                             key=f"dayabs_free_{daily_active_month_int}_{day}",
+                                             use_container_width=True):
+                                    _cycle[day] = 1
+                                    st.session_state[_cycle_ns] = _cycle
+                                    st.rerun()
 
-            # Legend
+            # Legend — clean colored squares, no emoji inside cells
             st.markdown(
-                "<div style='direction:rtl;font-size:0.77rem;color:#64748b;"
-                "margin:8px 0 0 0;line-height:2'>"
-                "🌙 תורנות לילה &nbsp;|&nbsp; 🔶 אחרי תורנות &nbsp;|&nbsp; "
+                "<div style='direction:rtl;font-size:0.77rem;color:#475569;"
+                "margin:8px 0 2px 0;line-height:2.2'>"
+                "<span style='background:#1e3a5f;color:white;border-radius:4px;"
+                "padding:1px 7px'>27</span> תורנות &nbsp;|&nbsp; "
+                "<span style='background:#f97316;color:white;border-radius:4px;"
+                "padding:1px 7px'>27</span> אחרי תורנות &nbsp;|&nbsp; "
+                "<span style='background:#bbf7d0;color:#166534;border-radius:4px;"
+                "padding:1px 7px;border:1px solid #86efac'>27</span> בקשה לחופש &nbsp;|&nbsp; "
                 "<span style='background:#16a34a;color:white;border-radius:4px;"
-                "padding:1px 6px;font-size:0.72rem'>▲</span> חופש עתידי מאושר &nbsp;|&nbsp; "
-                "🔵 חופש מאושר &nbsp;|&nbsp; 🟡 202 מאושר &nbsp;|&nbsp; 🔘 בקשה ממתינה &nbsp;|&nbsp; "
-                "<span style='border:1px solid #e2e8f0;padding:1px 8px;border-radius:5px;"
-                "background:white;color:#334155'>27</span> פנוי (לחיצה לבחירה)"
+                "padding:1px 7px'>27</span> חופש מאושר &nbsp;|&nbsp; "
+                "<span style='background:#fef9c3;color:#854d0e;border-radius:4px;"
+                "padding:1px 7px;border:1px solid #fde68a'>27</span> בקשה ל-202 &nbsp;|&nbsp; "
+                "<span style='background:#ca8a04;color:white;border-radius:4px;"
+                "padding:1px 7px'>27</span> 202 מאושר &nbsp;|&nbsp; "
+                "<span style='border:1px solid #e2e8f0;padding:1px 7px;border-radius:4px;"
+                "background:white;color:#334155'>27</span> פנוי"
                 "</div>",
                 unsafe_allow_html=True)
 
+        # ── Summary message + שמור button ──────────────────────────────
+        _vac_sel = sorted(d for d, s in _cycle.items() if s == 1)
+        _202_sel = sorted(d for d, s in _cycle.items() if s == 2)
+
+        if _vac_sel or _202_sel:
             st.divider()
+            _btn_col, _msg_col = st.columns([1, 4])
+            with _msg_col:
+                _lines = []
+                for _d in _vac_sel:
+                    _lines.append(
+                        f"<span style='background:#bbf7d0;color:#166534;border-radius:4px;"
+                        f"padding:1px 7px;margin:2px;display:inline-block'>"
+                        f"בקשה לחופש — {_d:02d}/{daily_active_month_int:02d}</span>")
+                for _d in _202_sel:
+                    _lines.append(
+                        f"<span style='background:#fef9c3;color:#854d0e;border-radius:4px;"
+                        f"padding:1px 7px;margin:2px;display:inline-block'>"
+                        f"בקשה ל-202 — {_d:02d}/{daily_active_month_int:02d}</span>")
+                st.markdown(
+                    "<div style='direction:rtl;line-height:2;font-size:0.85rem'>"
+                    + " ".join(_lines) + "</div>",
+                    unsafe_allow_html=True)
+            with _btn_col:
+                can_submit = daily_requests_open or role == 'מנהל מחלקה'
+                if st.button("💾 שמור", use_container_width=True,
+                             key=f"dayabs_save_{daily_active_month_int}",
+                             type="primary", disabled=not can_submit):
+                    # ── Lookup dept + manager email ───────────────────
+                    _dr2 = st.session_state.dept_rotation
+                    _dept_at_req = ""
+                    _mgr_email   = ""
+                    if not _dr2.empty and 'employee' in _dr2.columns:
+                        _my_rot = _dr2[
+                            (_dr2['employee'].astype(str).str.strip() == str(user_name).strip()) &
+                            (_dr2['year_month'].astype(str) == da_year_month)
+                        ]
+                        if not _my_rot.empty:
+                            _dept_at_req = str(_my_rot.iloc[0].get('daily_dept', '')).strip()
+                    if _dept_at_req:
+                        for _, _sr in st.session_state.staff.iterrows():
+                            if str(_sr.get('type', '')).strip() != 'מנהל מחלקה':
+                                continue
+                            if _dept_at_req in _parse_manage_depts(_sr.get('manage_depts', '')):
+                                _mgr_email = str(_sr.get('email', '')).strip()
+                                break
 
-            # Submission row
-            ss = st.session_state[sel_start_key]
-            se = st.session_state[sel_end_key]
-            if ss and se:
-                lo, hi = min(ss, se), max(ss, se)
-                abs_type_disp = st.session_state.get(abs_type_key, "חופש")
-                _type_color = "#ca8a04" if abs_type_disp == "202" else "#2563eb"
-                c1, c2, c3 = st.columns([3, 3, 2])
-                with c1:
-                    st.markdown(
-                        f"**נבחר:** {lo:02d}/{daily_active_month_int:02d} – {hi:02d}/{daily_active_month_int:02d} &nbsp;"
-                        f"<span style='background:{_type_color};color:white;border-radius:4px;"
-                        f"padding:2px 8px;font-size:0.8rem'>{abs_type_disp}</span>",
-                        unsafe_allow_html=True)
-                with c2:
-                    abs_note = st.text_input(
-                        "הערה:", placeholder="הערה (רשות)...",
-                        label_visibility="collapsed",
-                        key=f"dayabs_note_{daily_active_month_int}"
-                    )
-                with c3:
-                    # מנהל מחלקה bypasses the open/close gate (auto-approved)
-                    can_submit = daily_requests_open or role == 'מנהל מחלקה'
-                    if st.button("✅ הגש בקשה", use_container_width=True,
-                                 key=f"dayabs_submit_{daily_active_month_int}",
-                                 disabled=not can_submit):
-                        # Lookup user's daily dept for this month
-                        dr = st.session_state.dept_rotation
-                        dept_at_req = ""
-                        manager_email = ""
-                        if not dr.empty and 'employee' in dr.columns:
-                            my_rot = dr[
-                                (dr['employee'].astype(str).str.strip() == str(user_name).strip()) &
-                                (dr['year_month'].astype(str) == da_year_month)
-                            ]
-                            if not my_rot.empty:
-                                dept_at_req = str(my_rot.iloc[0].get('daily_dept', '')).strip()
-                        # Find manager email by manage_depts
-                        if dept_at_req:
-                            staff_df_local = st.session_state.staff
-                            for _, sr in staff_df_local.iterrows():
-                                if str(sr.get('type', '')).strip() != 'מנהל מחלקה':
-                                    continue
-                                mdepts = _parse_manage_depts(sr.get('manage_depts', ''))
-                                if dept_at_req in mdepts:
-                                    manager_email = str(sr.get('email', '')).strip()
-                                    break
+                    _is_mgr = (role == 'מנהל מחלקה')
+                    _req_st = 'approved' if _is_mgr else 'pending'
+                    _appr   = str(user_name).strip() if _is_mgr else ''
+                    _resp   = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if _is_mgr else ''
+                    _now    = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-                        # מנהל מחלקה: auto-approved immediately
-                        _is_mgr_req   = (role == 'מנהל מחלקה')
-                        _req_status   = 'approved' if _is_mgr_req else 'pending'
-                        _approved_by  = str(user_name).strip() if _is_mgr_req else ''
-                        _responded_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if _is_mgr_req else ''
-
-                        # Build new row
-                        new_row = {
-                            'id': str(uuid.uuid4()),
-                            'employee': str(user_name).strip(),
-                            'start_date': f"2026-{daily_active_month_int:02d}-{lo:02d}",
-                            'end_date':   f"2026-{daily_active_month_int:02d}-{hi:02d}",
-                            'type': abs_type_disp,
-                            'status': _req_status,
-                            'dept_at_request': dept_at_req,
-                            'manager_email': manager_email,
-                            'approved_by': _approved_by,
-                            'notes': abs_note.strip(),
-                            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                            'responded_at': _responded_at,
-                        }
-                        new_df = pd.concat(
-                            [st.session_state.absence_requests, pd.DataFrame([new_row])],
-                            ignore_index=True
+                    # ── Remove existing pending rows for this user × month ─
+                    _ar_base = st.session_state.absence_requests.copy()
+                    if not _ar_base.empty and 'employee' in _ar_base.columns:
+                        _keep = ~(
+                            (_ar_base['employee'].astype(str).str.strip() == str(user_name).strip()) &
+                            (_ar_base['status'].astype(str).str.lower() == 'pending') &
+                            (_ar_base['start_date'].astype(str).str.startswith(
+                                f"2026-{daily_active_month_int:02d}"))
                         )
-                        st.session_state.absence_requests = new_df
-                        save_to_db("absence_requests", new_df)
+                        _ar_base = _ar_base[_keep]
 
-                        if _is_mgr_req:
-                            # Auto-approved: write directly to work_schedule_daily
-                            _mgr_dept = dept_at_req
-                            if not _mgr_dept:
-                                _sf  = st.session_state.staff
-                                _srf = _sf[_sf['name'].astype(str).str.strip() == str(user_name).strip()]
-                                if not _srf.empty:
-                                    _mdl = _parse_manage_depts(_srf.iloc[0].get('manage_depts', ''))
-                                    _mgr_dept = _mdl[0] if _mdl else ''
-                            if _mgr_dept:
-                                _di = lo
-                                while _di <= hi:
-                                    _ds = f"2026-{daily_active_month_int:02d}-{_di:02d}"
-                                    _wsd_upsert(_ds, str(user_name).strip(), _mgr_dept,
-                                                abs_type_disp, is_manual=True,
-                                                note=abs_note.strip())
-                                    _di += 1
-                            st.success(f"✅ {abs_type_disp} {lo:02d}/{daily_active_month_int:02d}–"
-                                       f"{hi:02d}/{daily_active_month_int:02d} אושר אוטומטית ועודכן בלוח!")
-                        else:
-                            # Regular employee: email the manager
-                            if manager_email:
-                                send_notification_email(
-                                    manager_email,
-                                    f"בקשת היעדרות חדשה: {user_name}",
-                                    f"<div dir='rtl'><p>שלום,</p>"
-                                    f"<p>עובד <b>{user_name}</b> ({dept_at_req}) הגיש/ה בקשת היעדרות:</p>"
-                                    f"<ul><li>סוג: {abs_type_disp}</li>"
-                                    f"<li>תאריכים: {new_row['start_date']} – {new_row['end_date']}</li>"
-                                    f"<li>הערה: {abs_note or '—'}</li></ul>"
-                                    f"<p>נא להיכנס למערכת לאישור או דחיה.</p></div>"
-                                )
-                            st.success(f"✅ בקשת {abs_type_disp} ל-{lo:02d}/{daily_active_month_int:02d}–"
-                                       f"{hi:02d}/{daily_active_month_int:02d} נשלחה!")
-                        st.session_state[sel_start_key] = None
-                        st.session_state[sel_end_key]   = None
-                        st.rerun()
+                    # ── Add one row per selected day ──────────────────
+                    _new_rows = []
+                    for _d in _vac_sel:
+                        _ds = f"2026-{daily_active_month_int:02d}-{_d:02d}"
+                        _new_rows.append({
+                            'id': str(uuid.uuid4()), 'employee': str(user_name).strip(),
+                            'start_date': _ds, 'end_date': _ds, 'type': 'חופש',
+                            'status': _req_st, 'dept_at_request': _dept_at_req,
+                            'manager_email': _mgr_email, 'approved_by': _appr,
+                            'notes': '', 'created_at': _now, 'responded_at': _resp,
+                        })
+                    for _d in _202_sel:
+                        _ds = f"2026-{daily_active_month_int:02d}-{_d:02d}"
+                        _new_rows.append({
+                            'id': str(uuid.uuid4()), 'employee': str(user_name).strip(),
+                            'start_date': _ds, 'end_date': _ds, 'type': '202',
+                            'status': _req_st, 'dept_at_request': _dept_at_req,
+                            'manager_email': _mgr_email, 'approved_by': _appr,
+                            'notes': '', 'created_at': _now, 'responded_at': _resp,
+                        })
 
-                if st.button("✖ בטל בחירה", key=f"dayabs_cancel_{daily_active_month_int}"):
-                    st.session_state[sel_start_key] = None
-                    st.session_state[sel_end_key]   = None
+                    _ar_final = pd.concat(
+                        [_ar_base, pd.DataFrame(_new_rows)], ignore_index=True)
+                    st.session_state.absence_requests = _ar_final
+                    save_to_db("absence_requests", _ar_final)
+
+                    if _is_mgr:
+                        # Auto-approved: write directly to WSD
+                        _mgr_dept2 = _dept_at_req
+                        if not _mgr_dept2:
+                            _srf2 = st.session_state.staff
+                            _srf2 = _srf2[_srf2['name'].astype(str).str.strip() == str(user_name).strip()]
+                            if not _srf2.empty:
+                                _mdl2 = _parse_manage_depts(_srf2.iloc[0].get('manage_depts', ''))
+                                _mgr_dept2 = _mdl2[0] if _mdl2 else ''
+                        if _mgr_dept2:
+                            for _d in _vac_sel:
+                                _wsd_upsert(f"2026-{daily_active_month_int:02d}-{_d:02d}",
+                                            str(user_name).strip(), _mgr_dept2,
+                                            'חופש', is_manual=True, note='')
+                            for _d in _202_sel:
+                                _wsd_upsert(f"2026-{daily_active_month_int:02d}-{_d:02d}",
+                                            str(user_name).strip(), _mgr_dept2,
+                                            '202', is_manual=True, note='')
+                        _build_approved_map()
+                    else:
+                        # Email manager
+                        if _mgr_email:
+                            _all_dates = (
+                                [f"חופש — {_d:02d}/{daily_active_month_int:02d}" for _d in _vac_sel] +
+                                [f"202 — {_d:02d}/{daily_active_month_int:02d}" for _d in _202_sel]
+                            )
+                            send_notification_email(
+                                _mgr_email,
+                                f"בקשת היעדרות חדשה: {user_name}",
+                                f"<div dir='rtl'><p>שלום,</p>"
+                                f"<p><b>{user_name}</b> ({_dept_at_req}) הגיש/ה בקשות היעדרות:</p>"
+                                f"<ul>{''.join(f'<li>{x}</li>' for x in _all_dates)}</ul>"
+                                f"<p>נא להיכנס למערכת לאישור.</p></div>"
+                            )
+
+                    # Reset init so calendar re-reads from DB on next render
+                    st.session_state[_init_key] = False
+                    st.session_state['show_dayabs_saved'] = True
                     st.rerun()
-            elif ss:
-                st.info(f"📍 נבחר: {ss:02d}/{daily_active_month_int:02d} — כעת לחץ על יום הסיום")
-            else:
-                st.caption("💡 לחץ על יום פנוי בלוח לבחירת תאריך התחלה. "
-                           "חופש עתידי שאושר מראש מופיע בכחול בלוח.")
+
+        if st.session_state.pop('show_dayabs_saved', False):
+            st.success("✅ הבקשות נשמרו!")
+        elif not (_vac_sel or _202_sel):
+            st.caption("💡 לחץ על יום פנוי — פעם אחת לחופש, פעמיים ל-202, שלוש לביטול.")
 
         # ── History table ──
         st.divider()
