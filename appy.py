@@ -794,6 +794,284 @@ def _export_dept_to_new_gsheet(dept_name, year_month, view_month):
     except Exception as e:
         return False, '', str(e)
 
+
+# ── Batched export helpers ────────────────────────────────────────────────────
+_BATCHED_ABSENT_STATUSES = {"חופש", "202", "אחרי תורנות", "אחר"}
+_BATCHED_SHIKUM_DEPTS    = {"שיקום גריאטרי א'", "שיקום גריאטרי ב'"}
+
+
+def _build_batched_day_data(dept_name, year_month, view_month):
+    """
+    Build per-day batches for the batched export format.
+    Returns (employees, per_day_workers, per_day_toranet, per_day_absent)
+    or (None, None, None, None) if no data.
+
+    Batch rules:
+      - Regular day : workers = dept_rotation employees not absent (sorted by role)
+      - Friday      : workers = שישי בוקר workers for this dept
+      - Saturday    : workers = [] (nothing for שיקום; only תורן for פנימית)
+      - תורן        : from _get_night_duty()
+      - absent      : employees with ABSENT status
+    """
+    year = 2026
+    num_days = calendar.monthrange(year, view_month)[1]
+    days = list(range(1, num_days + 1))
+
+    dr = st.session_state.dept_rotation
+    if dr.empty or 'employee' not in dr.columns:
+        return None, None, None, None
+    mask = ((dr['year_month'].astype(str) == year_month) &
+            (dr['daily_dept'].astype(str) == dept_name))
+    employees = dr[mask]['employee'].astype(str).str.strip().tolist()
+    if not employees:
+        return None, None, None, None
+    employees = _sort_employees_by_role(employees)
+
+    per_day_workers = {}
+    per_day_toranet = {}
+    per_day_absent  = {}
+
+    for d in days:
+        date_str = f"{year}-{view_month:02d}-{d:02d}"
+        date_obj = date(year, view_month, d)
+        weekday  = (date_obj.weekday() + 1) % 7  # 0=Sun 5=Fri 6=Sat
+        is_friday   = weekday == 5
+        is_saturday = weekday == 6
+
+        workers, absent = [], []
+
+        if is_saturday:
+            # Saturday: no workers for any dept (שיקום has nothing, פנימית shows only תורן)
+            for emp in employees:
+                status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
+                if status in _BATCHED_ABSENT_STATUSES:
+                    absent.append(emp)
+        elif is_friday:
+            # Friday: workers = שישי בוקר workers (may be from outside dept_rotation)
+            workers = _get_fri_shift_workers(date_str, dept_name)
+            for emp in employees:
+                status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
+                if status in _BATCHED_ABSENT_STATUSES:
+                    absent.append(emp)
+        else:
+            # Regular day
+            for emp in employees:
+                status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
+                if status in _BATCHED_ABSENT_STATUSES:
+                    absent.append(emp)
+                else:
+                    workers.append(emp)
+
+        per_day_workers[d] = workers
+        per_day_toranet[d] = _get_night_duty(date_str, dept_name)
+        per_day_absent[d]  = absent
+
+    return employees, per_day_workers, per_day_toranet, per_day_absent
+
+
+def _write_batched_sheet(ws, dept_name, year_month, view_month,
+                         per_day_workers, per_day_toranet, per_day_absent):
+    """
+    Write batched schedule data into an existing openpyxl Worksheet.
+    Layout (rows × cols-per-day):
+      Row 1  : dept title header
+      Row 2  : day-number + weekday-letter header
+      Row 3  : 'עובדים' section label
+      Rows 4+ : worker slots (max across all days)
+      Next   : תורן row (single data row, label in col A)
+      Next   : 'לא נמצאים' section label
+      Next+  : absent slots (max across all days)
+    No merged cells.
+    """
+    import openpyxl
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+
+    year = 2026
+    num_days = calendar.monthrange(year, view_month)[1]
+    days = list(range(1, num_days + 1))
+    WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
+
+    toranet_label = "תורן פנגר" if dept_name == "פנימית גריאטרית" else "תורן שיקום"
+
+    max_work_rows = max((len(v) for v in per_day_workers.values()), default=1)
+    max_abs_rows  = max((len(v) for v in per_day_absent.values()),  default=0)
+
+    # ── Styles ──────────────────────────────────────────────────────────
+    thin = Side(style='thin', color='CBD5E1')
+    bdr  = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    f_hdr_dept   = PatternFill("solid", fgColor="1E293B")
+    f_hdr_day    = PatternFill("solid", fgColor="334155")
+    f_sec_work   = PatternFill("solid", fgColor="DCFCE7")
+    f_sec_toran  = PatternFill("solid", fgColor="EDE9FE")
+    f_sec_absent = PatternFill("solid", fgColor="FEF2F2")
+    f_work_cell  = PatternFill("solid", fgColor="F0FDF4")
+    f_fri_cell   = PatternFill("solid", fgColor="FFFBEB")
+    f_sat_cell   = PatternFill("solid", fgColor="F1F5F9")
+    f_abs_cell   = PatternFill("solid", fgColor="FFF5F5")
+
+    ws.sheet_view.rightToLeft = True
+
+    def _set(row, col, val="", **kw):
+        c = ws.cell(row, col, val)
+        c.border = bdr
+        for attr, v in kw.items():
+            setattr(c, attr, v)
+        return c
+
+    # ── Row 1: dept title ────────────────────────────────────────────────
+    _set(1, 1, f"{dept_name} — {year_month}",
+         font=Font(bold=True, size=12, color="FFFFFF"),
+         fill=f_hdr_dept,
+         alignment=Alignment(horizontal='right'))
+    for d in days:
+        _set(1, d + 1, fill=f_hdr_dept)
+
+    # ── Row 2: day numbers + weekday letters ─────────────────────────────
+    _set(2, 1, "יום / תאריך",
+         font=Font(bold=True, color="FFFFFF", size=9),
+         fill=f_hdr_day,
+         alignment=Alignment(horizontal='center'))
+    for d in days:
+        date_obj = date(year, view_month, d)
+        wd_idx   = (date_obj.weekday() + 1) % 7
+        _set(2, d + 1, f"{d}\n{WD[wd_idx]}",
+             font=Font(bold=True, color="FFFFFF", size=9),
+             fill=f_hdr_day,
+             alignment=Alignment(horizontal='center', vertical='center', wrap_text=True))
+    ws.row_dimensions[2].height = 26
+
+    # ── Row 3: עובדים section label ──────────────────────────────────────
+    r = 3
+    _set(r, 1, "עובדים",
+         font=Font(bold=True, size=9, color="166534"),
+         fill=f_sec_work,
+         alignment=Alignment(horizontal='right'))
+    for d in days:
+        _set(r, d + 1, fill=f_sec_work)
+    r += 1
+
+    # Worker rows
+    for i in range(max_work_rows):
+        _set(r, 1)
+        for d in days:
+            date_obj = date(year, view_month, d)
+            wd_idx   = (date_obj.weekday() + 1) % 7
+            lst = per_day_workers.get(d, [])
+            val = lst[i] if i < len(lst) else ""
+            if wd_idx == 6:
+                bg = f_sat_cell
+            elif wd_idx == 5:
+                bg = f_fri_cell
+            else:
+                bg = f_work_cell
+            _set(r, d + 1, val,
+                 font=Font(size=9),
+                 fill=bg,
+                 alignment=Alignment(horizontal='right', vertical='center'))
+        r += 1
+
+    # ── תורן row (label + data in same row) ──────────────────────────────
+    _set(r, 1, toranet_label,
+         font=Font(bold=True, size=9, color="5B21B6"),
+         fill=f_sec_toran,
+         alignment=Alignment(horizontal='right'))
+    for d in days:
+        nd = per_day_toranet.get(d) or ""
+        _set(r, d + 1, nd,
+             font=Font(size=9, color="5B21B6"),
+             fill=f_sec_toran,
+             alignment=Alignment(horizontal='right', vertical='center'))
+    r += 1
+
+    # ── לא נמצאים section label ──────────────────────────────────────────
+    _set(r, 1, "לא נמצאים",
+         font=Font(bold=True, size=9, color="991B1B"),
+         fill=f_sec_absent,
+         alignment=Alignment(horizontal='right'))
+    for d in days:
+        _set(r, d + 1, fill=f_sec_absent)
+    r += 1
+
+    # Absent rows
+    for i in range(max_abs_rows):
+        _set(r, 1)
+        for d in days:
+            lst = per_day_absent.get(d, [])
+            val = lst[i] if i < len(lst) else ""
+            _set(r, d + 1, val,
+                 font=Font(size=9, color="991B1B" if val else "9CA3AF"),
+                 fill=f_abs_cell,
+                 alignment=Alignment(horizontal='right', vertical='center'))
+        r += 1
+
+    # ── Column widths + freeze ────────────────────────────────────────────
+    ws.column_dimensions['A'].width = 14
+    for d in days:
+        ws.column_dimensions[
+            openpyxl.utils.get_column_letter(d + 1)].width = 11
+    ws.freeze_panes = "B3"
+
+
+def _export_dept_grid_batched(dept_name, year_month, view_month):
+    """
+    Export single dept in batched format. Returns (bytes, filename) or (None, None).
+    """
+    try:
+        import openpyxl
+        employees, pw, pt, pa = _build_batched_day_data(
+            dept_name, year_month, view_month)
+        if employees is None:
+            return None, None
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        safe_title = dept_name.replace("'", "").replace('"', '').replace('/', '_')[:31]
+        ws.title = safe_title
+
+        _write_batched_sheet(ws, dept_name, year_month, view_month, pw, pt, pa)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        safe = dept_name.replace("'", "").replace('"', '').replace('/', '_')[:25]
+        return buf.getvalue(), f"סידור_{safe}_{year_month}.xlsx"
+    except Exception:
+        return None, None
+
+
+def _export_all_depts_batched(year_month, view_month):
+    """
+    Export all 3 dept grids in a single Excel workbook (one sheet per dept).
+    Returns (bytes, filename) or (None, None).
+    """
+    try:
+        import openpyxl
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)   # remove default blank sheet
+        any_added = False
+
+        for dept_name in DAILY_DEPTS_ALL:
+            employees, pw, pt, pa = _build_batched_day_data(
+                dept_name, year_month, view_month)
+            if employees is None:
+                continue
+            safe_title = dept_name.replace("'", "").replace('"', '').replace('/', '_')[:31]
+            ws = wb.create_sheet(title=safe_title)
+            _write_batched_sheet(ws, dept_name, year_month, view_month, pw, pt, pa)
+            any_added = True
+
+        if not any_added:
+            return None, None
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf.getvalue(), f"סידור_כל_המחלקות_{year_month}.xlsx"
+    except Exception:
+        return None, None
+
+
 def _get_fri_shift_workers(date_str, daily_dept):
     """
     Return list of employee names assigned to the department's Friday-morning
@@ -1088,16 +1366,16 @@ _TYPE_DISPLAY = {
 
 def _render_export_buttons(dept_name, year_month, view_month, key_ns, user_name=""):
     """
-    Render two export buttons for a dept:
-      1. 📥 Excel — download_button (local download)
-      2. 🔗 פתח ב-Sheets — create standalone GSheet, open in new tab
+    Render export buttons for a dept:
+      1. 📥 Excel (batched format) — download_button
+      2. 🔗 פתח ב-Sheets — export to Google Sheets + open in browser
     """
     import streamlit.components.v1 as _components
     c1, c2 = st.columns(2)
 
-    # 1. Excel download
+    # 1. Batched Excel download
     with c1:
-        xl_bytes, xl_fname = _export_dept_grid_excel(dept_name, year_month, view_month)
+        xl_bytes, xl_fname = _export_dept_grid_batched(dept_name, year_month, view_month)
         if xl_bytes:
             st.download_button(
                 "📥 הורד Excel",
@@ -1111,7 +1389,7 @@ def _render_export_buttons(dept_name, year_month, view_month, key_ns, user_name=
             st.button("📥 Excel", key=f"xl_dl_{key_ns}_na", disabled=True,
                       use_container_width=True)
 
-    # 2. New standalone Google Sheet — auto-open in browser
+    # 2. Google Sheets export — auto-open in browser
     with c2:
         if st.button("🔗 פתח ב-Sheets", key=f"exp_new_{key_ns}",
                      use_container_width=True):
@@ -5371,6 +5649,24 @@ elif role in ("מנהל/ת", "מנהל על"):
                         cnt = (cur['daily_dept'] == d).sum()
                         if cnt > 0:
                             st.caption(f"   • {d}: {cnt} עובדים")
+
+        # ── ייצוא כל המחלקות ─────────────────────────────────────
+        st.divider()
+        st.markdown("##### 📥 ייצוא סידור — כל המחלקות")
+        _exp_col1, _exp_col2, _ = st.columns([2, 2, 3])
+        with _exp_col1:
+            _all_bytes, _all_fname = _export_all_depts_batched(view_year_month, view_month)
+            if _all_bytes:
+                st.download_button(
+                    f"📥 Excel — כל המחלקות ({hebrew_months[view_month-1]})",
+                    data=_all_bytes,
+                    file_name=_all_fname,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"xl_all_depts_{view_month}",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("אין שיבוצים לייצוא לחודש זה.")
 
         # ── הוספת היעדרות מאושרת לעובד ───────────────────────────
         st.divider()
