@@ -1452,28 +1452,43 @@ def _render_dept_grid_readonly(dept_name, year_month, view_month, highlight_user
             else:
                 _statuses[(emp, d)] = raw
 
+    # Helper: render one labeled info-row (תורן / שישי בוקר)
+    def _info_row(col_w, label, label_bg, label_color, cells):
+        """cells: list of (text, bg_color) per day in segment."""
+        rc = st.columns(col_w)
+        rc[0].markdown(
+            f"<div style='background:{label_bg};color:{label_color};font-weight:700;"
+            f"font-size:0.7rem;border-radius:5px;text-align:center;"
+            f"padding:3px 2px;white-space:nowrap'>{label}</div>",
+            unsafe_allow_html=True)
+        for ci, (txt, cell_bg) in enumerate(cells):
+            rc[ci + 1].markdown(
+                f"<div style='background:{cell_bg};color:#374151;border-radius:5px;"
+                f"text-align:center;font-size:0.68rem;padding:3px 1px;"
+                f"min-height:28px;line-height:1.3;overflow:hidden;"
+                f"white-space:nowrap;text-overflow:ellipsis'>"
+                f"{txt or ''}</div>",
+                unsafe_allow_html=True)
+
     # Render per 10-day segment so columns don't overflow
     seg1 = list(range(1, 11))
     seg2 = list(range(11, 21))
     seg3 = list(range(21, num_days + 1))
     for seg in [s for s in [seg1, seg2, seg3] if s]:
-        # Header row: empty label col + day-number cols
-        cal_weeks_seg = []
-        # Build week-indexed day structure for this segment
         _days_in_seg = seg
-        # Column widths: name col (2) + one col per day
         n_days = len(_days_in_seg)
-        col_w  = [2] + [1] * n_days
-        # Day header
+        col_w  = [2] + [1] * n_days   # label col (left) + one col per day
+
+        # ── Day header ───────────────────────────────────────────────────
         hdr_cols = st.columns(col_w)
         hdr_cols[0].markdown(
-            "<div style='font-size:0.72rem;color:#64748b;text-align:right;"
-            "font-weight:700;padding:2px 4px'>עובד/ת</div>",
+            "<div style='font-size:0.72rem;color:#64748b;text-align:center;"
+            "font-weight:700;padding:2px 4px'>&nbsp;</div>",
             unsafe_allow_html=True)
         for ci, d in enumerate(_days_in_seg):
             date_obj = date(year, view_month, d)
             wd_idx   = (date_obj.weekday() + 1) % 7  # 0=Sun … 6=Sat
-            is_wk    = wd_idx in (5, 6)              # Fri or Sat
+            is_wk    = wd_idx in (5, 6)
             hdr_cols[ci + 1].markdown(
                 f"<div style='text-align:center;font-size:0.7rem;"
                 f"font-weight:700;color:{'#7c3aed' if is_wk else '#64748b'};"
@@ -1481,14 +1496,11 @@ def _render_dept_grid_readonly(dept_name, year_month, view_month, highlight_user
                 f"{WD_SHORT[wd_idx]}</span></div>",
                 unsafe_allow_html=True)
 
-        # Employee rows
+        # ── Employee rows ────────────────────────────────────────────────
         for emp in employees:
             is_me = (str(emp).strip() == str(highlight_user or '').strip())
             row_cols = st.columns(col_w)
-            _name_style = (
-                "font-weight:700;color:#0f172a" if is_me
-                else "color:#374151"
-            )
+            _name_style = "font-weight:700;color:#0f172a" if is_me else "color:#374151"
             row_cols[0].markdown(
                 f"<div style='font-size:0.75rem;{_name_style};"
                 f"text-align:right;padding:2px 4px;white-space:nowrap;"
@@ -1504,7 +1516,32 @@ def _render_dept_grid_readonly(dept_name, year_month, view_month, highlight_user
                     f"text-align:center;font-size:0.72rem;font-weight:600;"
                     f"padding:4px 1px;min-height:28px;line-height:1.2'>{lbl}</div>",
                     unsafe_allow_html=True)
-        st.markdown("<div style='margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+        # ── תורנ/ית row ──────────────────────────────────────────────────
+        nd_cells = []
+        for d in _days_in_seg:
+            ds      = f"{year}-{view_month:02d}-{d:02d}"
+            nd      = _get_night_duty(ds, dept_name)
+            wd_idx  = (date(year, view_month, d).weekday() + 1) % 7
+            cell_bg = "#fef2f2" if wd_idx in (5, 6) else "#f5f3ff"
+            nd_cells.append((_make_initials(nd) if nd else "—", cell_bg))
+        _info_row(col_w, "🌙 תורנ/ית", "#ede9fe", "#5b21b6", nd_cells)
+
+        # ── שישי בוקר row ────────────────────────────────────────────────
+        fri_cells = []
+        for d in _days_in_seg:
+            ds     = f"{year}-{view_month:02d}-{d:02d}"
+            wd_idx = (date(year, view_month, d).weekday() + 1) % 7
+            if wd_idx == 5:   # Friday
+                fw      = _get_fri_shift_workers(ds, dept_name)
+                txt     = " / ".join(_make_initials(n) for n in fw) if fw else "—"
+                cell_bg = "#fffbeb"
+            else:
+                txt, cell_bg = "", "#f8fafc"
+            fri_cells.append((txt, cell_bg))
+        _info_row(col_w, "☀️ שישי בוקר", "#fef9c3", "#854d0e", fri_cells)
+
+        st.markdown("<div style='margin-bottom:10px'></div>", unsafe_allow_html=True)
 
     # Legend
     st.markdown(
@@ -1514,7 +1551,9 @@ def _render_dept_grid_readonly(dept_name, year_month, view_month, highlight_user
         "<span style='background:#dbeafe;color:#1e40af;border-radius:3px;padding:1px 6px'>ח</span> חופש &nbsp;|&nbsp;"
         "<span style='background:#fef9c3;color:#854d0e;border-radius:3px;padding:1px 6px'>202</span> 202 &nbsp;|&nbsp;"
         "<span style='background:#ffedd5;color:#9a3412;border-radius:3px;padding:1px 6px'>אח</span> אחרי תורנות &nbsp;|&nbsp;"
-        "<span style='background:#ede9fe;color:#5b21b6;border-radius:3px;padding:1px 6px'>ת</span> תורנות"
+        "<span style='background:#ede9fe;color:#5b21b6;border-radius:3px;padding:1px 6px'>ת</span> תורנות &nbsp;|&nbsp;"
+        "<span style='background:#f5f3ff;color:#5b21b6;border-radius:3px;padding:1px 6px'>🌙</span> תורנ/ית &nbsp;|&nbsp;"
+        "<span style='background:#fffbeb;color:#854d0e;border-radius:3px;padding:1px 6px'>☀️</span> שישי בוקר"
         "</div>",
         unsafe_allow_html=True)
 
@@ -5864,8 +5903,69 @@ elif role in ("מנהל/ת", "מנהל על"):
         adm_mgr_tabs = st.tabs(["לוח מחלקה", "בקשות ממתינות"])
         with adm_mgr_tabs[0]:
             st.markdown(f"#### לוח {sel_dept_admin}")
+
+            # Build employees list: dept_rotation + managers of this dept (always shown)
+            _adm_dr = st.session_state.dept_rotation
+            _adm_emps = []
+            if not _adm_dr.empty and 'employee' in _adm_dr.columns:
+                _adm_mask = ((_adm_dr['year_month'].astype(str) == adm_y_m) &
+                             (_adm_dr['daily_dept'].astype(str) == sel_dept_admin))
+                _adm_emps = _adm_dr[_adm_mask]['employee'].astype(str).str.strip().tolist()
+
+            # Find managers for this dept
+            _adm_staff = st.session_state.staff.copy()
+            _adm_staff['name'] = _adm_staff['name'].astype(str).str.strip()
+            _dept_managers = []
+            for _, _sr in _adm_staff[_adm_staff['type'] == 'מנהל מחלקה'].iterrows():
+                _m_depts = _parse_manage_depts(_sr.get('manage_depts', ''))
+                if sel_dept_admin in _m_depts:
+                    _dept_managers.append(str(_sr['name']).strip())
+
+            # Add managers not already in the list (prepend, flagged separately)
+            _mgrs_not_in_dr = [m for m in _dept_managers if m not in _adm_emps]
+            _all_adm_emps = _adm_emps + _mgrs_not_in_dr  # managers at bottom
+            _all_adm_emps = _sort_employees_by_role(_all_adm_emps)
+
             _render_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int,
-                              "adm_mgrview")
+                              "adm_mgrview", employees=_all_adm_emps)
+
+            # ── Section: add/remove dept manager from this month's schedule ──
+            if _dept_managers:
+                st.divider()
+                st.markdown("**👔 מנהלי המחלקה**")
+                for _mgr in _dept_managers:
+                    _mgr_in_dr = _mgr in _adm_emps
+                    _mc1, _mc2 = st.columns([3, 2])
+                    _mc1.markdown(
+                        f"<div style='padding:6px 0;font-size:0.9rem'>"
+                        f"{'✅' if _mgr_in_dr else '⬜'} **{_mgr}**"
+                        f"{'&nbsp;&nbsp;<span style=\"color:#16a34a;font-size:0.8rem\">משובץ לחודש</span>' if _mgr_in_dr else ''}"
+                        f"</div>",
+                        unsafe_allow_html=True)
+                    if not _mgr_in_dr:
+                        if _mc2.button(f"➕ הוסף לסידור", key=f"adm_add_mgr_{_mgr}_{adm_y_m}",
+                                       use_container_width=True):
+                            _new_dr_row = {'employee': _mgr, 'year_month': adm_y_m,
+                                           'daily_dept': sel_dept_admin}
+                            _new_dr_df = pd.concat(
+                                [st.session_state.dept_rotation, pd.DataFrame([_new_dr_row])],
+                                ignore_index=True)
+                            st.session_state.dept_rotation = _new_dr_df
+                            save_to_db("dept_rotation", _new_dr_df)
+                            st.rerun()
+                    else:
+                        if _mc2.button(f"➖ הסר מסידור", key=f"adm_rem_mgr_{_mgr}_{adm_y_m}",
+                                       use_container_width=True):
+                            _filt_dr = st.session_state.dept_rotation
+                            _filt_dr = _filt_dr[~(
+                                (_filt_dr['employee'].astype(str).str.strip() == _mgr) &
+                                (_filt_dr['year_month'].astype(str) == adm_y_m) &
+                                (_filt_dr['daily_dept'].astype(str) == sel_dept_admin)
+                            )]
+                            st.session_state.dept_rotation = _filt_dr.reset_index(drop=True)
+                            save_to_db("dept_rotation", st.session_state.dept_rotation)
+                            st.rerun()
+
             st.divider()
             _render_export_buttons(sel_dept_admin, adm_y_m, daily_active_month_int,
                                    "adm_mgrview", user_name)
