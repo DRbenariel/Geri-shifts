@@ -835,7 +835,11 @@ def _build_batched_day_data(dept_name, year_month, view_month):
                     # מנהל מחלקה not planted on this day → skip
                     continue
                 if status in _BATCHED_ABSENT_STATUSES:
-                    absent.append(emp)
+                    _note = _wsd_get_note(date_str, emp)
+                    if status == "אחר" and _note:
+                        absent.append(f"{emp} - אחר ({_note})")
+                    else:
+                        absent.append(f"{emp} - {status}")
                 else:
                     workers.append(emp)
 
@@ -6015,6 +6019,30 @@ elif role in ("מנהל/ת", "מנהל על"):
                             if row.get('notes'):
                                 st.caption(f"💬 {row['notes']}")
 
+                # ── Approved requests for the active month (table below) ──
+                st.divider()
+                st.markdown("#### בקשות שאושרו לחודש הפעיל")
+                _ap_a = ar_admgr[(ar_admgr['status'] == 'approved') &
+                                 (ar_admgr['dept_at_request'] == sel_dept_admin)].copy()
+                if not _ap_a.empty:
+                    _ap_a['start_date'] = pd.to_datetime(_ap_a['start_date'], errors='coerce')
+                    _ap_a['end_date']   = pd.to_datetime(_ap_a['end_date'],   errors='coerce')
+                    _mstart_a = pd.Timestamp(2026, daily_active_month_int, 1)
+                    _mend_a   = pd.Timestamp(
+                        2026, daily_active_month_int,
+                        calendar.monthrange(2026, daily_active_month_int)[1])
+                    _ap_a = _ap_a[(_ap_a['end_date'] >= _mstart_a) &
+                                  (_ap_a['start_date'] <= _mend_a)]
+                if _ap_a.empty:
+                    st.info("אין בקשות שאושרו לחודש זה.")
+                else:
+                    _show_a = _ap_a[['employee', 'start_date', 'end_date', 'type',
+                                     'approved_by', 'responded_at']].copy()
+                    _show_a.columns = ['עובד/ת', 'מתאריך', 'עד תאריך', 'סוג',
+                                       'אושר ע"י', 'תאריך אישור']
+                    _show_a['מתאריך']  = _show_a['מתאריך'].dt.strftime('%Y-%m-%d')
+                    _show_a['עד תאריך'] = _show_a['עד תאריך'].dt.strftime('%Y-%m-%d')
+                    st.dataframe(_show_a, use_container_width=True, hide_index=True)
 
 
 else:
@@ -6368,11 +6396,11 @@ else:
                         else:
                             _state = _cycle.get(day, 0)
                             if _state == 1:
-                                # Light green — בקשה לחופש; click → 202
+                                # Light green — בקשה לחופש; click → 202 (or → free for רופא בכיר)
                                 if st.button(str(day),
                                              key=f"dayabs_vac_{daily_active_month_int}_{day}",
                                              use_container_width=True):
-                                    _cycle[day] = 2
+                                    _cycle[day] = 0 if role == 'רופא בכיר' else 2
                                     st.session_state[_cycle_ns] = _cycle
                                     st.rerun()
                             elif _state == 2:
@@ -6393,7 +6421,8 @@ else:
                                     st.rerun()
 
             # Legend — clean colored squares, no emoji inside cells
-            st.markdown(
+            # רופא בכיר never sees the 202 entries (they can't request 202)
+            _legend_html = (
                 "<div style='direction:rtl;font-size:0.77rem;color:#475569;"
                 "margin:8px 0 2px 0;line-height:2.2'>"
                 "<span style='background:#1e3a5f;color:#1e3a5f;border-radius:4px;"
@@ -6404,14 +6433,20 @@ else:
                 "padding:1px 10px;border:1px solid #86efac'>&nbsp;</span> בקשה לחופש &nbsp;|&nbsp; "
                 "<span style='background:#16a34a;color:#16a34a;border-radius:4px;"
                 "padding:1px 10px'>&nbsp;</span> חופש מאושר &nbsp;|&nbsp; "
-                "<span style='background:#fef9c3;border-radius:4px;"
-                "padding:1px 10px;border:1px solid #fde68a'>&nbsp;</span> בקשה ל-202 &nbsp;|&nbsp; "
-                "<span style='background:#eab308;color:#eab308;border-radius:4px;"
-                "padding:1px 10px'>&nbsp;</span> 202 מאושר &nbsp;|&nbsp; "
+            )
+            if role != 'רופא בכיר':
+                _legend_html += (
+                    "<span style='background:#fef9c3;border-radius:4px;"
+                    "padding:1px 10px;border:1px solid #fde68a'>&nbsp;</span> בקשה ל-202 &nbsp;|&nbsp; "
+                    "<span style='background:#eab308;color:#eab308;border-radius:4px;"
+                    "padding:1px 10px'>&nbsp;</span> 202 מאושר &nbsp;|&nbsp; "
+                )
+            _legend_html += (
                 "<span style='border:1px solid #e2e8f0;padding:1px 10px;border-radius:4px;"
                 "background:white'>&nbsp;</span> פנוי"
-                "</div>",
-                unsafe_allow_html=True)
+                "</div>"
+            )
+            st.markdown(_legend_html, unsafe_allow_html=True)
 
         # ── Summary message + שמור button ──────────────────────────────
         _vac_sel = sorted(d for d, s in _cycle.items() if s == 1)
@@ -6773,6 +6808,33 @@ else:
                                         st.rerun()
                                     if row.get('notes'):
                                         st.caption(f"💬 {row['notes']}")
+
+                        # ── Approved requests for the active month (table below) ──
+                        st.divider()
+                        st.markdown("#### בקשות שאושרו לחודש הפעיל")
+                        _ap_m = ar_df_mgr[
+                            (ar_df_mgr['status'] == 'approved') &
+                            (dept_match | emp_match)
+                        ].copy()
+                        if not _ap_m.empty:
+                            _ap_m['start_date'] = pd.to_datetime(_ap_m['start_date'], errors='coerce')
+                            _ap_m['end_date']   = pd.to_datetime(_ap_m['end_date'],   errors='coerce')
+                            _mstart_m = pd.Timestamp(2026, daily_active_month_int, 1)
+                            _mend_m   = pd.Timestamp(
+                                2026, daily_active_month_int,
+                                calendar.monthrange(2026, daily_active_month_int)[1])
+                            _ap_m = _ap_m[(_ap_m['end_date'] >= _mstart_m) &
+                                          (_ap_m['start_date'] <= _mend_m)]
+                        if _ap_m.empty:
+                            st.info("אין בקשות שאושרו לחודש זה.")
+                        else:
+                            _show_m = _ap_m[['employee', 'start_date', 'end_date', 'type',
+                                             'approved_by', 'responded_at']].copy()
+                            _show_m.columns = ['עובד/ת', 'מתאריך', 'עד תאריך', 'סוג',
+                                               'אושר ע"י', 'תאריך אישור']
+                            _show_m['מתאריך']  = _show_m['מתאריך'].dt.strftime('%Y-%m-%d')
+                            _show_m['עד תאריך'] = _show_m['עד תאריך'].dt.strftime('%Y-%m-%d')
+                            st.dataframe(_show_m, use_container_width=True, hide_index=True)
         else:
             # מתמחה / רופא בכיר — read-only full department calendar
             hebrew_months_es = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
