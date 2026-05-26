@@ -206,7 +206,10 @@ def _update_absence_status(req_id, new_status, responder_name):
     df.loc[mask, 'approved_by']  = responder_name
     df.loc[mask, 'responded_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     st.session_state.absence_requests = df
-    save_to_db("absence_requests", df)
+    # Fire-and-forget write so admin can approve/reject in rapid succession
+    # without each click freezing on the gspread round-trip. The coalescing
+    # queue in _save_async guarantees the latest snapshot wins.
+    _save_async("absence_requests", df.copy())
 
     # Notify the requester by email if we have one
     try:
@@ -2079,23 +2082,68 @@ def _log_async(event_type, detail_1='', detail_2=''):
     ).start()
 
 
+import queue as _queue
+import sys as _sys
+import traceback as _traceback
+
+# Single background queue + drainer thread for all async writes.
+# Coalesces consecutive writes to the same worksheet so rapid clicks
+# don't race (the latest snapshot always wins). This fixes the bug
+# where two daemon threads writing the same sheet could complete out
+# of order and silently drop the newer click.
+_save_queue: "_queue.Queue[tuple[str, object, bool]]" = _queue.Queue()
+_save_worker_started = False
+_save_worker_lock = _threading.Lock()
+
+def _save_worker():
+    while True:
+        worksheet, df, is_rtl = _save_queue.get()   # blocks
+        # Coalesce: drain any queued writes for the same worksheet
+        # and keep only the latest snapshot — older ones are stale.
+        try:
+            held = []
+            while not _save_queue.empty():
+                try:
+                    w2, d2, r2 = _save_queue.get_nowait()
+                except _queue.Empty:
+                    break
+                if w2 == worksheet:
+                    df, is_rtl = d2, r2   # newer snapshot wins
+                else:
+                    held.append((w2, d2, r2))
+            # Re-queue items for other worksheets (preserve order)
+            for item in held:
+                _save_queue.put(item)
+            # Perform the (coalesced) write
+            try:
+                save_to_db(worksheet, df, is_rtl=is_rtl)
+            except Exception:
+                # Surface to the Streamlit server log so silent loss
+                # doesn't go completely unnoticed.
+                _traceback.print_exc(file=_sys.stderr)
+        finally:
+            _save_queue.task_done()
+
+
 def _save_async(worksheet_name, df, is_rtl=False):
-    """Fire-and-forget wrapper for save_to_db — never blocks the UI.
+    """Queue a non-blocking write to Google Sheets — never freezes the UI.
 
     Use ONLY when the calling code has just updated the in-memory
     st.session_state copy. The DataFrame is .copy()ed so background
     mutations don't corrupt the write.
 
-    Errors from the background write are silenced (save_to_db already
-    has 4× retry on rate-limit). If the write truly fails, the user's
-    next action that re-reads from sheets will surface the discrepancy.
+    Writes are serialized through a single daemon worker thread that
+    coalesces consecutive writes to the same worksheet (latest wins).
+    This prevents the race where two daemon threads could complete out
+    of order and silently drop the newer click's data.
     """
-    def _do():
-        try:
-            save_to_db(worksheet_name, df, is_rtl=is_rtl)
-        except Exception:
-            pass
-    _threading.Thread(target=_do, daemon=True).start()
+    global _save_worker_started
+    if not _save_worker_started:
+        with _save_worker_lock:
+            if not _save_worker_started:
+                _threading.Thread(target=_save_worker, daemon=True).start()
+                _save_worker_started = True
+    _save_queue.put((worksheet_name, df, is_rtl))
 
 
 def save_to_db(worksheet_name, df, is_rtl=False):
