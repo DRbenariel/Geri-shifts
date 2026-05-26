@@ -1164,7 +1164,9 @@ def _wsd_upsert(date_str, employee, daily_dept, status, is_manual=True, note="")
         }])], ignore_index=True)
     st.session_state.work_schedule_daily = wsd
     _rebuild_wsd_index()   # keep O(1) index in sync
-    save_to_db("work_schedule_daily", wsd)
+    # Fire-and-forget write: UI updates instantly; gspread write happens in
+    # a background thread so the click doesn't freeze waiting for Google Sheets.
+    _save_async("work_schedule_daily", wsd.copy())
 
 # Status cycle for in-grid editing (clicks rotate through these)
 _GRID_STATUS_CYCLE = {
@@ -2075,6 +2077,25 @@ def _log_async(event_type, detail_1='', detail_2=''):
         args=(event_type, detail_1, detail_2),
         daemon=True,
     ).start()
+
+
+def _save_async(worksheet_name, df, is_rtl=False):
+    """Fire-and-forget wrapper for save_to_db — never blocks the UI.
+
+    Use ONLY when the calling code has just updated the in-memory
+    st.session_state copy. The DataFrame is .copy()ed so background
+    mutations don't corrupt the write.
+
+    Errors from the background write are silenced (save_to_db already
+    has 4× retry on rate-limit). If the write truly fails, the user's
+    next action that re-reads from sheets will surface the discrepancy.
+    """
+    def _do():
+        try:
+            save_to_db(worksheet_name, df, is_rtl=is_rtl)
+        except Exception:
+            pass
+    _threading.Thread(target=_do, daemon=True).start()
 
 
 def save_to_db(worksheet_name, df, is_rtl=False):

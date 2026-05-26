@@ -36,9 +36,24 @@ SKILLS = {
     'claude-api':                ['claude api', 'anthropic sdk', 'prompt caching',
                                   'cache_control'],
     'keybindings-help':          ['keybinding', 'keyboard shortcut', 'chord'],
-    'simplify':                  ['review my code', 'simplify', 'cleanup'],
+    'simplify':                  ['review my code', 'simplify', 'cleanup',
+                                  'refactor', 'dead code'],
     'loop':                      ['every minute', 'recurring task', 'poll for'],
     'schedule':                  ['cron', 'scheduled task'],
+
+    # Performance / debugging — surface gstack code-review skills
+    'gstack-review':             ['debug', 'debugg', 'debbug', 'slow', 'slowly',
+                                  'performance', 'perf', 'optimize',
+                                  'bottleneck', 'lag', 'laggy', 'speed up',
+                                  'why is', 'why does',
+                                  'freeze', 'freezes', 'frozen',
+                                  'hang', 'hangs', 'hanging', 'stuck',
+                                  'crash', 'crashes', 'crashing',
+                                  'doesn\'t work', 'not working', 'broken'],
+    'gstack-careful':            ['scheduling algorithm', 'risky', 'careful',
+                                  'don\'t break', 'do not break'],
+    'gstack-qa':                 ['test this', 'qa', 'verify the app',
+                                  'end-to-end', 'e2e'],
 }
 
 matches = [s for s, kws in SKILLS.items() if any(k in prompt for k in kws)]
