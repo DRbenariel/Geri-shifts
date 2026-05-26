@@ -1215,6 +1215,50 @@ _FRIDAY_SHIFT_DEPTS = {
 
 _HEB_DAY_TO_IDX = {"א": 0, "ב": 1, "ג": 2, "ד": 3, "ה": 4, "ו": 5, "ש": 6}
 
+# ── Role-specific dept-grid cycles ────────────────────────────────────────────
+# מנהל מחלקה: toggle empty ↔ עובד only (they don't take vacation through the grid)
+# רופא בכיר: skip 202 (which is comp-day-off for מתמחה weekend night-shifts only)
+# Everyone else: full cycle (uses _GRID_STATUS_CYCLE)
+_GRID_STATUS_CYCLE_MANAGER = {"": "עובד", "עובד": ""}
+_GRID_STATUS_CYCLE_SENIOR = {
+    "":             "עובד",
+    "עובד":         "חופש",
+    "חופש":         "אחרי תורנות",   # skip 202
+    "אחרי תורנות":  "אחר",
+    "אחר":          "",
+    "תורנות":       "חופש",
+}
+
+def _cycle_for_role(emp: str) -> dict:
+    """Pick the click cycle for the dept grid based on the employee's staff.type."""
+    try:
+        sf = st.session_state.staff
+        row = sf[sf['name'].astype(str).str.strip() == str(emp).strip()]
+        if not row.empty:
+            t = str(row.iloc[0].get('type', '')).strip()
+            if t == 'מנהל מחלקה':
+                return _GRID_STATUS_CYCLE_MANAGER
+            if t == 'רופא בכיר':
+                return _GRID_STATUS_CYCLE_SENIOR
+    except Exception:
+        pass
+    return _GRID_STATUS_CYCLE
+
+def _manual_statuses_for_role(emp: str) -> list:
+    """Pick the popover selectbox options based on the employee's staff.type."""
+    try:
+        sf = st.session_state.staff
+        row = sf[sf['name'].astype(str).str.strip() == str(emp).strip()]
+        if not row.empty:
+            t = str(row.iloc[0].get('type', '')).strip()
+            if t == 'מנהל מחלקה':
+                return ["", "עובד"]
+            if t == 'רופא בכיר':
+                return ["עובד", "חופש", "אחרי תורנות", "אחר"]
+    except Exception:
+        pass
+    return _MANUAL_STATUSES
+
 # Friday shift → daily dept mapping (for deriving who works which daily dept on Fridays)
 _DAILY_DEPT_TO_FRIDAY_SHIFTS = {
     "פנימית גריאטרית":    ["שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)"],
@@ -1766,7 +1810,7 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                         if st.button(lbl, key=cell_key, use_container_width=True,
                                      help=cur_note if cur_note else None):
                             _wsd_upsert(date_str, emp, dept_name,
-                                        _GRID_STATUS_CYCLE.get(cur_status, "חופש"),
+                                        _cycle_for_role(emp).get(cur_status, ""),
                                         is_manual=True, note=cur_note)
                             st.rerun()
 
@@ -1908,7 +1952,7 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                         if st.button(lbl, key=cell_key, use_container_width=True,
                                      help=cur_note if cur_note else None):
                             _wsd_upsert(date_str, emp, dept_name,
-                                        _GRID_STATUS_CYCLE.get(cur_status, "חופש"),
+                                        _cycle_for_role(emp).get(cur_status, ""),
                                         is_manual=True, note=cur_note)
                             st.rerun()
                         try:
@@ -1917,10 +1961,11 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                                             use_container_width=True):
                                 st.markdown(f"<b>{emp}</b> — {d}/{view_month}",
                                             unsafe_allow_html=True)
+                                _pop_opts = _manual_statuses_for_role(emp)
                                 ps = st.selectbox(
-                                    "סטטוס:", _MANUAL_STATUSES,
-                                    index=_MANUAL_STATUSES.index(cur_status)
-                                           if cur_status in _MANUAL_STATUSES else 0,
+                                    "סטטוס:", _pop_opts,
+                                    index=_pop_opts.index(cur_status)
+                                           if cur_status in _pop_opts else 0,
                                     key=f"popst_{key_ns}_{emp}_{d}")
                                 new_note = st.text_input(
                                     "הערה:", value=cur_note,
