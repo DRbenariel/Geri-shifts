@@ -1,0 +1,71 @@
+/**
+ * Design System Tokens — המערך הגריאטרי Admin Frontend
+ * Healthcare / RTL / Precision Instrument variant
+ * Source of truth: MASTER.md
+ * Link this in every HTML page: <link rel="stylesheet" href="../design-system/tokens.css">
+ */
+
+:root {
+  /* ── Surfaces ─────────────────────────────────────────────────────── */
+  --bg:          #070D16;
+  --bg-card:     #0C1520;
+  --bg-row:      #0F1A28;
+
+  /* ── Borders ──────────────────────────────────────────────────────── */
+  --border:      #152030;
+  --border-hi:   #1E3050;
+  --border-glow: #2A4570;
+
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --text:        #B8CCE4;   /* 7.2:1 on --bg-card ✓ */
+  --text-dim:    #4A6888;   /* 3.1:1 — labels only  */
+  --text-faint:  #243448;   /* decorative only       */
+
+  /* ── Semantic: Warning (Amber) ────────────────────────────────────── */
+  --amber:       #C87800;
+  --amber-hi:    #E8A020;
+  --amber-glow:  rgba(232,160,32,.25);
+  --amber-soft:  rgba(200,120,0,.10);
+
+  /* ── Semantic: Positive (Green) ───────────────────────────────────── */
+  --green:       #0A7850;
+  --green-hi:    #10C880;
+  --green-glow:  rgba(16,200,128,.20);
+  --green-soft:  rgba(10,120,80,.10);
+
+  /* ── Semantic: Critical (Red) ─────────────────────────────────────── */
+  --red:         #900000;
+  --red-hi:      #D83030;
+  --red-glow:    rgba(216,48,48,.20);
+  --red-soft:    rgba(144,0,0,.10);
+
+  /* ── Semantic: Info (Blue) — new ─────────────────────────────────── */
+  --blue:        #1A4A80;
+  --blue-hi:     #4A9AE8;
+  --blue-glow:   rgba(74,154,232,.20);
+  --blue-soft:   rgba(26,74,128,.10);
+
+  /* ── Typography scale ─────────────────────────────────────────────── */
+  --font:         'Heebo', sans-serif;
+  --type-label:   11px;
+  --type-body:    13px;
+  --type-caption: 11px;
+  --type-title:   15px;
+  --type-heading: 20px;
+  --type-kpi:     52px;
+  --type-nav:     13px;
+
+  /* ── Spacing (base 4px) ───────────────────────────────────────────── */
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-12: 48px;
+
+  /* ── Layout ───────────────────────────────────────────────────────── */
+  --nav-h:    48px;
+  --header-h: 58px;
+}
