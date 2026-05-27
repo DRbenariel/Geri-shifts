@@ -6,8 +6,9 @@
   <title>מערכת סידור — המערך הגריאטרי</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&display=swap" rel="stylesheet" />
-  <!-- Design system tokens — single source of truth -->
+  <!-- Heebo: Hebrew UI text | Fira Code: numeric data values -->
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&family=Fira+Code:wght@400;500;700&display=swap" rel="stylesheet" />
+  <!-- Design system tokens — single source of truth (ui-ux-pro-max) -->
   <link rel="stylesheet" href="../design-system/tokens.css" />
 
   <style>
@@ -26,11 +27,11 @@
       min-height: 100vh;
       overflow-x: hidden;
       /* Dot-grid — monitoring system display */
-      background-image: radial-gradient(circle, #1A2840 1px, transparent 1px);
+      background-image: radial-gradient(circle, #192438 1px, transparent 1px);
       background-size: 28px 28px;
     }
 
-    /* Scanline overlay — ≤12% opacity per healthcare UX spec */
+    /* Scanline overlay — ≤10% opacity (skill: eye-strain spec) */
     body::after {
       content: '';
       position: fixed;
@@ -39,11 +40,28 @@
         0deg,
         transparent 0px,
         transparent 3px,
-        rgba(0,0,0,.10) 3px,
-        rgba(0,0,0,.10) 4px
+        rgba(0,0,0,.09) 3px,
+        rgba(0,0,0,.09) 4px
       );
       pointer-events: none;
       z-index: 9999;
+    }
+
+    /* ── prefers-reduced-motion (skill: HIGH severity) ────────────────
+       Disable all animations for users who prefer reduced motion       */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    /* ── Focus rings (skill: CRITICAL — keyboard nav) ─────────────────
+       All interactive elements get a visible amber focus ring           */
+    :focus-visible {
+      outline: 2px solid var(--amber-hi);
+      outline-offset: 2px;
     }
 
     /* ═══════════════════════════════════════════════════════════════════
@@ -98,7 +116,6 @@
     .sys-stat {
       display: flex;
       align-items: center;
-      gap: var(--space-2) - 2px; /* 6px */
       gap: 6px;
       font-size: var(--type-caption);
       font-weight: 400;
@@ -106,7 +123,7 @@
       letter-spacing: .06em;
     }
 
-    /* LED — exactly 8px per design spec */
+    /* LED — 8px (skill spec) + double box-shadow glow */
     .led {
       width: 8px;
       height: 8px;
@@ -118,6 +135,7 @@
     .led-red   { background: var(--red-hi);   box-shadow: 0 0 6px var(--red-hi),   0 0 12px var(--red-glow);   }
 
     .month-readout {
+      font-family: var(--font-data);   /* Fira Code for date display */
       font-size: var(--type-body);
       font-weight: 500;
       color: var(--amber-hi);
@@ -125,6 +143,7 @@
       padding: var(--space-1) var(--space-3);
       letter-spacing: .04em;
       background: var(--amber-soft);
+      direction: ltr;
     }
 
     .user-block {
@@ -151,10 +170,9 @@
       color: var(--text-dim);
       background: none;
       border: 1px solid var(--border-hi);
-      padding: var(--space-1) var(--space-3) - 2px;
       padding: 4px 10px;
-      cursor: pointer;
-      transition: color .15s, border-color .15s;
+      cursor: pointer;   /* skill: CRITICAL — cursor-pointer on clickable */
+      transition: color var(--transition-fast), border-color var(--transition-fast);
       font-family: var(--font);
     }
     .logout-btn:hover { color: var(--red-hi); border-color: var(--red-hi); }
@@ -172,7 +190,7 @@
 
     nav {
       display: flex;
-      justify-content: flex-end; /* RTL: rightmost item = first tab */
+      justify-content: flex-end;
       overflow-x: auto;
       scrollbar-width: none;
     }
@@ -181,20 +199,21 @@
     .nav-btn {
       flex-shrink: 0;
       height: var(--nav-h);
+      min-height: 44px;   /* skill: CRITICAL — 44px minimum touch target */
       padding: 0 var(--space-6);
       background: none;
       border: none;
-      cursor: pointer;
+      cursor: pointer;   /* skill: CRITICAL */
       font-family: var(--font);
       font-size: var(--type-nav);
       font-weight: 400;
       color: var(--text-dim);
       letter-spacing: .04em;
       position: relative;
-      transition: color .2s;
+      transition: color var(--transition-normal);
       white-space: nowrap;
     }
-    /* 2px amber bottom line (not 1px) — more visible on dark bg */
+    /* 2px amber underline on active */
     .nav-btn::after {
       content: '';
       position: absolute;
@@ -204,7 +223,7 @@
       background: var(--amber-hi);
       box-shadow: 0 0 8px var(--amber-glow);
       transform: scaleX(0);
-      transition: transform .25s cubic-bezier(.4,0,.2,1);
+      transition: transform var(--transition-slow) cubic-bezier(.4,0,.2,1);
     }
     .nav-btn:hover { color: var(--text); }
     .nav-btn.active {
@@ -228,7 +247,6 @@
       align-items: baseline;
       justify-content: space-between;
       margin-bottom: var(--space-6);
-      padding-bottom: var(--space-3) - 2px;
       padding-bottom: 10px;
       border-bottom: 1px solid var(--border);
     }
@@ -239,15 +257,16 @@
       letter-spacing: .01em;
     }
     .section-meta {
+      font-family: var(--font-data);   /* Fira Code for date/meta */
       font-size: var(--type-caption);
-      font-weight: 300;
+      font-weight: 400;
       color: var(--text-dim);
-      letter-spacing: .1em;
+      letter-spacing: .08em;
       text-transform: uppercase;
     }
 
     /* ═══════════════════════════════════════════════════════════════════
-       ALERT BANNER — semantic severity tokens
+       ALERT BANNER — semantic severity classes
     ═══════════════════════════════════════════════════════════════════ */
     .alert-banner {
       display: flex;
@@ -257,7 +276,6 @@
       padding: var(--space-3) var(--space-5);
       margin-bottom: 28px;
     }
-    /* Severity variants */
     .alert-banner.critical {
       background: var(--red-soft);
       border: 1px solid var(--red);
@@ -290,15 +308,17 @@
     .alert-banner.info     .alert-text strong { color: var(--blue-hi); font-weight: 700; }
 
     .alert-time {
+      font-family: var(--font-data);
       font-size: var(--type-caption);
-      font-weight: 300;
+      font-weight: 400;
       color: var(--text-dim);
-      letter-spacing: .06em;
+      letter-spacing: .04em;
       white-space: nowrap;
+      direction: ltr;
     }
 
     /* ═══════════════════════════════════════════════════════════════════
-       BUTTONS
+       BUTTONS — cursor:pointer mandatory (skill: CRITICAL)
     ═══════════════════════════════════════════════════════════════════ */
     .btn {
       font-family: var(--font);
@@ -308,7 +328,7 @@
       padding: var(--space-2) var(--space-4);
       cursor: pointer;
       border: none;
-      transition: all .15s;
+      transition: all var(--transition-normal);
     }
     .btn-amber {
       background: var(--amber-soft);
@@ -342,11 +362,17 @@
       padding: var(--space-5) 22px;
       position: relative;
       overflow: hidden;
+      cursor: pointer;   /* skill: cursor-pointer on interactive cards */
       animation: fadeUp .4s ease both;
+      transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
     }
     .kpi:nth-child(1) { animation-delay:.05s; }
     .kpi:nth-child(2) { animation-delay:.10s; }
     .kpi:nth-child(3) { animation-delay:.15s; }
+    .kpi:hover {
+      border-color: var(--border-glow);
+      box-shadow: var(--shadow-md);
+    }
 
     /* Top accent line */
     .kpi::before {
@@ -355,9 +381,9 @@
       top: 0; left: 0; right: 0;
       height: 1px;
     }
-    .kpi.amber::before { background: var(--amber-hi); box-shadow: 0 0 12px var(--amber-glow); }
-    .kpi.green::before { background: var(--green-hi); box-shadow: 0 0 12px var(--green-glow); }
-    .kpi.red::before   { background: var(--red-hi);   box-shadow: 0 0 12px var(--red-glow);   }
+    .kpi.amber::before { background: var(--amber-hi); box-shadow: 0 0 10px var(--amber-glow); }
+    .kpi.green::before { background: var(--green-hi); box-shadow: 0 0 10px var(--green-glow); }
+    .kpi.red::before   { background: var(--red-hi);   box-shadow: 0 0 10px var(--red-glow);   }
 
     .kpi-label {
       font-size: var(--type-label);
@@ -367,19 +393,20 @@
       text-transform: uppercase;
       margin-bottom: var(--space-3);
     }
+    /* KPI value — Fira Code for numbers, reduced glow to 10px (skill spec) */
     .kpi-value {
-      font-size: var(--type-kpi);   /* 52px — large, prominent */
-      font-weight: 900;
+      font-family: var(--font-data);
+      font-size: var(--type-kpi);
+      font-weight: 700;
       line-height: 1;
       margin-bottom: var(--space-2);
       letter-spacing: -.02em;
-      /* Numbers always LTR regardless of RTL page direction */
       direction: ltr;
       text-align: right;
     }
-    .kpi.amber .kpi-value { color: var(--amber-hi); text-shadow: 0 0 30px var(--amber-glow); }
-    .kpi.green .kpi-value { color: var(--green-hi); text-shadow: 0 0 30px var(--green-glow); }
-    .kpi.red   .kpi-value { color: var(--red-hi);   text-shadow: 0 0 30px var(--red-glow);   }
+    .kpi.amber .kpi-value { color: var(--amber-hi); text-shadow: 0 0 10px var(--amber-glow); }
+    .kpi.green .kpi-value { color: var(--green-hi); text-shadow: 0 0 10px var(--green-glow); }
+    .kpi.red   .kpi-value { color: var(--red-hi);   text-shadow: 0 0 10px var(--red-glow);   }
 
     .kpi-sub {
       font-size: var(--type-caption);
@@ -406,7 +433,6 @@
       animation: fadeUp .4s .2s ease both;
     }
     .panel-head {
-      padding: 11px var(--space-5) - 2px;
       padding: 11px 18px;
       border-bottom: 1px solid var(--border);
       display: flex;
@@ -421,20 +447,22 @@
       text-transform: uppercase;
     }
     .panel-badge {
+      font-family: var(--font-data);
       font-size: var(--type-caption);
       font-weight: 500;
       color: var(--amber-hi);
       border: 1px solid var(--amber);
       padding: 2px var(--space-2);
       background: var(--amber-soft);
-      letter-spacing: .06em;
+      letter-spacing: .04em;
+      direction: ltr;
     }
     .panel-body { padding: 0; }
 
     /* ═══════════════════════════════════════════════════════════════════
        BAR CHART
     ═══════════════════════════════════════════════════════════════════ */
-    .bars { padding: var(--space-4) var(--space-5) - 2px; padding: var(--space-4) 18px; }
+    .bars { padding: var(--space-4) 18px; }
     .bar-row {
       display: flex;
       align-items: center;
@@ -451,7 +479,7 @@
     }
     .bar-track {
       flex: 1;
-      height: 4px;           /* slimmer = more precision feel */
+      height: 4px;   /* slim = precision instrument feel */
       background: var(--border);
       position: relative;
     }
@@ -460,7 +488,6 @@
       transition: width .8s cubic-bezier(.4,0,.2,1);
       position: relative;
     }
-    /* Endpoint glow cap */
     .bar-fill::after {
       content: '';
       position: absolute;
@@ -472,26 +499,26 @@
     }
     .bar-fill.a { background: var(--amber-hi); }
     .bar-fill.g { background: var(--green-hi); }
+    /* Fira Code for bar count numbers — LTR */
     .bar-count {
+      font-family: var(--font-data);
       font-size: var(--type-body);
       font-weight: 700;
       color: var(--amber-hi);
       min-width: 16px;
       text-align: left;
-      direction: ltr;   /* numbers always LTR */
+      direction: ltr;
     }
 
     /* ═══════════════════════════════════════════════════════════════════
-       STATUS TABLE — RTL with LTR numeric columns
+       STATUS TABLE — RTL layout, LTR numeric columns
     ═══════════════════════════════════════════════════════════════════ */
     .data-table {
       width: 100%;
       border-collapse: collapse;
       font-size: var(--type-body);
     }
-    .data-table thead {
-      background: var(--bg);
-    }
+    .data-table thead { background: var(--bg); }
     .data-table th {
       padding: var(--space-2) var(--space-4);
       font-size: var(--type-label);
@@ -502,36 +529,34 @@
       text-align: right;
       border-bottom: 1px solid var(--border);
     }
-    /* Numeric column header — center-aligned */
     .data-table th.num-col { text-align: center; }
-
     .data-table td {
-      padding: var(--space-3) - 2px var(--space-4);
       padding: 10px var(--space-4);
       text-align: right;
       border-bottom: 1px solid var(--border);
       color: var(--text);
       font-weight: 400;
+      transition: background var(--transition-fast);
     }
-    /* Numeric cells — LTR override, center aligned */
     .data-table td.num-col { text-align: center; }
     .data-table tr:last-child td { border-bottom: none; }
-    .data-table tbody tr { transition: background .15s; }
+    /* skill: hover feedback required — no layout shift */
     .data-table tbody tr:hover td { background: var(--bg-row); }
+    .data-table tbody tr { cursor: default; }
 
-    /* Numeric value — always LTR regardless of page direction */
+    /* Numeric value — Fira Code, always LTR */
     .num {
+      font-family: var(--font-data);
       font-weight: 700;
       color: var(--amber-hi);
       direction: ltr;
       display: inline-block;
     }
 
-    /* Status tags — dot + label pattern */
+    /* Status tags — dot + label (color not sole indicator) */
     .tag {
       display: inline-flex;
       align-items: center;
-      gap: var(--space-1) + 1px;
       gap: 5px;
       padding: 2px var(--space-2);
       font-size: var(--type-label);
@@ -576,7 +601,6 @@
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
 
-    /* Stub panels */
     .stub {
       background: var(--bg-card);
       border: 1px solid var(--border);
@@ -589,30 +613,33 @@
     }
 
     /* ═══════════════════════════════════════════════════════════════════
-       ANIMATIONS
+       ANIMATIONS (respects prefers-reduced-motion above)
     ═══════════════════════════════════════════════════════════════════ */
     @keyframes fadeUp {
       from { opacity:0; transform:translateY(8px); }
       to   { opacity:1; transform:translateY(0);   }
     }
+    /* Pulse only on critical LED — skill: continuous animation for loading/alerts only */
     @keyframes pulse-red {
       0%,100% { box-shadow: 0 0 6px var(--red-hi), 0 0 12px var(--red-glow); }
-      50%      { box-shadow: 0 0 10px var(--red-hi), 0 0 24px var(--red-glow); }
+      50%      { box-shadow: 0 0 10px var(--red-hi), 0 0 20px var(--red-glow); }
     }
 
     /* ═══════════════════════════════════════════════════════════════════
-       RESPONSIVE
+       RESPONSIVE — tested at 375 / 768 / 1024 / 1440 (skill spec)
     ═══════════════════════════════════════════════════════════════════ */
-    @media (max-width: 900px) {
+    @media (max-width: 1024px) {
       .cols-2 { grid-template-columns: 1fr; }
       .header-center { display: none; }
     }
-    @media (max-width: 600px) {
+    @media (max-width: 768px) {
       .kpi-grid { grid-template-columns: 1fr 1fr; }
       main { padding: var(--space-5) 14px 60px; }
+    }
+    @media (max-width: 600px) {
       header { padding: 0 var(--space-4); }
     }
-    @media (max-width: 380px) {
+    @media (max-width: 375px) {
       .kpi-grid { grid-template-columns: 1fr; }
     }
   </style>
@@ -630,12 +657,12 @@
 
   <div class="header-center">
     <div class="sys-stat">
-      <span class="led led-green"></span>
+      <span class="led led-green" aria-label="מערכת פעילה"></span>
       מערכת פעילה
     </div>
     <div class="sys-stat">
-      <span class="led led-amber"></span>
-      3 בעיות ממתינות
+      <span class="led led-amber" aria-label="3 בעיות ממתינות"></span>
+      <span dir="ltr">3</span>&nbsp;בעיות ממתינות
     </div>
     <div class="month-readout">יוני 2026</div>
   </div>
@@ -645,7 +672,7 @@
       <span class="name">ד״ר גל ברנאריאל</span>
       <span class="role">מנהל/ת מערכת</span>
     </div>
-    <button class="logout-btn">יציאה</button>
+    <button class="logout-btn" aria-label="יציאה מהמערכת">יציאה</button>
   </div>
 </header>
 
@@ -653,13 +680,13 @@
      NAV BAR
 ═══════════════════════════════════════════════════════════════════ -->
 <div class="nav-wrap">
-  <nav role="tablist">
-    <button class="nav-btn" onclick="switchTab(this,'settings')" role="tab">הגדרות</button>
-    <button class="nav-btn" onclick="switchTab(this,'shifts')"   role="tab">סידור תורנויות</button>
-    <button class="nav-btn" onclick="switchTab(this,'staff')"    role="tab">צוות</button>
-    <button class="nav-btn active" onclick="switchTab(this,'reports')" role="tab">דוחות וניהול</button>
-    <button class="nav-btn" onclick="switchTab(this,'monthly')"  role="tab">סידור חודשי</button>
-    <button class="nav-btn" onclick="switchTab(this,'daily')"    role="tab">סידור יומי</button>
+  <nav role="tablist" aria-label="ניווט ראשי">
+    <button class="nav-btn" onclick="switchTab(this,'settings')" role="tab" aria-selected="false" aria-controls="panel-settings">הגדרות</button>
+    <button class="nav-btn" onclick="switchTab(this,'shifts')"   role="tab" aria-selected="false" aria-controls="panel-shifts">סידור תורנויות</button>
+    <button class="nav-btn" onclick="switchTab(this,'staff')"    role="tab" aria-selected="false" aria-controls="panel-staff">צוות</button>
+    <button class="nav-btn active" onclick="switchTab(this,'reports')" role="tab" aria-selected="true" aria-controls="panel-reports">דוחות וניהול</button>
+    <button class="nav-btn" onclick="switchTab(this,'monthly')"  role="tab" aria-selected="false" aria-controls="panel-monthly">סידור חודשי</button>
+    <button class="nav-btn" onclick="switchTab(this,'daily')"    role="tab" aria-selected="false" aria-controls="panel-daily">סידור יומי</button>
   </nav>
 </div>
 
@@ -669,17 +696,17 @@
 <main>
 
   <!-- ── REPORTS ──────────────────────────────────────────────────── -->
-  <div class="tab-panel active" id="panel-reports">
+  <div class="tab-panel active" id="panel-reports" role="tabpanel">
 
-    <!-- Alert banner — CRITICAL severity (uses semantic class) -->
-    <div class="alert-banner critical">
+    <!-- Alert banner — CRITICAL severity -->
+    <div class="alert-banner critical" role="alert">
       <div class="alert-left">
-        <span class="led led-red" style="animation:pulse-red 1.4s infinite;"></span>
+        <span class="led led-red" style="animation:pulse-red 1.4s infinite;" aria-hidden="true"></span>
         <span class="alert-text">
           <strong>דוח יומי:</strong>
-          <span dir="ltr" style="display:inline;">3</span> ימי שיא חסימה קריטיים
+          <span dir="ltr">3</span> ימי שיא חסימה קריטיים
           &nbsp;·&nbsp;
-          <span dir="ltr" style="display:inline;">2</span> אזהרות זמינות
+          <span dir="ltr">2</span> אזהרות זמינות
         </span>
       </div>
       <div style="display:flex;align-items:center;gap:var(--space-3);">
@@ -691,22 +718,22 @@
     <!-- Section header -->
     <div class="section-header">
       <span class="section-title">לוח בקרה</span>
-      <span class="section-meta">יוני 2026 &nbsp;/&nbsp; JUNE 2026</span>
+      <span class="section-meta">יוני 2026 / JUNE 2026</span>
     </div>
 
     <!-- KPI cards -->
     <div class="kpi-grid">
-      <div class="kpi amber">
+      <div class="kpi amber" tabindex="0" aria-label="סה׳׳כ צוות: 14">
         <div class="kpi-label">סה״כ צוות</div>
         <div class="kpi-value">14</div>
         <div class="kpi-sub">מתמחים ותורני חוץ</div>
       </div>
-      <div class="kpi green">
+      <div class="kpi green" tabindex="0" aria-label="הגישו אילוצים: 11">
         <div class="kpi-label">הגישו אילוצים</div>
         <div class="kpi-value">11</div>
         <div class="kpi-sub">עבור חודש יוני</div>
       </div>
-      <div class="kpi red">
+      <div class="kpi red" tabindex="0" aria-label="ממתינים להגשה: 3">
         <div class="kpi-label">ממתינים להגשה</div>
         <div class="kpi-value">03</div>
         <div class="kpi-sub">נדרש תזכורת</div>
@@ -725,37 +752,51 @@
         <div class="panel-body bars">
           <div class="bar-row">
             <span class="bar-name">ד״ר כהן</span>
-            <div class="bar-track"><div class="bar-fill a" style="width:72%"></div></div>
+            <div class="bar-track" role="progressbar" aria-valuenow="72" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר כהן: 5 תורנויות">
+              <div class="bar-fill a" style="width:72%"></div>
+            </div>
             <span class="bar-count">5</span>
           </div>
           <div class="bar-row">
             <span class="bar-name">ד״ר לוי</span>
-            <div class="bar-track"><div class="bar-fill g" style="width:57%"></div></div>
+            <div class="bar-track" role="progressbar" aria-valuenow="57" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר לוי: 4 תורנויות">
+              <div class="bar-fill g" style="width:57%"></div>
+            </div>
             <span class="bar-count">4</span>
           </div>
           <div class="bar-row">
             <span class="bar-name">ד״ר ברק</span>
-            <div class="bar-track"><div class="bar-fill a" style="width:85%"></div></div>
+            <div class="bar-track" role="progressbar" aria-valuenow="85" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר ברק: 6 תורנויות">
+              <div class="bar-fill a" style="width:85%"></div>
+            </div>
             <span class="bar-count">6</span>
           </div>
           <div class="bar-row">
             <span class="bar-name">ד״ר מזרחי</span>
-            <div class="bar-track"><div class="bar-fill g" style="width:42%"></div></div>
+            <div class="bar-track" role="progressbar" aria-valuenow="42" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר מזרחי: 3 תורנויות">
+              <div class="bar-fill g" style="width:42%"></div>
+            </div>
             <span class="bar-count">3</span>
           </div>
           <div class="bar-row">
             <span class="bar-name">סלאמה קאסם</span>
-            <div class="bar-track"><div class="bar-fill a" style="width:64%"></div></div>
+            <div class="bar-track" role="progressbar" aria-valuenow="64" aria-valuemin="0" aria-valuemax="100" aria-label="סלאמה קאסם: 5 תורנויות">
+              <div class="bar-fill a" style="width:64%"></div>
+            </div>
             <span class="bar-count">5</span>
           </div>
           <div class="bar-row">
             <span class="bar-name">ד״ר פרץ</span>
-            <div class="bar-track"><div class="bar-fill g" style="width:50%"></div></div>
+            <div class="bar-track" role="progressbar" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר פרץ: 4 תורנויות">
+              <div class="bar-fill g" style="width:50%"></div>
+            </div>
             <span class="bar-count">4</span>
           </div>
           <div class="bar-row">
             <span class="bar-name">ד״ר אבו-רמי</span>
-            <div class="bar-track"><div class="bar-fill a" style="width:78%"></div></div>
+            <div class="bar-track" role="progressbar" aria-valuenow="78" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר אבו-רמי: 6 תורנויות">
+              <div class="bar-fill a" style="width:78%"></div>
+            </div>
             <span class="bar-count">6</span>
           </div>
         </div>
@@ -765,16 +806,16 @@
       <div class="panel">
         <div class="panel-head">
           <span class="panel-title">סטטוס הגשות</span>
-          <button class="btn btn-ghost" style="font-size:var(--type-caption);padding:4px 10px;">שלח תזכורת</button>
+          <button class="btn btn-ghost" style="font-size:var(--type-caption);padding:4px 10px;" aria-label="שלח תזכורת לעובדים שטרם הגישו">שלח תזכורת</button>
         </div>
         <div class="panel-body">
-          <table class="data-table">
+          <table class="data-table" aria-label="טבלת סטטוס הגשות">
             <thead>
               <tr>
-                <th>שם</th>
-                <th>תפקיד</th>
-                <th class="num-col">חסימות</th>
-                <th>סטטוס</th>
+                <th scope="col">שם</th>
+                <th scope="col">תפקיד</th>
+                <th scope="col" class="num-col">חסימות</th>
+                <th scope="col">סטטוס</th>
               </tr>
             </thead>
             <tbody>
@@ -829,38 +870,28 @@
   </div><!-- /panel-reports -->
 
   <!-- ── STUBS ─────────────────────────────────────────────────────── -->
-  <div class="tab-panel" id="panel-settings">
-    <div class="section-header">
-      <span class="section-title">הגדרות</span>
-    </div>
+  <div class="tab-panel" id="panel-settings" role="tabpanel">
+    <div class="section-header"><span class="section-title">הגדרות</span></div>
     <div class="stub">בקרוב</div>
   </div>
 
-  <div class="tab-panel" id="panel-shifts">
-    <div class="section-header">
-      <span class="section-title">סידור תורנויות</span>
-    </div>
+  <div class="tab-panel" id="panel-shifts" role="tabpanel">
+    <div class="section-header"><span class="section-title">סידור תורנויות</span></div>
     <div class="stub">בקרוב</div>
   </div>
 
-  <div class="tab-panel" id="panel-staff">
-    <div class="section-header">
-      <span class="section-title">צוות</span>
-    </div>
+  <div class="tab-panel" id="panel-staff" role="tabpanel">
+    <div class="section-header"><span class="section-title">צוות</span></div>
     <div class="stub">בקרוב</div>
   </div>
 
-  <div class="tab-panel" id="panel-monthly">
-    <div class="section-header">
-      <span class="section-title">סידור חודשי</span>
-    </div>
+  <div class="tab-panel" id="panel-monthly" role="tabpanel">
+    <div class="section-header"><span class="section-title">סידור חודשי</span></div>
     <div class="stub">בקרוב</div>
   </div>
 
-  <div class="tab-panel" id="panel-daily">
-    <div class="section-header">
-      <span class="section-title">סידור יומי</span>
-    </div>
+  <div class="tab-panel" id="panel-daily" role="tabpanel">
+    <div class="section-header"><span class="section-title">סידור יומי</span></div>
     <div class="stub">בקרוב</div>
   </div>
 
@@ -868,11 +899,32 @@
 
 <script>
   function switchTab(btn, key) {
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => {
+      p.classList.remove('active');
+    });
+    document.querySelectorAll('.nav-btn').forEach(b => {
+      b.classList.remove('active');
+      b.setAttribute('aria-selected', 'false');
+    });
     document.getElementById('panel-' + key).classList.add('active');
     btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
   }
+
+  // Keyboard nav: arrow keys between tabs (skill: keyboard-nav rule)
+  document.querySelector('nav').addEventListener('keydown', function(e) {
+    const tabs = [...document.querySelectorAll('.nav-btn')];
+    const idx = tabs.indexOf(document.activeElement);
+    if (idx === -1) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      const next = e.key === 'ArrowLeft'
+        ? tabs[(idx + 1) % tabs.length]
+        : tabs[(idx - 1 + tabs.length) % tabs.length];
+      next.focus();
+      next.click();
+    }
+  });
 </script>
 </body>
 </html>
