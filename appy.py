@@ -5833,8 +5833,8 @@ elif role in ("מנהל/ת", "מנהל על"):
                     st.info("אין נתוני הגשות עדיין.")
 
     # ── סידור חודשי (אדמין) ────────────────────────────────────
-    if selected_nav == 'סידור חודשי':
-        st.subheader("🗓️ סידור חודשי — ניהול")
+    if selected_nav == 'גאנט חודשי':
+        st.subheader("🗓️ גאנט חודשי — ניהול")
 
         # ── Top: month selector + active-month action ──────────
         hebrew_months = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
@@ -6007,66 +6007,11 @@ elif role in ("מנהל/ת", "מנהל על"):
             else:
                 st.caption("אין שיבוצים לייצוא לחודש זה.")
 
-        # ── הוספת היעדרות מאושרת לעובד ───────────────────────────
-        st.divider()
-        st.markdown("##### ➕ הוסף היעדרות מאושרת לעובד")
-        sf_all = st.session_state.staff
-        active_emps = sorted(
-            sf_all[sf_all['type'].isin(['מתמחה', 'רופא בכיר', 'מנהל מחלקה', 'מנהל/ת'])]
-            ['name'].astype(str).str.strip().tolist()
-        )
-        adm_emp = st.selectbox("עובד", active_emps, key="adm_abs_emp")
-        adm_col1, adm_col2 = st.columns(2)
-        with adm_col1:
-            adm_start = st.date_input("מתאריך", key="adm_abs_start",
-                                      value=date(2026, view_month, 1),
-                                      min_value=date(2026, 1, 1),
-                                      max_value=date(2026, 12, 31))
-        with adm_col2:
-            adm_end = st.date_input("עד תאריך", key="adm_abs_end",
-                                    value=date(2026, view_month, 1),
-                                    min_value=date(2026, 1, 1),
-                                    max_value=date(2026, 12, 31))
-        adm_type = st.selectbox("סוג היעדרות", ["חופש", "202", "היעדרות אחרת"], key="adm_abs_type")
-        adm_note = st.text_input("הערה (אופציונלי)", key="adm_abs_note")
 
-        if st.button("✅ הוסף היעדרות מאושרת", key="adm_abs_submit"):
-            if adm_end < adm_start:
-                st.error("תאריך סיום לפני תאריך התחלה.")
-            else:
-                emp_row = sf_all[sf_all['name'].astype(str).str.strip() == adm_emp]
-                emp_dept = str(emp_row.iloc[0].get('dept', '')) if not emp_row.empty else ''
-                new_adm_row = {
-                    'id':              str(uuid.uuid4()),
-                    'employee':        adm_emp,
-                    'start_date':      adm_start.strftime('%Y-%m-%d'),
-                    'end_date':        adm_end.strftime('%Y-%m-%d'),
-                    'type':            adm_type,
-                    'status':          'approved',
-                    'dept_at_request': emp_dept,
-                    'manager_email':   '',
-                    'approved_by':     str(user_name).strip(),
-                    'notes':           adm_note.strip(),
-                    'created_at':      datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'responded_at':    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                }
-                new_adm_df = pd.concat(
-                    [st.session_state.absence_requests, pd.DataFrame([new_adm_row])],
-                    ignore_index=True
-                )
-                st.session_state.absence_requests = new_adm_df
-                save_to_db("absence_requests", new_adm_df)
-                _build_approved_map()
-                st.session_state['show_adm_abs_success'] = True
-                st.rerun()
-
-        if st.session_state.pop('show_adm_abs_success', False):
-            st.success("✅ היעדרות נוספה ואושרה — תופיע בלוח מיד.")
-
-    # ── סידור יומי (אדמין) — same view as מנהל מחלקה but for any dept of choice ──
-    if selected_nav == 'סידור יומי':
-        st.subheader("🗓️ סידור יומי — תצוגת מנהל/ת מחלקה (אדמין)")
-        st.caption("בחר מחלקה לראות אותה כפי שמנהל המחלקה רואה (לוח מחלקה + בקשות ממתינות).")
+    # ── סידור עבודה (אדמין) — same view as מנהל מחלקה but for any dept of choice ──
+    if selected_nav == 'סידור עבודה':
+        st.subheader("🗓️ סידור עבודה — תצוגת מנהל/ת מחלקה (אדמין)")
+        st.caption("בחר מחלקה לראות אותה כפי שמנהל המחלקה רואה.")
 
         adm_hebrew_months = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
                              "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
@@ -6075,88 +6020,157 @@ elif role in ("מנהל/ת", "מנהל על"):
         st.caption(f"חודש פעיל: **{adm_hebrew_months[daily_active_month_int-1]} 2026**")
         adm_y_m = f"2026-{daily_active_month_int:02d}"
 
-        adm_mgr_tabs = st.tabs(["לוח מחלקה", "בקשות ממתינות"])
-        with adm_mgr_tabs[0]:
-            st.markdown(f"#### לוח {sel_dept_admin}")
+        st.markdown(f"#### לוח {sel_dept_admin}")
 
-            # Build employees: dept_rotation + ALL managers of this dept.
-            # Managers always appear as rows; their cells default to empty
-            # (via _derive_auto_status) — click any cell to "plant" them.
-            _adm_dr = st.session_state.dept_rotation
-            _adm_emps = []
-            if not _adm_dr.empty and 'employee' in _adm_dr.columns:
-                _adm_mask = ((_adm_dr['year_month'].astype(str) == adm_y_m) &
-                             (_adm_dr['daily_dept'].astype(str) == sel_dept_admin))
-                _adm_emps = _adm_dr[_adm_mask]['employee'].astype(str).str.strip().tolist()
-            _dept_managers = _get_dept_managers(sel_dept_admin)
-            _all_adm_emps = _sort_employees_by_role(
-                _dept_managers + [e for e in _adm_emps if e not in _dept_managers]
-            )
+        # Build employees: dept_rotation + ALL managers of this dept.
+        # Managers always appear as rows; their cells default to empty
+        # (via _derive_auto_status) — click any cell to "plant" them.
+        _adm_dr = st.session_state.dept_rotation
+        _adm_emps = []
+        if not _adm_dr.empty and 'employee' in _adm_dr.columns:
+            _adm_mask = ((_adm_dr['year_month'].astype(str) == adm_y_m) &
+                         (_adm_dr['daily_dept'].astype(str) == sel_dept_admin))
+            _adm_emps = _adm_dr[_adm_mask]['employee'].astype(str).str.strip().tolist()
+        _dept_managers = _get_dept_managers(sel_dept_admin)
+        _all_adm_emps = _sort_employees_by_role(
+            _dept_managers + [e for e in _adm_emps if e not in _dept_managers]
+        )
 
-            _render_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int,
-                              "adm_mgrview", employees=_all_adm_emps)
+        _render_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int,
+                          "adm_mgrview", employees=_all_adm_emps)
 
+        st.divider()
+        _render_export_buttons(sel_dept_admin, adm_y_m, daily_active_month_int,
+                               "adm_mgrview", user_name)
 
-            st.divider()
-            _render_export_buttons(sel_dept_admin, adm_y_m, daily_active_month_int,
-                                   "adm_mgrview", user_name)
+    # ── ניהול בקשות (אדמין) ───────────────────────────────────────
+    if selected_nav == 'ניהול בקשות':
+        st.subheader("📋 ניהול בקשות היעדרות")
 
-        with adm_mgr_tabs[1]:
-            st.markdown(f"#### בקשות ממתינות — {sel_dept_admin}")
-            ar_admgr = st.session_state.absence_requests.copy()
-            if ar_admgr.empty or 'status' not in ar_admgr.columns:
-                st.info("אין בקשות במערכת.")
+        # ── Section 1: בקשות ממתינות ──────────────────────────────
+        st.markdown("#### ⏳ בקשות ממתינות")
+        nb_dept_filter = st.selectbox(
+            "סנן לפי מחלקה:",
+            ["הכל"] + DAILY_DEPTS_ALL,
+            key="nb_adm_dept"
+        )
+        ar_nb = st.session_state.absence_requests.copy()
+        if ar_nb.empty or 'status' not in ar_nb.columns:
+            st.info("אין בקשות במערכת.")
+        else:
+            ar_nb['status']          = ar_nb['status'].astype(str).str.lower()
+            ar_nb['dept_at_request'] = ar_nb['dept_at_request'].astype(str)
+            pen_nb = ar_nb[ar_nb['status'] == 'pending']
+            if nb_dept_filter != "הכל":
+                pen_nb = pen_nb[pen_nb['dept_at_request'] == nb_dept_filter]
+            if 'start_date' in pen_nb.columns:
+                pen_nb = pen_nb.sort_values('start_date')
+            if pen_nb.empty:
+                st.success("אין בקשות ממתינות ✅")
             else:
-                ar_admgr['status']          = ar_admgr['status'].astype(str).str.lower()
-                ar_admgr['dept_at_request'] = ar_admgr['dept_at_request'].astype(str)
-                pen = ar_admgr[(ar_admgr['status'] == 'pending') &
-                               (ar_admgr['dept_at_request'] == sel_dept_admin)]
-                if pen.empty:
-                    st.success("אין בקשות ממתינות במחלקה זו ✅")
-                else:
-                    st.caption(f"📋 {len(pen)} בקשות ממתינות")
-                    for idx, row in pen.iterrows():
-                        with st.container(border=True):
-                            cc1, cc2, cc3, cc4, cc5 = st.columns([2, 2, 2, 1, 1])
-                            cc1.markdown(f"**{row.get('employee', '—')}**")
-                            cc2.write(f"{row['start_date']} – {row['end_date']}")
-                            cc3.write(row.get('type', '—'))
-                            req_id = str(row.get('id', idx))
-                            if cc4.button("✅ אשר", key=f"admmgr_ap_{req_id}",
-                                          use_container_width=True):
-                                _approve_request(req_id, str(user_name).strip())
-                                st.rerun()
-                            if cc5.button("❌ דחה", key=f"admmgr_rj_{req_id}",
-                                          use_container_width=True):
-                                _reject_request(req_id, str(user_name).strip())
-                                st.rerun()
-                            if row.get('notes'):
-                                st.caption(f"💬 {row['notes']}")
+                st.caption(f"📋 {len(pen_nb)} בקשות ממתינות")
+                for idx, row in pen_nb.iterrows():
+                    with st.container(border=True):
+                        cc1, cc2, cc3, cc4, cc5, cc6 = st.columns([2, 1.5, 1.5, 1.5, 1, 1])
+                        cc1.markdown(f"**{row.get('employee', '—')}**")
+                        cc2.write(row.get('dept_at_request', '—'))
+                        cc3.write(f"{row['start_date']} – {row['end_date']}")
+                        cc4.write(row.get('type', '—'))
+                        req_id = str(row.get('id', idx))
+                        if cc5.button("✅ אשר", key=f"nb_adm_ap_{req_id}",
+                                      use_container_width=True):
+                            _approve_request(req_id, str(user_name).strip())
+                            st.rerun()
+                        if cc6.button("❌ דחה", key=f"nb_adm_rj_{req_id}",
+                                      use_container_width=True):
+                            _reject_request(req_id, str(user_name).strip())
+                            st.rerun()
+                        if row.get('notes'):
+                            st.caption(f"💬 {row['notes']}")
 
-                # ── Approved requests for the active month (table below) ──
-                st.divider()
-                st.markdown("#### בקשות שאושרו לחודש הפעיל")
-                _ap_a = ar_admgr[(ar_admgr['status'] == 'approved') &
-                                 (ar_admgr['dept_at_request'] == sel_dept_admin)].copy()
-                if not _ap_a.empty:
-                    _ap_a['start_date'] = pd.to_datetime(_ap_a['start_date'], errors='coerce')
-                    _ap_a['end_date']   = pd.to_datetime(_ap_a['end_date'],   errors='coerce')
-                    _mstart_a = pd.Timestamp(2026, daily_active_month_int, 1)
-                    _mend_a   = pd.Timestamp(
-                        2026, daily_active_month_int,
-                        calendar.monthrange(2026, daily_active_month_int)[1])
-                    _ap_a = _ap_a[(_ap_a['end_date'] >= _mstart_a) &
-                                  (_ap_a['start_date'] <= _mend_a)]
-                if _ap_a.empty:
-                    st.info("אין בקשות שאושרו לחודש זה.")
-                else:
-                    _show_a = _ap_a[['employee', 'start_date', 'end_date', 'type',
-                                     'approved_by', 'responded_at']].copy()
-                    _show_a.columns = ['עובד/ת', 'מתאריך', 'עד תאריך', 'סוג',
-                                       'אושר ע"י', 'תאריך אישור']
-                    _show_a['מתאריך']  = _show_a['מתאריך'].dt.strftime('%Y-%m-%d')
-                    _show_a['עד תאריך'] = _show_a['עד תאריך'].dt.strftime('%Y-%m-%d')
-                    st.dataframe(_show_a, use_container_width=True, hide_index=True)
+        st.divider()
+
+        # ── Section 2: בקשות שאושרו — כל העתידיות ────────────────
+        st.markdown("#### ✅ בקשות שאושרו — עתידיות")
+        ar_nb2 = st.session_state.absence_requests.copy()
+        if not ar_nb2.empty and 'status' in ar_nb2.columns:
+            ar_nb2['status']    = ar_nb2['status'].astype(str).str.lower()
+            ar_nb2['end_date']  = pd.to_datetime(ar_nb2['end_date'], errors='coerce')
+            ar_nb2['start_date'] = pd.to_datetime(ar_nb2['start_date'], errors='coerce')
+            _today_ts = pd.Timestamp(date.today())
+            ap_nb2 = ar_nb2[
+                (ar_nb2['status'] == 'approved') &
+                (ar_nb2['end_date'] >= _today_ts)
+            ].copy()
+            if ap_nb2.empty:
+                st.info("אין בקשות שאושרו לתאריכים עתידיים.")
+            else:
+                ap_nb2 = ap_nb2.sort_values(['dept_at_request', 'start_date'])
+                _show_nb2 = ap_nb2[['employee', 'dept_at_request', 'start_date', 'end_date',
+                                    'type', 'approved_by']].copy()
+                _show_nb2.columns = ['עובד/ת', 'מחלקה', 'מתאריך', 'עד תאריך', 'סוג', 'אושר ע"י']
+                _show_nb2['מתאריך']  = _show_nb2['מתאריך'].dt.strftime('%Y-%m-%d')
+                _show_nb2['עד תאריך'] = _show_nb2['עד תאריך'].dt.strftime('%Y-%m-%d')
+                st.dataframe(_show_nb2, use_container_width=True, hide_index=True)
+        else:
+            st.info("אין בקשות שאושרו.")
+
+        st.divider()
+
+        # ── Section 3: הוספת היעדרות עתידית לעובד ─────────────────
+        st.markdown("#### ➕ הוסף היעדרות עתידית לעובד")
+        sf_all_nb = st.session_state.staff
+        active_emps_nb = sorted(
+            sf_all_nb[sf_all_nb['type'].isin(['מתמחה', 'רופא בכיר', 'מנהל מחלקה', 'מנהל/ת'])]
+            ['name'].astype(str).str.strip().tolist()
+        )
+        adm_nb_emp = st.selectbox("עובד/ת:", active_emps_nb, key="nb_adm_emp")
+        nb_adm_col1, nb_adm_col2 = st.columns(2)
+        with nb_adm_col1:
+            adm_nb_start = st.date_input("מתאריך:", key="nb_adm_start",
+                                         value=date.today(),
+                                         min_value=date(2026, 1, 1),
+                                         max_value=date(2026, 12, 31))
+        with nb_adm_col2:
+            adm_nb_end = st.date_input("עד תאריך:", key="nb_adm_end",
+                                       value=date.today(),
+                                       min_value=date(2026, 1, 1),
+                                       max_value=date(2026, 12, 31))
+        adm_nb_type = st.selectbox("סוג היעדרות:", ["חופש", "202", "היעדרות אחרת"], key="nb_adm_type")
+        adm_nb_note = st.text_input("הערה (אופציונלי):", key="nb_adm_note")
+
+        if st.button("✅ הוסף היעדרות מאושרת", key="nb_adm_submit"):
+            if adm_nb_end < adm_nb_start:
+                st.error("תאריך סיום לפני תאריך התחלה.")
+            else:
+                emp_row_nb = sf_all_nb[sf_all_nb['name'].astype(str).str.strip() == adm_nb_emp]
+                emp_dept_nb = str(emp_row_nb.iloc[0].get('dept', '')) if not emp_row_nb.empty else ''
+                new_nb_row = {
+                    'id':              str(uuid.uuid4()),
+                    'employee':        adm_nb_emp,
+                    'start_date':      adm_nb_start.strftime('%Y-%m-%d'),
+                    'end_date':        adm_nb_end.strftime('%Y-%m-%d'),
+                    'type':            adm_nb_type,
+                    'status':          'approved',
+                    'dept_at_request': emp_dept_nb,
+                    'manager_email':   '',
+                    'approved_by':     str(user_name).strip(),
+                    'notes':           adm_nb_note.strip(),
+                    'created_at':      datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'responded_at':    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                }
+                new_nb_df = pd.concat(
+                    [st.session_state.absence_requests, pd.DataFrame([new_nb_row])],
+                    ignore_index=True
+                )
+                st.session_state.absence_requests = new_nb_df
+                save_to_db("absence_requests", new_nb_df)
+                _build_approved_map()
+                st.session_state['show_nb_adm_success'] = True
+                st.rerun()
+
+        if st.session_state.pop('show_nb_adm_success', False):
+            st.success("✅ היעדרות נוספה ואושרה — תופיע בלוח מיד.")
 
 
 else:
@@ -6810,10 +6824,10 @@ else:
     if selected_nav == 'סידור תורנויות':
         draw_calendar_view(2026, sel_month, "עובד/ת", user_name)
 
-    # ── סידור יומי (עובדים / מנהלי מחלקה) ────────────────────────
-    if selected_nav == 'סידור יומי':
+    # ── סידור עבודה (עובדים / מנהלי מחלקה) ────────────────────────
+    if selected_nav == 'סידור עבודה':
         if role == "מנהל מחלקה":
-            st.subheader("🗓️ סידור יומי — מנהל/ת מחלקה")
+            st.subheader("🗓️ סידור עבודה — מנהל/ת מחלקה")
             # Look up the depts this manager controls
             staff_row = st.session_state.staff[
                 st.session_state.staff['name'].astype(str).str.strip() == str(user_name).strip()
@@ -6826,177 +6840,252 @@ else:
             else:
                 st.caption(f"מחלקות בניהולך: {' | '.join(managed_depts)}")
 
-                mgr_tabs = st.tabs(["לוח מחלקה", "בקשות ממתינות"])
-                with mgr_tabs[0]:
-                    hebrew_months_da = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
-                                        "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
-                    da_y_m = f"2026-{daily_active_month_int:02d}"
-                    st.markdown(f"#### לוח מחלקה — {hebrew_months_da[daily_active_month_int-1]} 2026")
-                    st.caption("עורך/ת מחלקה: לחץ/י על תא לשינוי סטטוס. שורתך מצורפת לכל מחלקה — עריכה ישירה.")
-                    def _compose_mgr_emps(d_name):
-                        dr = st.session_state.dept_rotation
-                        emps = []
-                        if not dr.empty and 'employee' in dr.columns:
-                            mask = ((dr['year_month'].astype(str) == da_y_m) &
-                                    (dr['daily_dept'].astype(str) == d_name))
-                            emps = dr[mask]['employee'].astype(str).str.strip().tolist()
-                        mgrs = _get_dept_managers(d_name)
-                        # ensure current user is included even if not in manage_depts list
-                        if user_name not in mgrs:
-                            mgrs = [user_name] + mgrs
-                        return _sort_employees_by_role(
-                            mgrs + [e for e in emps if e not in mgrs]
-                        )
+                hebrew_months_da = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
+                                    "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
+                da_y_m = f"2026-{daily_active_month_int:02d}"
+                st.markdown(f"#### לוח מחלקה — {hebrew_months_da[daily_active_month_int-1]} 2026")
+                st.caption("עורך/ת מחלקה: לחץ/י על תא לשינוי סטטוס. שורתך מצורפת לכל מחלקה — עריכה ישירה.")
+                def _compose_mgr_emps(d_name):
+                    dr = st.session_state.dept_rotation
+                    emps = []
+                    if not dr.empty and 'employee' in dr.columns:
+                        mask = ((dr['year_month'].astype(str) == da_y_m) &
+                                (dr['daily_dept'].astype(str) == d_name))
+                        emps = dr[mask]['employee'].astype(str).str.strip().tolist()
+                    mgrs = _get_dept_managers(d_name)
+                    # ensure current user is included even if not in manage_depts list
+                    if user_name not in mgrs:
+                        mgrs = [user_name] + mgrs
+                    return _sort_employees_by_role(
+                        mgrs + [e for e in emps if e not in mgrs]
+                    )
 
-                    if len(managed_depts) > 1:
-                        sub_dept_tabs = st.tabs(managed_depts)
-                        for di, d_name in enumerate(managed_depts):
-                            with sub_dept_tabs[di]:
-                                emps = _compose_mgr_emps(d_name)
-                                _render_dept_grid(d_name, da_y_m, daily_active_month_int,
-                                                  f"mgr_{di}", employees=emps)
-                                st.divider()
-                                _render_export_buttons(d_name, da_y_m, daily_active_month_int,
-                                                       f"mgr_{di}", user_name)
-                    else:
-                        d_name = managed_depts[0]
-                        emps = _compose_mgr_emps(d_name)
-                        _render_dept_grid(d_name, da_y_m, daily_active_month_int,
-                                          "mgr_solo", employees=emps)
-                        st.divider()
-                        _render_export_buttons(d_name, da_y_m, daily_active_month_int,
-                                               "mgr_solo", user_name)
-                with mgr_tabs[1]:
-                    st.markdown("#### בקשות היעדרות ממתינות")
-                    ar_df_mgr = st.session_state.absence_requests.copy()
-                    if ar_df_mgr.empty or 'status' not in ar_df_mgr.columns:
-                        st.info("אין בקשות במערכת.")
-                    else:
-                        ar_df_mgr['status']           = ar_df_mgr['status'].astype(str).str.lower()
-                        ar_df_mgr['dept_at_request'] = ar_df_mgr['dept_at_request'].astype(str).str.strip()
-                        ar_df_mgr['employee']        = ar_df_mgr['employee'].astype(str).str.strip()
+                if len(managed_depts) > 1:
+                    sub_dept_tabs = st.tabs(managed_depts)
+                    for di, d_name in enumerate(managed_depts):
+                        with sub_dept_tabs[di]:
+                            emps = _compose_mgr_emps(d_name)
+                            _render_dept_grid(d_name, da_y_m, daily_active_month_int,
+                                              f"mgr_{di}", employees=emps)
+                            st.divider()
+                            _render_export_buttons(d_name, da_y_m, daily_active_month_int,
+                                                   f"mgr_{di}", user_name)
+                else:
+                    d_name = managed_depts[0]
+                    emps = _compose_mgr_emps(d_name)
+                    _render_dept_grid(d_name, da_y_m, daily_active_month_int,
+                                      "mgr_solo", employees=emps)
+                    st.divider()
+                    _render_export_buttons(d_name, da_y_m, daily_active_month_int,
+                                           "mgr_solo", user_name)
 
-                        # Normalise dept names for comparison (strip + normalise apostrophes)
-                        def _norm_dept(s):
-                            return str(s).strip().replace('׳', "'").replace('’', "'")
-                        norm_managed = [_norm_dept(d) for d in managed_depts]
-                        dept_match = ar_df_mgr['dept_at_request'].apply(_norm_dept).isin(norm_managed)
+    # ── ניהול בקשות (מנהל מחלקה) ─────────────────────────────────
+    if selected_nav == 'ניהול בקשות' and role == "מנהל מחלקה":
+        st.subheader("📋 ניהול בקשות היעדרות")
 
-                        # Fallback: also match by employee name — find all employees ever in
-                        # managed depts across all dept_rotation rows, regardless of month
-                        dr_all = st.session_state.dept_rotation
-                        managed_emps = set()
-                        if not dr_all.empty and 'daily_dept' in dr_all.columns:
-                            for md in norm_managed:
-                                emask = dr_all['daily_dept'].apply(_norm_dept) == md
-                                managed_emps.update(
-                                    dr_all[emask]['employee'].astype(str).str.strip().tolist()
-                                )
-                        emp_match = ar_df_mgr['employee'].isin(managed_emps)
+        # Lookup managed departments
+        _mgr_staff_row = st.session_state.staff[
+            st.session_state.staff['name'].astype(str).str.strip() == str(user_name).strip()
+        ]
+        _mgr_managed_depts = []
+        if not _mgr_staff_row.empty:
+            _mgr_managed_depts = _parse_manage_depts(_mgr_staff_row.iloc[0].get('manage_depts', ''))
 
-                        # Combine: dept_at_request match OR employee-in-managed-dept match
-                        my_pending = ar_df_mgr[
-                            (ar_df_mgr['status'] == 'pending') &
-                            (dept_match | emp_match)
-                        ]
-                        if 'start_date' in my_pending.columns:
-                            my_pending = my_pending.sort_values('start_date')
-                        if my_pending.empty:
-                            st.success("אין בקשות ממתינות במחלקותיך ✅")
-                        else:
-                            st.caption(f"📋 {len(my_pending)} בקשות ממתינות")
-                            for idx, row in my_pending.iterrows():
-                                with st.container(border=True):
-                                    cc1, cc2, cc3, cc4, cc5 = st.columns([2, 2, 2, 1, 1])
-                                    cc1.markdown(f"**{row.get('employee', '—')}**")
-                                    cc2.write(f"{row['start_date']} – {row['end_date']}")
-                                    cc3.write(row.get('type', '—'))
-                                    req_id = str(row.get('id', idx))
-                                    if cc4.button("✅ אשר", key=f"mgr_ap_{req_id}",
-                                                  use_container_width=True):
-                                        _approve_request(req_id, str(user_name).strip())
-                                        st.rerun()
-                                    if cc5.button("❌ דחה", key=f"mgr_rj_{req_id}",
-                                                  use_container_width=True):
-                                        _reject_request(req_id, str(user_name).strip())
-                                        st.rerun()
-                                    if row.get('notes'):
-                                        st.caption(f"💬 {row['notes']}")
-
-                        # ── Approved requests for the active month (table below) ──
-                        st.divider()
-                        st.markdown("#### בקשות שאושרו לחודש הפעיל")
-                        _ap_m = ar_df_mgr[
-                            (ar_df_mgr['status'] == 'approved') &
-                            (dept_match | emp_match)
-                        ].copy()
-                        if not _ap_m.empty:
-                            _ap_m['start_date'] = pd.to_datetime(_ap_m['start_date'], errors='coerce')
-                            _ap_m['end_date']   = pd.to_datetime(_ap_m['end_date'],   errors='coerce')
-                            _mstart_m = pd.Timestamp(2026, daily_active_month_int, 1)
-                            _mend_m   = pd.Timestamp(
-                                2026, daily_active_month_int,
-                                calendar.monthrange(2026, daily_active_month_int)[1])
-                            _ap_m = _ap_m[(_ap_m['end_date'] >= _mstart_m) &
-                                          (_ap_m['start_date'] <= _mend_m)]
-                        if _ap_m.empty:
-                            st.info("אין בקשות שאושרו לחודש זה.")
-                        else:
-                            _show_m = _ap_m[['employee', 'start_date', 'end_date', 'type',
-                                             'approved_by', 'responded_at']].copy()
-                            _show_m.columns = ['עובד/ת', 'מתאריך', 'עד תאריך', 'סוג',
-                                               'אושר ע"י', 'תאריך אישור']
-                            _show_m['מתאריך']  = _show_m['מתאריך'].dt.strftime('%Y-%m-%d')
-                            _show_m['עד תאריך'] = _show_m['עד תאריך'].dt.strftime('%Y-%m-%d')
-                            st.dataframe(_show_m, use_container_width=True, hide_index=True)
+        if not _mgr_managed_depts:
+            st.warning("⚠️ לא הוגדרו מחלקות בניהולך.")
         else:
-            # מתמחה / רופא בכיר — read-only full department calendar
-            hebrew_months_es = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
-                                "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
-            view_m = daily_active_month_int
-            es_year_month = f"2026-{view_m:02d}"
+            # Build dept/emp match helpers (uses global _norm_dept)
+            _mgr_norm_depts = [_norm_dept(d) for d in _mgr_managed_depts]
 
-            # Resolve the user's daily dept for this month
-            dr = st.session_state.dept_rotation
-            my_dept = "—"
-            if not dr.empty and 'employee' in dr.columns:
-                my_row = dr[
-                    (dr['employee'].astype(str).str.strip() == str(user_name).strip()) &
-                    (dr['year_month'].astype(str) == es_year_month)
-                ]
-                if not my_row.empty:
-                    my_dept = str(my_row.iloc[0].get('daily_dept', '—'))
+            _ar_mgr = st.session_state.absence_requests.copy()
+            if not _ar_mgr.empty and 'status' in _ar_mgr.columns:
+                _ar_mgr['status']          = _ar_mgr['status'].astype(str).str.lower()
+                _ar_mgr['dept_at_request'] = _ar_mgr['dept_at_request'].astype(str).str.strip()
+                _ar_mgr['employee']        = _ar_mgr['employee'].astype(str).str.strip()
+                _dept_match_mgr = _ar_mgr['dept_at_request'].apply(_norm_dept).isin(_mgr_norm_depts)
 
-            st.subheader(f"🗓️ לוח מחלקה — {hebrew_months_es[view_m-1]} 2026")
-            if my_dept == "—":
-                st.info("טרם שובצת למחלקה בחודש זה. פנה/י למנהל המערכת.")
+                _dr_all_mgr = st.session_state.dept_rotation
+                _mgr_emps_set = set()
+                if not _dr_all_mgr.empty and 'daily_dept' in _dr_all_mgr.columns:
+                    for _md in _mgr_norm_depts:
+                        _emask = _dr_all_mgr['daily_dept'].apply(_norm_dept) == _md
+                        _mgr_emps_set.update(
+                            _dr_all_mgr[_emask]['employee'].astype(str).str.strip().tolist()
+                        )
+                _emp_match_mgr = _ar_mgr['employee'].isin(_mgr_emps_set)
             else:
-                st.caption(f"מחלקתך: **{my_dept}**")
-                # Build employees: dept_rotation + all managers of this dept
-                _u_dr = st.session_state.dept_rotation
-                _u_emps = []
-                if not _u_dr.empty and 'employee' in _u_dr.columns:
-                    _u_mask = ((_u_dr['year_month'].astype(str) == es_year_month) &
-                               (_u_dr['daily_dept'].astype(str) == my_dept))
-                    _u_emps = _u_dr[_u_mask]['employee'].astype(str).str.strip().tolist()
-                _u_mgrs = _get_dept_managers(my_dept)
-                _u_all  = _sort_employees_by_role(
-                    _u_mgrs + [e for e in _u_emps if e not in _u_mgrs]
-                )
-                _render_dept_grid(my_dept, es_year_month, view_m,
-                                  "user_view", employees=_u_all,
-                                  readonly=True, highlight_user=user_name)
+                _ar_mgr = pd.DataFrame()
+                _dept_match_mgr = pd.Series(dtype=bool)
+                _emp_match_mgr  = pd.Series(dtype=bool)
 
-            # ── Personal schedule Excel download ──────────────────────────
-            st.markdown("---")
-            _pers_bytes, _pers_fname = _export_personal_schedule_excel(
-                user_name, view_m,
-                daily_dept=my_dept if my_dept != "—" else None)
-            if _pers_bytes:
-                st.download_button(
-                    "📥 הורד לוח עבודה שלי (Excel)",
-                    data=_pers_bytes,
-                    file_name=_pers_fname,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="personal_xl_dl",
-                )
+            # ── Section 1: בקשות ממתינות ──────────────────────────
+            st.markdown("#### ⏳ בקשות ממתינות")
+            if _ar_mgr.empty:
+                st.info("אין בקשות במערכת.")
+            else:
+                _pen_mgr = _ar_mgr[
+                    (_ar_mgr['status'] == 'pending') &
+                    (_dept_match_mgr | _emp_match_mgr)
+                ]
+                if 'start_date' in _pen_mgr.columns:
+                    _pen_mgr = _pen_mgr.sort_values('start_date')
+                if _pen_mgr.empty:
+                    st.success("אין בקשות ממתינות במחלקותיך ✅")
+                else:
+                    st.caption(f"📋 {len(_pen_mgr)} בקשות ממתינות")
+                    for _idx, _row in _pen_mgr.iterrows():
+                        with st.container(border=True):
+                            _c1, _c2, _c3, _c4, _c5 = st.columns([2, 2, 2, 1, 1])
+                            _c1.markdown(f"**{_row.get('employee', '—')}**")
+                            _c2.write(f"{_row['start_date']} – {_row['end_date']}")
+                            _c3.write(_row.get('type', '—'))
+                            _rid = str(_row.get('id', _idx))
+                            if _c4.button("✅ אשר", key=f"nb_mgr_ap_{_rid}",
+                                          use_container_width=True):
+                                _approve_request(_rid, str(user_name).strip())
+                                st.rerun()
+                            if _c5.button("❌ דחה", key=f"nb_mgr_rj_{_rid}",
+                                          use_container_width=True):
+                                _reject_request(_rid, str(user_name).strip())
+                                st.rerun()
+                            if _row.get('notes'):
+                                st.caption(f"💬 {_row['notes']}")
+
+            st.divider()
+
+            # ── Section 2: בקשות שאושרו — עתידיות ────────────────
+            st.markdown("#### ✅ בקשות שאושרו — עתידיות")
+            if _ar_mgr.empty:
+                st.info("אין בקשות שאושרו.")
+            else:
+                _ar_mgr2 = _ar_mgr.copy()
+                _ar_mgr2['end_date']   = pd.to_datetime(_ar_mgr2['end_date'], errors='coerce')
+                _ar_mgr2['start_date'] = pd.to_datetime(_ar_mgr2['start_date'], errors='coerce')
+                _today_mgr = pd.Timestamp(date.today())
+                _ap_mgr = _ar_mgr2[
+                    (_ar_mgr2['status'] == 'approved') &
+                    (_dept_match_mgr | _emp_match_mgr) &
+                    (_ar_mgr2['end_date'] >= _today_mgr)
+                ].copy()
+                if _ap_mgr.empty:
+                    st.info("אין בקשות שאושרו לתאריכים עתידיים.")
+                else:
+                    _ap_mgr = _ap_mgr.sort_values('start_date')
+                    _show_mgr = _ap_mgr[['employee', 'start_date', 'end_date', 'type', 'approved_by']].copy()
+                    _show_mgr.columns = ['עובד/ת', 'מתאריך', 'עד תאריך', 'סוג', 'אושר ע"י']
+                    _show_mgr['מתאריך']  = _show_mgr['מתאריך'].dt.strftime('%Y-%m-%d')
+                    _show_mgr['עד תאריך'] = _show_mgr['עד תאריך'].dt.strftime('%Y-%m-%d')
+                    st.dataframe(_show_mgr, use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            # ── Section 3: הוספת היעדרות לעובד ────────────────────
+            st.markdown("#### ➕ הוסף היעדרות לעובד")
+            st.caption("בחר עובד/ת מהמחלקה לרישום היעדרות מאושרת ישירות.")
+
+            # Build employee list: managed dept rotation members + manager themselves
+            _nb_mgr_da_ym = f"2026-{daily_active_month_int:02d}"
+            _nb_mgr_emps_list = list(_mgr_emps_set)
+            if str(user_name).strip() not in _nb_mgr_emps_list:
+                _nb_mgr_emps_list.append(str(user_name).strip())
+            _nb_mgr_emps_list = sorted(_nb_mgr_emps_list)
+
+            _nb_mgr_sel_emp = st.selectbox("עובד/ת:", _nb_mgr_emps_list, key="nb_mgr_emp")
+            _nb_mgr_c1, _nb_mgr_c2 = st.columns(2)
+            with _nb_mgr_c1:
+                _nb_mgr_start = st.date_input("מתאריך:", key="nb_mgr_start",
+                                               value=date.today(),
+                                               min_value=date(2026, 1, 1),
+                                               max_value=date(2026, 12, 31))
+            with _nb_mgr_c2:
+                _nb_mgr_end = st.date_input("עד תאריך:", key="nb_mgr_end",
+                                             value=date.today(),
+                                             min_value=date(2026, 1, 1),
+                                             max_value=date(2026, 12, 31))
+            _nb_mgr_type = st.selectbox("סוג היעדרות:", ["חופש", "202", "היעדרות אחרת"],
+                                         key="nb_mgr_type")
+            _nb_mgr_note = st.text_input("הערה (אופציונלי):", key="nb_mgr_note")
+
+            if st.button("✅ הוסף היעדרות מאושרת", key="nb_mgr_submit"):
+                if _nb_mgr_end < _nb_mgr_start:
+                    st.error("תאריך סיום לפני תאריך התחלה.")
+                else:
+                    _nb_emp_dept = _mgr_managed_depts[0] if _mgr_managed_depts else ''
+                    _nb_new_row = {
+                        'id':              str(uuid.uuid4()),
+                        'employee':        _nb_mgr_sel_emp,
+                        'start_date':      _nb_mgr_start.strftime('%Y-%m-%d'),
+                        'end_date':        _nb_mgr_end.strftime('%Y-%m-%d'),
+                        'type':            _nb_mgr_type,
+                        'status':          'approved',
+                        'dept_at_request': _nb_emp_dept,
+                        'manager_email':   '',
+                        'approved_by':     str(user_name).strip(),
+                        'notes':           _nb_mgr_note.strip(),
+                        'created_at':      datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        'responded_at':    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    }
+                    _nb_new_df = pd.concat(
+                        [st.session_state.absence_requests, pd.DataFrame([_nb_new_row])],
+                        ignore_index=True
+                    )
+                    st.session_state.absence_requests = _nb_new_df
+                    save_to_db("absence_requests", _nb_new_df)
+                    _build_approved_map()
+                    st.session_state['show_nb_mgr_success'] = True
+                    st.rerun()
+
+            if st.session_state.pop('show_nb_mgr_success', False):
+                st.success("✅ היעדרות נוספה ואושרה — תופיע בלוח מיד.")
+
+    if selected_nav == 'סידור עבודה' and role not in ("מנהל מחלקה",):
+        # מתמחה / רופא בכיר — read-only full department calendar
+        hebrew_months_es = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
+                            "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
+        view_m = daily_active_month_int
+        es_year_month = f"2026-{view_m:02d}"
+
+        # Resolve the user's daily dept for this month
+        dr = st.session_state.dept_rotation
+        my_dept = "—"
+        if not dr.empty and 'employee' in dr.columns:
+            my_row = dr[
+                (dr['employee'].astype(str).str.strip() == str(user_name).strip()) &
+                (dr['year_month'].astype(str) == es_year_month)
+            ]
+            if not my_row.empty:
+                my_dept = str(my_row.iloc[0].get('daily_dept', '—'))
+
+        st.subheader(f"🗓️ לוח מחלקה — {hebrew_months_es[view_m-1]} 2026")
+        if my_dept == "—":
+            st.info("טרם שובצת למחלקה בחודש זה. פנה/י למנהל המערכת.")
+        else:
+            st.caption(f"מחלקתך: **{my_dept}**")
+            # Build employees: dept_rotation + all managers of this dept
+            _u_dr = st.session_state.dept_rotation
+            _u_emps = []
+            if not _u_dr.empty and 'employee' in _u_dr.columns:
+                _u_mask = ((_u_dr['year_month'].astype(str) == es_year_month) &
+                           (_u_dr['daily_dept'].astype(str) == my_dept))
+                _u_emps = _u_dr[_u_mask]['employee'].astype(str).str.strip().tolist()
+            _u_mgrs = _get_dept_managers(my_dept)
+            _u_all  = _sort_employees_by_role(
+                _u_mgrs + [e for e in _u_emps if e not in _u_mgrs]
+            )
+            _render_dept_grid(my_dept, es_year_month, view_m,
+                              "user_view", employees=_u_all,
+                              readonly=True, highlight_user=user_name)
+
+        # ── Personal schedule Excel download ──────────────────────────
+        st.markdown("---")
+        _pers_bytes, _pers_fname = _export_personal_schedule_excel(
+            user_name, view_m,
+            daily_dept=my_dept if my_dept != "—" else None)
+        if _pers_bytes:
+            st.download_button(
+                "📥 הורד לוח עבודה שלי (Excel)",
+                data=_pers_bytes,
+                file_name=_pers_fname,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="personal_xl_dl",
+            )

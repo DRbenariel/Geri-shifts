@@ -366,9 +366,10 @@ def render_navbar(role):
     """Renders the responsive navigation bar.
     Role-based visibility:
       - מנהל על  : כל הטאבים (super-admin)
-      - מנהל/ת   : הגדרות + סידור חודשי + סידור יומי בלבד
-      - מנהל מחלקה / רופא בכיר: הגדרות + הגשת בקשות + סידור יומי
-      - מתמחה / תורן חוץ: הגדרות + סידור תורנויות + הגשת בקשות + סידור יומי
+      - מנהל/ת   : הגדרות + גאנט חודשי + סידור עבודה בלבד
+      - מנהל מחלקה: הגדרות + סידור עבודה + ניהול בקשות
+      - רופא בכיר: הגדרות + הגשת בקשות + סידור עבודה
+      - מתמחה / תורן חוץ: הגדרות + סידור תורנויות + הגשת בקשות + סידור עבודה (תורן חוץ ללא סידור עבודה)
     """
     items = []
 
@@ -378,22 +379,26 @@ def render_navbar(role):
     if role not in ("מנהל מחלקה", "רופא בכיר", "מנהל/ת"):
         items.append(sac.TabsItem('סידור תורנויות', icon='calendar-week'))
 
-    # הגשת בקשות — לא למנהל/ת ולא למנהל על
-    if role not in ("מנהל/ת", "מנהל על"):
+    # הגשת בקשות — לא למנהל/ת, מנהל על, מנהל מחלקה
+    if role not in ("מנהל/ת", "מנהל על", "מנהל מחלקה"):
         items.append(sac.TabsItem('הגשת בקשות', icon='calendar-check'))
 
-    # צוות + דוחות — מנהל על ומנהל/ת (ישן) לא — רק מנהל על
+    # צוות + דוחות — רק מנהל על
     if role == "מנהל על":
         items.append(sac.TabsItem('צוות', icon='people'))
         items.append(sac.TabsItem('דוחות וניהול', icon='bar-chart-line'))
 
-    # סידור חודשי — מנהל על ומנהל/ת
+    # גאנט חודשי — מנהל על ומנהל/ת
     if role in ("מנהל על", "מנהל/ת"):
-        items.append(sac.TabsItem('סידור חודשי', icon='calendar3'))
+        items.append(sac.TabsItem('גאנט חודשי', icon='calendar3'))
 
-    # סידור יומי — כולם חוץ מ-תורן חוץ
+    # סידור עבודה — כולם חוץ מ-תורן חוץ
     if role != "תורן חוץ":
-        items.append(sac.TabsItem('סידור יומי', icon='calendar-day'))
+        items.append(sac.TabsItem('סידור עבודה', icon='calendar-day'))
+
+    # ניהול בקשות — מנהל על ומנהל מחלקה
+    if role in ("מנהל על", "מנהל מחלקה"):
+        items.append(sac.TabsItem('ניהול בקשות', icon='inbox'))
 
     # ── Default index after first login ───────────────────────────
     if 'nav_initialized' not in st.session_state:
@@ -401,9 +406,11 @@ def render_navbar(role):
         if role == "מנהל על":
             default = 'דוחות וניהול'
         elif role == "מנהל/ת":
-            default = 'סידור חודשי'
-        elif role in ("מנהל מחלקה", "רופא בכיר"):
-            default = 'סידור יומי'
+            default = 'גאנט חודשי'
+        elif role == "מנהל מחלקה":
+            default = 'סידור עבודה'
+        elif role == "רופא בכיר":
+            default = 'סידור עבודה'
         else:
             default = 'הגשת בקשות'
         st.session_state.current_nav_index = labels.index(default) if default in labels else 0
