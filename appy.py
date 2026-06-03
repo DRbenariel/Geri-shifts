@@ -6124,6 +6124,11 @@ elif role in ("מנהל/ת", "מנהל על"):
                 st.success("אין בקשות ממתינות ✅")
             else:
                 st.caption(f"📋 {len(pen_nb)} בקשות ממתינות")
+                # Pre-compute approved rows for overlap check (once, outside loop)
+                _ar_appr_nb = ar_nb.copy()
+                _ar_appr_nb['_sd'] = pd.to_datetime(_ar_appr_nb['start_date'], errors='coerce')
+                _ar_appr_nb['_ed'] = pd.to_datetime(_ar_appr_nb['end_date'], errors='coerce')
+                _ar_appr_nb = _ar_appr_nb[_ar_appr_nb['status'] == 'approved']
                 for idx, row in pen_nb.iterrows():
                     with st.container(border=True):
                         cc1, cc2, cc3, cc4, cc5, cc6 = st.columns([2, 1.5, 1.5, 1.5, 1, 1])
@@ -6140,6 +6145,20 @@ elif role in ("מנהל/ת", "מנהל על"):
                                       use_container_width=True):
                             _reject_request(req_id, str(user_name).strip())
                             st.rerun()
+                        # Overlap warning: other employees in same dept already approved
+                        _rs = pd.to_datetime(row.get('start_date', ''), errors='coerce')
+                        _re = pd.to_datetime(row.get('end_date', ''), errors='coerce')
+                        _rdept = str(row.get('dept_at_request', ''))
+                        _remp  = str(row.get('employee', '')).strip()
+                        _ovlp = _ar_appr_nb[
+                            (_ar_appr_nb['employee'].astype(str).str.strip() != _remp) &
+                            (_ar_appr_nb['dept_at_request'].astype(str) == _rdept) &
+                            (_ar_appr_nb['_sd'] <= _re) &
+                            (_ar_appr_nb['_ed'] >= _rs)
+                        ]
+                        if not _ovlp.empty:
+                            _cnames = ', '.join(_ovlp['employee'].astype(str).str.strip().unique())
+                            st.warning(f"⚠️ חופש כבר אושר ל: **{_cnames}** מאותה מחלקה בתאריכים אלו")
                         if row.get('notes'):
                             st.caption(f"💬 {row['notes']}")
 
@@ -6990,6 +7009,11 @@ else:
                     st.success("אין בקשות ממתינות במחלקותיך ✅")
                 else:
                     st.caption(f"📋 {len(_pen_mgr)} בקשות ממתינות")
+                    # Pre-compute approved rows for overlap check (once, outside loop)
+                    _ar_appr_mgr = _ar_mgr.copy()
+                    _ar_appr_mgr['_sd'] = pd.to_datetime(_ar_appr_mgr['start_date'], errors='coerce')
+                    _ar_appr_mgr['_ed'] = pd.to_datetime(_ar_appr_mgr['end_date'], errors='coerce')
+                    _ar_appr_mgr = _ar_appr_mgr[_ar_appr_mgr['status'] == 'approved']
                     for _idx, _row in _pen_mgr.iterrows():
                         with st.container(border=True):
                             _c1, _c2, _c3, _c4, _c5 = st.columns([2, 2, 2, 1, 1])
@@ -7005,6 +7029,21 @@ else:
                                           use_container_width=True):
                                 _reject_request(_rid, str(user_name).strip())
                                 st.rerun()
+                            # Overlap warning: other employees in same dept already approved
+                            _rs2 = pd.to_datetime(_row.get('start_date', ''), errors='coerce')
+                            _re2 = pd.to_datetime(_row.get('end_date', ''), errors='coerce')
+                            _rdept2 = str(_row.get('dept_at_request', ''))
+                            _remp2  = str(_row.get('employee', '')).strip()
+                            _ovlp2 = _ar_appr_mgr[
+                                (_ar_appr_mgr['employee'].astype(str).str.strip() != _remp2) &
+                                (_ar_appr_mgr['dept_at_request'].astype(str).apply(_norm_dept) ==
+                                 _norm_dept(_rdept2)) &
+                                (_ar_appr_mgr['_sd'] <= _re2) &
+                                (_ar_appr_mgr['_ed'] >= _rs2)
+                            ]
+                            if not _ovlp2.empty:
+                                _cnames2 = ', '.join(_ovlp2['employee'].astype(str).str.strip().unique())
+                                st.warning(f"⚠️ חופש כבר אושר ל: **{_cnames2}** מאותה מחלקה בתאריכים אלו")
                             if _row.get('notes'):
                                 st.caption(f"💬 {_row['notes']}")
 
