@@ -37,7 +37,7 @@ def get_client():
         with open(key_file) as f:
             creds_dict = json.load(f)
     creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    return gspread.authorize(creds)
+    return gspread.Client(auth=creds)
 
 
 def load_sheet(sh, name):
@@ -1094,7 +1094,7 @@ def save_report(sh, problems, year, month):
     except gspread.exceptions.WorksheetNotFound:
         ws = sh.add_worksheet('daily_report', rows=500, cols=6)
 
-    ws.update('A1', header + rows)
+    ws.update(header + rows, 'A1')
     print(f"[{now_str}] Report saved: {len(rows)} issues for {month_str}")
     for p in problems:
         sev  = p['severity']
