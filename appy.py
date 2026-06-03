@@ -1607,7 +1607,8 @@ def _render_dept_grid_readonly_DEPRECATED(dept_name, year_month, view_month, hig
 
 def _render_dept_grid(dept_name, year_month, view_month, key_ns,
                       employees=None, max_days=None,
-                      readonly=False, highlight_user=None):
+                      readonly=False, highlight_user=None,
+                      allow_temp_add=False):
     """
     Render a dept × month grid.
 
@@ -1669,9 +1670,16 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns,
                     (dr['daily_dept'].astype(str) == dept_name))
             employees = dr[mask]['employee'].astype(str).str.strip().tolist()
 
+    if allow_temp_add and not readonly:
+        _temp_key = f"temp_emps_{key_ns}"
+        _temp_emps = st.session_state.get(_temp_key, [])
+        _emp_set = {str(e).strip() for e in (employees or [])}
+        employees = (employees or []) + [e for e in _temp_emps if e not in _emp_set]
+
     if not employees:
         st.info(f"אין עובדים משובצים ל-{dept_name} בחודש זה.")
-        return
+        if not allow_temp_add:
+            return
 
 
     # ── Shared setup ────────────────────────────────────────────────────
@@ -2028,6 +2036,52 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                     f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
                     f"{cell_txt}</div>",
                     unsafe_allow_html=True)
+
+    # ── Temporary employee transfer form ───────────────────────────────────
+    if allow_temp_add and not readonly:
+        _temp_key = f"temp_emps_{key_ns}"
+        _cur_temps = st.session_state.get(_temp_key, [])
+        st.divider()
+        st.markdown(
+            "<div style='background:#f0fdf4;border:1px solid #86efac;border-radius:8px;"
+            "padding:10px 14px;text-align:right;margin-bottom:6px'>"
+            "<b>➕ העברה זמנית — הוסף עובד/ת ממחלקה אחרת</b></div>",
+            unsafe_allow_html=True)
+
+        _all_staff_names = []
+        if not st.session_state.staff.empty and 'name' in st.session_state.staff.columns:
+            _all_staff_names = (st.session_state.staff['name']
+                                .astype(str).str.strip().tolist())
+        _current_emp_set = {str(e).strip() for e in employees}
+        _available_to_add = [n for n in _all_staff_names
+                             if n and n not in _current_emp_set]
+
+        _ta_c1, _ta_c2 = st.columns([4, 1])
+        with _ta_c1:
+            _sel_ta = st.selectbox(
+                "בחר/י עובד/ת להוספה זמנית לסידור:",
+                ["—"] + _available_to_add,
+                key=f"temp_emp_sel_{key_ns}")
+        with _ta_c2:
+            st.write("")
+            if st.button("➕ הוסף", key=f"temp_emp_add_{key_ns}",
+                         use_container_width=True):
+                if _sel_ta and _sel_ta != "—":
+                    _cur_list = st.session_state.get(_temp_key, [])
+                    if _sel_ta not in _cur_list:
+                        st.session_state[_temp_key] = _cur_list + [_sel_ta]
+                    st.rerun()
+
+        if _cur_temps:
+            st.markdown("**עובדים/ות זמניים בסידור זה (בפעילות הנוכחית בלבד):**")
+            for _te in list(_cur_temps):
+                _tr1, _tr2 = st.columns([5, 1])
+                _tr1.markdown(f"• {_te}")
+                if _tr2.button("✕ הסר", key=f"temp_emp_rm_{key_ns}_{_te}",
+                               use_container_width=True):
+                    _updated = [x for x in st.session_state.get(_temp_key, []) if x != _te]
+                    st.session_state[_temp_key] = _updated
+                    st.rerun()
 
 
 def log_event(event_type, detail_1='', detail_2=''):
@@ -6037,7 +6091,8 @@ elif role in ("מנהל/ת", "מנהל על"):
         )
 
         _render_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int,
-                          "adm_mgrview", employees=_all_adm_emps)
+                          "adm_mgrview", employees=_all_adm_emps,
+                          allow_temp_add=True)
 
         st.divider()
         _render_export_buttons(sel_dept_admin, adm_y_m, daily_active_month_int,
@@ -6866,7 +6921,8 @@ else:
                         with sub_dept_tabs[di]:
                             emps = _compose_mgr_emps(d_name)
                             _render_dept_grid(d_name, da_y_m, daily_active_month_int,
-                                              f"mgr_{di}", employees=emps)
+                                              f"mgr_{di}", employees=emps,
+                                              allow_temp_add=True)
                             st.divider()
                             _render_export_buttons(d_name, da_y_m, daily_active_month_int,
                                                    f"mgr_{di}", user_name)
@@ -6874,7 +6930,8 @@ else:
                     d_name = managed_depts[0]
                     emps = _compose_mgr_emps(d_name)
                     _render_dept_grid(d_name, da_y_m, daily_active_month_int,
-                                      "mgr_solo", employees=emps)
+                                      "mgr_solo", employees=emps,
+                                      allow_temp_add=True)
                     st.divider()
                     _render_export_buttons(d_name, da_y_m, daily_active_month_int,
                                            "mgr_solo", user_name)

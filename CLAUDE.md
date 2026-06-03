@@ -147,20 +147,35 @@ Implementation rules:
 - Top of `דוחות וניהול` tab shows a live banner counting "ימי שיא חסימה" from the last saved report (קריטי / אזהרה counts) before the manual run button.
 - Headline reads from the already-saved `daily_report` sheet — does not re-run analysis on load.
 
-## Feature: סידור יומי / סידור חודשי (Daily Work Schedule)
+## Feature: סידור עבודה / גאנט חודשי (Daily Work Schedule)
 A second module on top of the night-shift scheduler — covers daytime staffing for 3 depts (`שיקום גריאטרי א'`, `שיקום גריאטרי ב'`, `פנימית גריאטרית`).
 
-### Tab access
-- **"הגשת בקשות"** (renamed from "הגשת אילוצים") — UNIFIED tab:
+### Tab structure (per role)
+| Role | Tabs |
+|---|---|
+| מנהל על | הגדרות \| סידור תורנויות \| צוות \| דוחות וניהול \| **גאנט חודשי** \| **סידור עבודה** \| **ניהול בקשות** |
+| מנהל/ת | הגדרות \| **גאנט חודשי** \| **סידור עבודה** |
+| מנהל מחלקה | הגדרות \| **סידור עבודה** \| **ניהול בקשות** |
+| מתמחה / רופא בכיר | הגדרות \| (סידור תורנויות) \| הגשת בקשות \| **סידור עבודה** |
+| תורן חוץ | הגדרות \| סידור תורנויות \| הגשת בקשות |
+
+### Tab access details
+- **"הגשת בקשות"** — UNIFIED tab (night constraints + day absences, role-gated):
   - מתמחה: 🌙 night constraints + ☀️ day absences (both sections)
   - תורן חוץ: 🌙 night constraints only
   - רופא בכיר: ☀️ day absences only
-  - מנהל מחלקה / מנהל/ת: not shown
-- **"סידור יומי"** (label for non-admins) / **"סידור חודשי"** (label for מנהל/ת) — same navbar tab, role-dependent label set in `render_navbar()`:
-  - מנהל/ת: 5 sub-tabs — שיבוץ חודשי / לוח עבודה כללי / כל הבקשות / צור סידור / ייצוא — with a top-level **month selector** (`view_month`) for planning ahead, plus a "הפוך לחודש פעיל" button
-  - מנהל מחלקה: 2 sub-tabs — לוח מחלקה (editable grid for own dept(s), includes own row) / בקשות ממתינות
-  - מתמחה / רופא בכיר: 1 view — לוח עבודה שלי (read-only colored calendar)
-  - תורן חוץ: tab not shown
+  - מנהל מחלקה / מנהל/ת / מנהל על: **not shown** (managers handle absences via ניהול בקשות)
+- **"גאנט חודשי"** (was "סידור חודשי") — מנהל/ת + מנהל על only:
+  - 5 sub-tabs: שיבוץ חודשי / לוח עבודה כללי / כל הבקשות / צור סידור / ייצוא
+  - Top-level month selector (`view_month`) + "הפוך לחודש פעיל" button
+- **"סידור עבודה"** (was "סידור יומי") — all roles except תורן חוץ:
+  - מנהל על / מנהל/ת: dept selector + editable grid + export buttons (no sub-tabs)
+  - מנהל מחלקה: editable grid for own dept(s) + export buttons (no sub-tabs)
+  - מתמחה / רופא בכיר: read-only personal calendar (לוח עבודה שלי)
+- **"ניהול בקשות"** — מנהל על + מנהל מחלקה only (single page, no sub-tabs):
+  - Section 1: pending absence requests (with dept filter for admin)
+  - Section 2: all future approved requests (end_date ≥ today), sorted by dept + date
+  - Section 3: add pre-approved absence for any employee (status=approved immediately)
 
 ### Day-absence calendar UI ("הגשת בקשות" → ☀️ section)
 Calendar shows ONLY absence-related states — **no night shifts, no אחרי תורנות**:
@@ -201,7 +216,7 @@ Gate: `daily_requests_open` setting. Admin opens/closes via 🔓/🔒 button in 
 - `_approve_request(req_id, responder)` / `_reject_request(req_id, responder)` — wrap `_update_absence_status()` which updates row + emails requester
 - `_generate_work_schedule(year_month, view_month)` — main scheduler
 - `_wsd_get_status(date_str, employee, default)` / `_wsd_upsert(date, emp, dept, status, is_manual, note)` — work_schedule_daily I/O
-- `_render_dept_grid(dept_name, year_month, view_month, key_ns, employees, max_days)` — shared editable grid (admin + manager use it)
+- `_render_dept_grid(dept_name, year_month, view_month, key_ns, employees, max_days, allow_temp_add=False)` — shared editable grid (admin + manager use it). Pass `allow_temp_add=True` to show the "העברה זמנית" form at the bottom — lets admin/manager add any staff member to the grid for the current session (stored in `st.session_state[f"temp_emps_{key_ns}"]`).
 - `_export_dept_grid(dept_name, year_month, view_month)` — writes wide-format `WSD_<dept>_<year_month>` sheet
 - `_export_schedule_wide(view_month)` — old Schedule_Export wide-format export, **moved to "לוח שיבוץ" tab** (was previously in "דוחות וניהול → ייצוא נתונים")
 
