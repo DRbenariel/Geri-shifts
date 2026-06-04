@@ -4635,46 +4635,54 @@ def _set_setting(key, value):
 def _sw_month_selector(active_m: int, key_ns: str) -> int:
     """Month toggle for the work-schedule tab.
 
-    Always shows [active month] [next month].
-    Also shows [month after next] if dept_rotation already has rows for it.
-    Returns the currently selected month integer (1-12).
+    Always shows exactly two buttons:
+      [current calendar month]  [active submission month (active_m)]
+    The current calendar month is derived from today's date so it
+    disappears naturally on the 1st of the new month.
+    Default selection: active_m (the submission month).
     Session-state key: f"{key_ns}_vm".
     """
-    next_m       = (active_m % 12) + 1
-    after_next_m = (next_m   % 12) + 1
+    cur_m = datetime.now().month   # real calendar month (e.g. June = 6)
 
-    # Check whether dept_rotation already has assignments for after_next_m
-    _after_next_ym = f"2026-{after_next_m:02d}"
-    _has_after_next = False
-    try:
-        dr = st.session_state.get('dept_rotation')
-        if dr is not None and not dr.empty and 'year_month' in dr.columns:
-            _has_after_next = (dr['year_month'].astype(str) == _after_next_ym).any()
-    except Exception:
-        pass
-
-    valid_months = (active_m, next_m, after_next_m) if _has_after_next else (active_m, next_m)
-
-    sk = f"{key_ns}_vm"
-    if sk not in st.session_state:
+    # If both are the same (can happen briefly on month rollover), just show one
+    if cur_m == active_m:
+        sk = f"{key_ns}_vm"
         st.session_state[sk] = active_m
-    # Reset to active month if the stored value is no longer valid
-    if st.session_state[sk] not in valid_months:
-        st.session_state[sk] = active_m
-
-    cols = st.columns([2, 2, 2, 6]) if _has_after_next else [*st.columns([2, 2, 8])[:2], None, None]
-    months_to_show = [active_m, next_m] + ([after_next_m] if _has_after_next else [])
-    btn_keys       = [f"{key_ns}_btn_cur", f"{key_ns}_btn_nxt", f"{key_ns}_btn_aft"]
-    for i, m in enumerate(months_to_show):
-        with cols[i]:
-            if st.button(
-                f"📅 {_HEB_MONTHS[m - 1]}",
-                key=btn_keys[i],
+        c1, _ = st.columns([2, 10])
+        with c1:
+            st.button(
+                f"📅 {_HEB_MONTHS[active_m - 1]}",
+                key=f"{key_ns}_btn_cur",
                 use_container_width=True,
-                type="primary" if st.session_state[sk] == m else "secondary",
-            ):
-                st.session_state[sk] = m
-                st.rerun()
+                type="primary",
+                disabled=True,
+            )
+        return active_m
+
+    valid_months = (cur_m, active_m)
+    sk = f"{key_ns}_vm"
+    if sk not in st.session_state or st.session_state[sk] not in valid_months:
+        st.session_state[sk] = active_m   # default: submission month
+
+    c1, c2, _ = st.columns([2, 2, 8])
+    with c1:
+        if st.button(
+            f"📅 {_HEB_MONTHS[cur_m - 1]}",
+            key=f"{key_ns}_btn_cur",
+            use_container_width=True,
+            type="primary" if st.session_state[sk] == cur_m else "secondary",
+        ):
+            st.session_state[sk] = cur_m
+            st.rerun()
+    with c2:
+        if st.button(
+            f"📅 {_HEB_MONTHS[active_m - 1]}",
+            key=f"{key_ns}_btn_nxt",
+            use_container_width=True,
+            type="primary" if st.session_state[sk] == active_m else "secondary",
+        ):
+            st.session_state[sk] = active_m
+            st.rerun()
     return st.session_state[sk]
 
 try:
