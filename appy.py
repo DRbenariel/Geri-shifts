@@ -18,6 +18,16 @@ calendar.setfirstweekday(calendar.SUNDAY)
 # ── Daily-schedule departments (Phase 1+, single source of truth) ──
 DAILY_DEPTS_ALL = ["שיקום גריאטרי א'", "שיקום גריאטרי ב'", "פנימית גריאטרית", "זה״ב"]
 
+# ── Hebrew month names (single source of truth) ───────────────────────────────
+_HEB_MONTHS = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני",
+               "יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
+
+# ── פנימית גריאטרית — two sub-ward constants ─────────────────────────────────
+PNIM_DEPT   = "פנימית גריאטרית"
+PNIM_SIDES  = ["ורוד", "כחול"]
+PNIM_COLORS = {"ורוד": "#fce7f3", "כחול": "#dbeafe"}
+PNIM_ICONS  = {"ורוד": "🌸", "כחול": "🔵"}
+
 import ui_components # Modular UI components
 
 # --- 1. עיצוב ו-CSS ---
@@ -76,10 +86,14 @@ def _norm_dept(v: str) -> str:
     return str(v).strip().translate(_APOS_VARIANTS)
 
 def _norm_dr(df: "pd.DataFrame") -> "pd.DataFrame":
-    """Normalise the daily_dept column of a dept_rotation DataFrame in-place."""
+    """Normalise the daily_dept and side columns of a dept_rotation DataFrame."""
     if not df.empty and 'daily_dept' in df.columns:
         df = df.copy()
         df['daily_dept'] = df['daily_dept'].astype(str).apply(_norm_dept)
+    # Ensure the `side` column always exists (added for פנימית two-ward display)
+    if 'side' not in df.columns:
+        df['side'] = ''
+    df['side'] = df['side'].fillna('').astype(str).str.strip()
     return df
 
 def _clean_sheet_values(vals):
@@ -2082,6 +2096,91 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                     _updated = [x for x in st.session_state.get(_temp_key, []) if x != _te]
                     st.session_state[_temp_key] = _updated
                     st.rerun()
+
+
+def _render_pnim_sided(year_month, view_month, key_ns,
+                       employees, readonly=False,
+                       highlight_user=None, allow_temp_add=False):
+    """Render פנימית גריאטרית with 🌸 ורוד / 🔵 כחול section headers.
+
+    Employees are split by their `side` field in dept_rotation, then sorted
+    within each group: רופא בכיר first, then מתמחה alphabetically.
+    Employees with no side assigned appear under a grey "ללא צד" section.
+    """
+    # Build side map from dept_rotation
+    dr = st.session_state.dept_rotation
+    _side_map: dict = {}
+    if not dr.empty and 'employee' in dr.columns and 'side' in dr.columns:
+        _cur_dr = dr[dr['year_month'].astype(str) == year_month]
+        _side_map = (
+            _cur_dr.set_index('employee')['side']
+            .fillna('').astype(str).str.strip()
+            .to_dict()
+        )
+
+    staff_df = st.session_state.staff
+
+    def _role_order(emp_name):
+        row = staff_df[staff_df['name'].astype(str).str.strip() == str(emp_name).strip()]
+        t = str(row.iloc[0]['type']).strip() if not row.empty else ''
+        return 0 if t == 'רופא בכיר' else 1
+
+    def _sorted_group(emps):
+        return sorted(emps, key=lambda e: (_role_order(e), str(e)))
+
+    emp_strs = [str(e).strip() for e in employees]
+
+    def _group(side_val):
+        return _sorted_group([e for e in emp_strs if _side_map.get(e, '') == side_val])
+
+    for side in PNIM_SIDES:
+        icon  = PNIM_ICONS[side]
+        color = PNIM_COLORS[side]
+        group = _group(side)
+        st.markdown(
+            f"<div style='background:{color};padding:8px 18px;border-radius:10px;"
+            f"margin:16px 0 6px;font-weight:700;font-size:1.05rem;color:#1e293b'>"
+            f"{icon}&nbsp;&nbsp;צד {side}</div>",
+            unsafe_allow_html=True,
+        )
+        if group:
+            _render_dept_grid(
+                PNIM_DEPT, year_month, view_month, f"{key_ns}_{side}",
+                employees=group,
+                readonly=readonly,
+                highlight_user=highlight_user,
+                allow_temp_add=False,
+            )
+        else:
+            st.caption(f"אין עובדים משובצים לצד {side} בחודש זה.")
+
+    # Employees not yet assigned to a side
+    unassigned = _group('')
+    if unassigned:
+        st.markdown(
+            "<div style='background:#f1f5f9;padding:8px 18px;border-radius:10px;"
+            "margin:16px 0 6px;font-weight:600;font-size:1rem;color:#64748b'>"
+            "⬜ ללא צד</div>",
+            unsafe_allow_html=True,
+        )
+        _render_dept_grid(
+            PNIM_DEPT, year_month, view_month, f"{key_ns}_none",
+            employees=unassigned,
+            readonly=readonly,
+            highlight_user=highlight_user,
+            allow_temp_add=False,
+        )
+
+    # Temp-employee transfer: delegate to _render_dept_grid with full employee list.
+    # Pass employees=[] so no rows are rendered twice — only the add/remove form shows.
+    if allow_temp_add and not readonly:
+        st.markdown("---")
+        _render_dept_grid(
+            PNIM_DEPT, year_month, view_month, key_ns,
+            employees=[],          # grid rows rendered above; here only the temp-add UI
+            readonly=False,
+            allow_temp_add=True,
+        )
 
 
 def log_event(event_type, detail_1='', detail_2=''):
@@ -4533,6 +4632,41 @@ def _set_setting(key, value):
     st.session_state.settings = s
     save_to_db("settings", s)
 
+def _sw_month_selector(active_m: int, key_ns: str) -> int:
+    """Two-button month toggle for the work-schedule tab.
+
+    Shows [active month] [next month] as primary/secondary buttons.
+    Returns the currently selected month integer (1-12).
+    Session-state key: f"{key_ns}_vm".
+    """
+    next_m = (active_m % 12) + 1
+    sk = f"{key_ns}_vm"
+    if sk not in st.session_state:
+        st.session_state[sk] = active_m
+    # Reset to active month if the stored value is no longer valid
+    if st.session_state[sk] not in (active_m, next_m):
+        st.session_state[sk] = active_m
+    c1, c2, _ = st.columns([2, 2, 8])
+    with c1:
+        if st.button(
+            f"📅 {_HEB_MONTHS[active_m - 1]}",
+            key=f"{key_ns}_btn_cur",
+            use_container_width=True,
+            type="primary" if st.session_state[sk] == active_m else "secondary",
+        ):
+            st.session_state[sk] = active_m
+            st.rerun()
+    with c2:
+        if st.button(
+            f"📅 {_HEB_MONTHS[next_m - 1]}",
+            key=f"{key_ns}_btn_nxt",
+            use_container_width=True,
+            type="primary" if st.session_state[sk] == next_m else "secondary",
+        ):
+            st.session_state[sk] = next_m
+            st.rerun()
+    return st.session_state[sk]
+
 try:
     daily_active_month_int = int(_get_setting('daily_active_month', active_month_int))
 except Exception:
@@ -5977,19 +6111,31 @@ elif role in ("מנהל/ת", "מנהל על"):
                 dr['employee']   = dr['employee'].astype(str).str.strip()
                 dr['year_month'] = dr['year_month'].astype(str)
                 dr['daily_dept'] = dr['daily_dept'].astype(str)
-                existing = dr[dr['year_month'] == view_year_month].set_index('employee')['daily_dept'].to_dict()
+                if 'side' not in dr.columns: dr['side'] = ''
+                dr['side'] = dr['side'].fillna('').astype(str).str.strip()
+                _cur_month_dr = dr[dr['year_month'] == view_year_month]
+                existing = _cur_month_dr.set_index('employee')['daily_dept'].to_dict()
+                existing_sides = _cur_month_dr.set_index('employee')['side'].to_dict()
             else:
                 existing = {}
+                existing_sides = {}
 
             with st.form(f"rotation_form_{view_month}"):
                 new_assignments = {}
+                new_sides = {}
+                # Header row
+                _hc1, _hc2, _hc3 = st.columns([2, 2, 1])
+                _hc2.caption("מחלקה")
+                _hc3.caption("צד (פנימית)")
                 for _, emp_row in eligible.iterrows():
                     emp_name = emp_row['name']
                     emp_type = emp_row['type']
                     current = existing.get(emp_name, "— לא שובץ —")
                     if current not in DAILY_DEPTS:
                         current = "— לא שובץ —"
-                    c1, c2 = st.columns([2, 3])
+                    cur_side = existing_sides.get(emp_name, "")
+                    if cur_side not in PNIM_SIDES: cur_side = ""
+                    c1, c2, c3 = st.columns([2, 2, 1])
                     c1.markdown(
                         f"<div style='padding:6px 0;font-weight:500'>"
                         f"{emp_name} <span style='color:#64748b;font-size:0.8rem'>({emp_type})</span></div>",
@@ -5999,6 +6145,17 @@ elif role in ("מנהל/ת", "מנהל על"):
                         index=DAILY_DEPTS.index(current),
                         key=f"rot_{emp_name}_{view_month}",
                         label_visibility="collapsed"
+                    )
+                    # Side selector: show for all; only relevant when dept=פנימית
+                    # (current DB value drives whether side options are highlighted)
+                    _side_opts = [""] + PNIM_SIDES
+                    _side_idx = _side_opts.index(cur_side) if cur_side in _side_opts else 0
+                    new_sides[emp_name] = c3.selectbox(
+                        "", _side_opts,
+                        index=_side_idx,
+                        key=f"rot_side_{emp_name}_{view_month}",
+                        label_visibility="collapsed",
+                        format_func=lambda s: ("🌸" if s == "ורוד" else "🔵" if s == "כחול" else "—"),
                     )
                 submit = st.form_submit_button(f"💾 שמור שיבוץ לחודש {hebrew_months[view_month-1]}")
 
@@ -6021,11 +6178,18 @@ elif role in ("מנהל/ת", "מנהל על"):
                     for emp_n, old_d, new_d in warnings_for:
                         st.warning(f"⚠️ {emp_n}: יש חופש עתידי מאושר. שינוי: {old_d} → {new_d}.")
                 other_months = dr[dr['year_month'] != view_year_month] if not dr.empty else pd.DataFrame(
-                    columns=['employee','year_month','daily_dept'])
+                    columns=['employee','year_month','daily_dept','side'])
                 new_rows = []
                 for emp_n, dept_n in new_assignments.items():
                     if dept_n != "— לא שובץ —":
-                        new_rows.append({'employee': emp_n, 'year_month': view_year_month, 'daily_dept': dept_n})
+                        # Only carry the side value for פנימית assignments
+                        side_val = new_sides.get(emp_n, '') if dept_n == PNIM_DEPT else ''
+                        new_rows.append({
+                            'employee': emp_n,
+                            'year_month': view_year_month,
+                            'daily_dept': dept_n,
+                            'side': side_val,
+                        })
                 new_dr = _norm_dr(pd.concat([other_months, pd.DataFrame(new_rows)], ignore_index=True))
                 st.session_state.dept_rotation = new_dr
                 save_to_db("dept_rotation", new_dr)
@@ -6067,14 +6231,11 @@ elif role in ("מנהל/ת", "מנהל על"):
         st.subheader("🗓️ סידור עבודה — תצוגת מנהל/ת מחלקה (אדמין)")
         st.caption("בחר מחלקה לראות אותה כפי שמנהל המחלקה רואה.")
 
-        adm_hebrew_months = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
-                             "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
         sel_dept_admin = st.selectbox("מחלקה לתצוגה:", DAILY_DEPTS_ALL, key="adm_sy_dept")
+        adm_view_m = _sw_month_selector(daily_active_month_int, "sw_adm")
+        adm_y_m = f"2026-{adm_view_m:02d}"
 
-        st.caption(f"חודש פעיל: **{adm_hebrew_months[daily_active_month_int-1]} 2026**")
-        adm_y_m = f"2026-{daily_active_month_int:02d}"
-
-        st.markdown(f"#### לוח {sel_dept_admin}")
+        st.markdown(f"#### לוח {sel_dept_admin} — {_HEB_MONTHS[adm_view_m-1]} 2026")
 
         # Build employees: dept_rotation + ALL managers of this dept.
         # Managers always appear as rows; their cells default to empty
@@ -6090,12 +6251,16 @@ elif role in ("מנהל/ת", "מנהל על"):
             _dept_managers + [e for e in _adm_emps if e not in _dept_managers]
         )
 
-        _render_dept_grid(sel_dept_admin, adm_y_m, daily_active_month_int,
-                          "adm_mgrview", employees=_all_adm_emps,
-                          allow_temp_add=True)
+        if sel_dept_admin == PNIM_DEPT:
+            _render_pnim_sided(adm_y_m, adm_view_m, "adm_mgrview",
+                               employees=_all_adm_emps, allow_temp_add=True)
+        else:
+            _render_dept_grid(sel_dept_admin, adm_y_m, adm_view_m,
+                              "adm_mgrview", employees=_all_adm_emps,
+                              allow_temp_add=True)
 
         st.divider()
-        _render_export_buttons(sel_dept_admin, adm_y_m, daily_active_month_int,
+        _render_export_buttons(sel_dept_admin, adm_y_m, adm_view_m,
                                "adm_mgrview", user_name)
 
     # ── ניהול בקשות (אדמין) ───────────────────────────────────────
@@ -6914,10 +7079,9 @@ else:
             else:
                 st.caption(f"מחלקות בניהולך: {' | '.join(managed_depts)}")
 
-                hebrew_months_da = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
-                                    "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
-                da_y_m = f"2026-{daily_active_month_int:02d}"
-                st.markdown(f"#### לוח מחלקה — {hebrew_months_da[daily_active_month_int-1]} 2026")
+                mgr_view_m = _sw_month_selector(daily_active_month_int, "sw_mgr")
+                da_y_m = f"2026-{mgr_view_m:02d}"
+                st.markdown(f"#### לוח מחלקה — {_HEB_MONTHS[mgr_view_m-1]} 2026")
                 st.caption("עורך/ת מחלקה: לחץ/י על תא לשינוי סטטוס. שורתך מצורפת לכל מחלקה — עריכה ישירה.")
                 def _compose_mgr_emps(d_name):
                     dr = st.session_state.dept_rotation
@@ -6934,25 +7098,29 @@ else:
                         mgrs + [e for e in emps if e not in mgrs]
                     )
 
+                def _mgr_render_dept(d_name, emps, ns):
+                    if d_name == PNIM_DEPT:
+                        _render_pnim_sided(da_y_m, mgr_view_m, ns,
+                                           employees=emps, allow_temp_add=True)
+                    else:
+                        _render_dept_grid(d_name, da_y_m, mgr_view_m,
+                                          ns, employees=emps, allow_temp_add=True)
+
                 if len(managed_depts) > 1:
                     sub_dept_tabs = st.tabs(managed_depts)
                     for di, d_name in enumerate(managed_depts):
                         with sub_dept_tabs[di]:
                             emps = _compose_mgr_emps(d_name)
-                            _render_dept_grid(d_name, da_y_m, daily_active_month_int,
-                                              f"mgr_{di}", employees=emps,
-                                              allow_temp_add=True)
+                            _mgr_render_dept(d_name, emps, f"mgr_{di}")
                             st.divider()
-                            _render_export_buttons(d_name, da_y_m, daily_active_month_int,
+                            _render_export_buttons(d_name, da_y_m, mgr_view_m,
                                                    f"mgr_{di}", user_name)
                 else:
                     d_name = managed_depts[0]
                     emps = _compose_mgr_emps(d_name)
-                    _render_dept_grid(d_name, da_y_m, daily_active_month_int,
-                                      "mgr_solo", employees=emps,
-                                      allow_temp_add=True)
+                    _mgr_render_dept(d_name, emps, "mgr_solo")
                     st.divider()
-                    _render_export_buttons(d_name, da_y_m, daily_active_month_int,
+                    _render_export_buttons(d_name, da_y_m, mgr_view_m,
                                            "mgr_solo", user_name)
 
     # ── ניהול בקשות (מנהל מחלקה) ─────────────────────────────────
@@ -7136,9 +7304,7 @@ else:
 
     if selected_nav == 'סידור עבודה' and role not in ("מנהל מחלקה",):
         # מתמחה / רופא בכיר — read-only full department calendar
-        hebrew_months_es = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי",
-                            "אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"]
-        view_m = daily_active_month_int
+        view_m = _sw_month_selector(daily_active_month_int, "sw_emp")
         es_year_month = f"2026-{view_m:02d}"
 
         # Resolve the user's daily dept for this month
@@ -7152,7 +7318,7 @@ else:
             if not my_row.empty:
                 my_dept = str(my_row.iloc[0].get('daily_dept', '—'))
 
-        st.subheader(f"🗓️ לוח מחלקה — {hebrew_months_es[view_m-1]} 2026")
+        st.subheader(f"🗓️ לוח מחלקה — {_HEB_MONTHS[view_m-1]} 2026")
         if my_dept == "—":
             st.info("טרם שובצת למחלקה בחודש זה. פנה/י למנהל המערכת.")
         else:
@@ -7168,9 +7334,14 @@ else:
             _u_all  = _sort_employees_by_role(
                 _u_mgrs + [e for e in _u_emps if e not in _u_mgrs]
             )
-            _render_dept_grid(my_dept, es_year_month, view_m,
-                              "user_view", employees=_u_all,
-                              readonly=True, highlight_user=user_name)
+            if my_dept == PNIM_DEPT:
+                _render_pnim_sided(es_year_month, view_m, "user_view",
+                                   employees=_u_all,
+                                   readonly=True, highlight_user=user_name)
+            else:
+                _render_dept_grid(my_dept, es_year_month, view_m,
+                                  "user_view", employees=_u_all,
+                                  readonly=True, highlight_user=user_name)
 
         # ── Personal schedule Excel download ──────────────────────────
         st.markdown("---")

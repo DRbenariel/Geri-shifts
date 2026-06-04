@@ -1,0 +1,77 @@
+## UI Pro Max Search Results
+**Domain:** ux | **Query:** animation accessibility focus dark dashboard
+**Source:** ux-guidelines.csv | **Found:** 3 results
+
+### Result 1
+- **Category:** Interaction
+- **Issue:** Focus States
+- **Platform:** All
+- **Description:** Keyboard users need visible focus indicators
+- **Do:** Use visible focus rings on interactive elements
+- **Don't:** Remove focus outline without replacement
+- **Code Example Good:** focus:ring-2 focus:ring-blue-500
+- **Code Example Bad:** outline-none without alternative
+- **Severity:** High
+
+### Result 2
+- **Category:** Animation
+- **Issue:** Continuous Animation
+- **Platform:** All
+- **Description:** Infinite animations are distracting
+- **Do:** Use for loading indicators only
+- **Don't:** Use for decorative elements
+- **Code Example Good:** animate-spin on loader
+- **Code Example Bad:** animate-bounce on icons
+- **Severity:** Medium
+
+### Result 3
+- **Category:** Animation
+- **Issue:** Reduced Motion
+- **Platform:** All
+- **Description:** Respect user's motion preferences
+- **Do:** Check prefers-reduced-motion media query
+- **Don't:** Ignore accessibility motion settings
+- **Code Example Good:** @media (prefers-reduced-motion: reduce)
+- **Code Example Bad:** No motion query check
+- **Severity:** High
+
+## UI Pro Max Search Results
+**Domain:** typography | **Query:** dashboard dark OLED technical precise
+**Source:** typography.csv | **Found:** 3 results
+
+### Result 1
+- **Font Pairing Name:** Dashboard Data
+- **Category:** Mono + Sans
+- **Heading Font:** Fira Code
+- **Body Font:** Fira Sans
+- **Mood/Style Keywords:** dashboard, data, analytics, code, technical, precise
+- **Best For:** Dashboards, analytics, data visualization, admin panels
+- **Google Fonts URL:** https://fonts.google.com/share?selection.family=Fira+Code:wght@400;500;600;700|Fira+Sans:wght@300;400;500;600;700
+- **CSS Import:** @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+- **Tailwind Config:** fontFamily: { mono: ['Fira Code', 'monospace'], sans: ['Fira Sans', 'sans-serif'] }
+- **Notes:** Fira family cohesion. Code for data, Sans for labels.
+
+### Result 2
+- **Font Pairing Name:** Developer Mono
+- **Category:** Mono + Sans
+- **Heading Font:** JetBrains Mono
+- **Body Font:** IBM Plex Sans
+- **Mood/Style Keywords:** code, developer, technical, precise, functional, hacker
+- **Best For:** Developer tools, documentation, code editors, tech blogs, CLI apps
+- **Google Fonts URL:** https://fonts.google.com/share?selection.family=IBM+Plex+Sans:wght@300;400;500;600;700|JetBrains+Mono:wght@400;500;600;700
+- **CSS Import:** @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+- **Tailwind Config:** fontFamily: { mono: ['JetBrains Mono', 'monospace'], sans: ['IBM Plex Sans', 'sans-serif'] }
+- **Notes:** JetBrains for code, IBM Plex for UI. Developer-focused.
+
+### Result 3
+- **Font Pairing Name:** Brutalist Raw
+- **Category:** Mono + Mono
+- **Heading Font:** Space Mono
+- **Body Font:** Space Mono
+- **Mood/Style Keywords:** brutalist, raw, technical, monospace, minimal, stark
+- **Best For:** Brutalist designs, developer portfolios, experimental, tech art
+- **Google Fonts URL:** https://fonts.google.com/share?selection.family=Space+Mono:wght@400;700
+- **CSS Import:** @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+- **Tailwind Config:** fontFamily: { mono: ['Space Mono', 'monospace'] }
+- **Notes:** All-mono for raw brutalist aesthetic. Limited weights.
+

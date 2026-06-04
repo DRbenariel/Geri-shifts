@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>מערכת סידור — המערך הגריאטרי</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Heebo: Hebrew UI text | Fira Code: numeric data values -->
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&family=Fira+Code:wght@400;500;700&display=swap" rel="stylesheet" />
+  <!-- Design system tokens — single source of truth (ui-ux-pro-max) -->
+  <link rel="stylesheet" href="../design-system/tokens.css" />
+
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════
+       RESET + BASE
+    ═══════════════════════════════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      font-size: var(--type-body);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      /* Dot-grid — monitoring system display */
+      background-image: radial-gradient(circle, #192438 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+
+    /* Scanline overlay — ≤10% opacity (skill: eye-strain spec) */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent 0px,
+        transparent 3px,
+        rgba(0,0,0,.09) 3px,
+        rgba(0,0,0,.09) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ── prefers-reduced-motion (skill: HIGH severity) ────────────────
+       Disable all animations for users who prefer reduced motion       */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    /* ── Focus rings (skill: CRITICAL — keyboard nav) ─────────────────
+       All interactive elements get a visible amber focus ring           */
+    :focus-visible {
+      outline: 2px solid var(--amber-hi);
+      outline-offset: 2px;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       HEADER
+    ═══════════════════════════════════════════════════════════════════ */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      height: var(--header-h);
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border-hi);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 var(--space-8);
+    }
+    /* Amber top accent line */
+    header::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--amber), transparent);
+      opacity: .6;
+    }
+
+    .logo {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.15;
+    }
+    .logo-primary {
+      font-size: var(--type-title);
+      font-weight: 700;
+      color: var(--amber-hi);
+      letter-spacing: .02em;
+    }
+    .logo-secondary {
+      font-size: var(--type-caption);
+      font-weight: 300;
+      color: var(--text-dim);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .header-center {
+      display: flex;
+      align-items: center;
+      gap: var(--space-5);
+    }
+    .sys-stat {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: var(--type-caption);
+      font-weight: 400;
+      color: var(--text-dim);
+      letter-spacing: .06em;
+    }
+
+    /* LED — 8px (skill spec) + double box-shadow glow */
+    .led {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .led-green { background: var(--green-hi); box-shadow: 0 0 6px var(--green-hi), 0 0 12px var(--green-glow); }
+    .led-amber { background: var(--amber-hi); box-shadow: 0 0 6px var(--amber-hi), 0 0 12px var(--amber-glow); }
+    .led-red   { background: var(--red-hi);   box-shadow: 0 0 6px var(--red-hi),   0 0 12px var(--red-glow);   }
+
+    .month-readout {
+      font-family: var(--font-data);   /* Fira Code for date display */
+      font-size: var(--type-body);
+      font-weight: 500;
+      color: var(--amber-hi);
+      border: 1px solid var(--border-hi);
+      padding: var(--space-1) var(--space-3);
+      letter-spacing: .04em;
+      background: var(--amber-soft);
+      direction: ltr;
+    }
+
+    .user-block {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      line-height: 1.2;
+    }
+    .user-block .name {
+      font-size: var(--type-body);
+      font-weight: 700;
+      color: var(--text);
+    }
+    .user-block .role {
+      font-size: var(--type-caption);
+      font-weight: 300;
+      color: var(--text-dim);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .logout-btn {
+      font-size: var(--type-caption);
+      font-weight: 400;
+      color: var(--text-dim);
+      background: none;
+      border: 1px solid var(--border-hi);
+      padding: 4px 10px;
+      cursor: pointer;   /* skill: CRITICAL — cursor-pointer on clickable */
+      transition: color var(--transition-fast), border-color var(--transition-fast);
+      font-family: var(--font);
+    }
+    .logout-btn:hover { color: var(--red-hi); border-color: var(--red-hi); }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       NAV BAR
+    ═══════════════════════════════════════════════════════════════════ */
+    .nav-wrap {
+      position: sticky;
+      top: var(--header-h);
+      z-index: 100;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+    }
+
+    nav {
+      display: flex;
+      justify-content: flex-end;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    nav::-webkit-scrollbar { display: none; }
+
+    .nav-btn {
+      flex-shrink: 0;
+      height: var(--nav-h);
+      min-height: 44px;   /* skill: CRITICAL — 44px minimum touch target */
+      padding: 0 var(--space-6);
+      background: none;
+      border: none;
+      cursor: pointer;   /* skill: CRITICAL */
+      font-family: var(--font);
+      font-size: var(--type-nav);
+      font-weight: 400;
+      color: var(--text-dim);
+      letter-spacing: .04em;
+      position: relative;
+      transition: color var(--transition-normal);
+      white-space: nowrap;
+    }
+    /* 2px amber underline on active */
+    .nav-btn::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      right: 0; left: 0;
+      height: 2px;
+      background: var(--amber-hi);
+      box-shadow: 0 0 8px var(--amber-glow);
+      transform: scaleX(0);
+      transition: transform var(--transition-slow) cubic-bezier(.4,0,.2,1);
+    }
+    .nav-btn:hover { color: var(--text); }
+    .nav-btn.active {
+      color: var(--amber-hi);
+      font-weight: 700;
+    }
+    .nav-btn.active::after { transform: scaleX(1); }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       MAIN CONTENT
+    ═══════════════════════════════════════════════════════════════════ */
+    main {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: var(--space-8) 28px 80px;
+    }
+
+    /* Section header */
+    .section-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: var(--space-6);
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-title {
+      font-size: var(--type-heading);
+      font-weight: 900;
+      color: var(--text);
+      letter-spacing: .01em;
+    }
+    .section-meta {
+      font-family: var(--font-data);   /* Fira Code for date/meta */
+      font-size: var(--type-caption);
+      font-weight: 400;
+      color: var(--text-dim);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       ALERT BANNER — semantic severity classes
+    ═══════════════════════════════════════════════════════════════════ */
+    .alert-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      padding: var(--space-3) var(--space-5);
+      margin-bottom: 28px;
+    }
+    .alert-banner.critical {
+      background: var(--red-soft);
+      border: 1px solid var(--red);
+      border-right: 3px solid var(--red-hi);
+    }
+    .alert-banner.warning {
+      background: var(--amber-soft);
+      border: 1px solid var(--amber);
+      border-right: 3px solid var(--amber-hi);
+    }
+    .alert-banner.info {
+      background: var(--blue-soft);
+      border: 1px solid var(--blue);
+      border-right: 2px solid var(--blue-hi);
+    }
+
+    .alert-left {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+    .alert-text {
+      font-size: var(--type-body);
+      font-weight: 400;
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .alert-banner.critical .alert-text strong { color: var(--red-hi); font-weight: 700; }
+    .alert-banner.warning  .alert-text strong { color: var(--amber-hi); font-weight: 700; }
+    .alert-banner.info     .alert-text strong { color: var(--blue-hi); font-weight: 700; }
+
+    .alert-time {
+      font-family: var(--font-data);
+      font-size: var(--type-caption);
+      font-weight: 400;
+      color: var(--text-dim);
+      letter-spacing: .04em;
+      white-space: nowrap;
+      direction: ltr;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       BUTTONS — cursor:pointer mandatory (skill: CRITICAL)
+    ═══════════════════════════════════════════════════════════════════ */
+    .btn {
+      font-family: var(--font);
+      font-size: var(--type-label);
+      font-weight: 700;
+      letter-spacing: .04em;
+      padding: var(--space-2) var(--space-4);
+      cursor: pointer;
+      border: none;
+      transition: all var(--transition-normal);
+    }
+    .btn-amber {
+      background: var(--amber-soft);
+      color: var(--amber-hi);
+      border: 1px solid var(--amber);
+    }
+    .btn-amber:hover {
+      background: var(--amber);
+      color: var(--bg);
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid var(--border-hi);
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--text-dim); }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       KPI GRID
+    ═══════════════════════════════════════════════════════════════════ */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(3,1fr);
+      gap: var(--space-3);
+      margin-bottom: var(--space-6);
+    }
+
+    .kpi {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      padding: var(--space-5) 22px;
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;   /* skill: cursor-pointer on interactive cards */
+      animation: fadeUp .4s ease both;
+      transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
+    }
+    .kpi:nth-child(1) { animation-delay:.05s; }
+    .kpi:nth-child(2) { animation-delay:.10s; }
+    .kpi:nth-child(3) { animation-delay:.15s; }
+    .kpi:hover {
+      border-color: var(--border-glow);
+      box-shadow: var(--shadow-md);
+    }
+
+    /* Top accent line */
+    .kpi::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+    }
+    .kpi.amber::before { background: var(--amber-hi); box-shadow: 0 0 10px var(--amber-glow); }
+    .kpi.green::before { background: var(--green-hi); box-shadow: 0 0 10px var(--green-glow); }
+    .kpi.red::before   { background: var(--red-hi);   box-shadow: 0 0 10px var(--red-glow);   }
+
+    .kpi-label {
+      font-size: var(--type-label);
+      font-weight: 500;
+      color: var(--text-dim);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: var(--space-3);
+    }
+    /* KPI value — Fira Code for numbers, reduced glow to 10px (skill spec) */
+    .kpi-value {
+      font-family: var(--font-data);
+      font-size: var(--type-kpi);
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: var(--space-2);
+      letter-spacing: -.02em;
+      direction: ltr;
+      text-align: right;
+    }
+    .kpi.amber .kpi-value { color: var(--amber-hi); text-shadow: 0 0 10px var(--amber-glow); }
+    .kpi.green .kpi-value { color: var(--green-hi); text-shadow: 0 0 10px var(--green-glow); }
+    .kpi.red   .kpi-value { color: var(--red-hi);   text-shadow: 0 0 10px var(--red-glow);   }
+
+    .kpi-sub {
+      font-size: var(--type-caption);
+      font-weight: 300;
+      color: var(--text-dim);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       TWO COLUMNS
+    ═══════════════════════════════════════════════════════════════════ */
+    .cols-2 {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: var(--space-3);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       PANEL (card shell)
+    ═══════════════════════════════════════════════════════════════════ */
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      animation: fadeUp .4s .2s ease both;
+    }
+    .panel-head {
+      padding: 11px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .panel-title {
+      font-size: var(--type-title);
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .panel-badge {
+      font-family: var(--font-data);
+      font-size: var(--type-caption);
+      font-weight: 500;
+      color: var(--amber-hi);
+      border: 1px solid var(--amber);
+      padding: 2px var(--space-2);
+      background: var(--amber-soft);
+      letter-spacing: .04em;
+      direction: ltr;
+    }
+    .panel-body { padding: 0; }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       BAR CHART
+    ═══════════════════════════════════════════════════════════════════ */
+    .bars { padding: var(--space-4) 18px; }
+    .bar-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      margin-bottom: 11px;
+    }
+    .bar-row:last-child { margin-bottom: 0; }
+    .bar-name {
+      font-size: var(--type-body);
+      font-weight: 400;
+      color: var(--text-dim);
+      min-width: 88px;
+      text-align: right;
+    }
+    .bar-track {
+      flex: 1;
+      height: 4px;   /* slim = precision instrument feel */
+      background: var(--border);
+      position: relative;
+    }
+    .bar-fill {
+      height: 100%;
+      transition: width .8s cubic-bezier(.4,0,.2,1);
+      position: relative;
+    }
+    .bar-fill::after {
+      content: '';
+      position: absolute;
+      top: 0; right: 0;
+      width: 2px;
+      height: 100%;
+      background: inherit;
+      filter: brightness(1.6) blur(1px);
+    }
+    .bar-fill.a { background: var(--amber-hi); }
+    .bar-fill.g { background: var(--green-hi); }
+    /* Fira Code for bar count numbers — LTR */
+    .bar-count {
+      font-family: var(--font-data);
+      font-size: var(--type-body);
+      font-weight: 700;
+      color: var(--amber-hi);
+      min-width: 16px;
+      text-align: left;
+      direction: ltr;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       STATUS TABLE — RTL layout, LTR numeric columns
+    ═══════════════════════════════════════════════════════════════════ */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: var(--type-body);
+    }
+    .data-table thead { background: var(--bg); }
+    .data-table th {
+      padding: var(--space-2) var(--space-4);
+      font-size: var(--type-label);
+      font-weight: 700;
+      color: var(--text-dim);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      text-align: right;
+      border-bottom: 1px solid var(--border);
+    }
+    .data-table th.num-col { text-align: center; }
+    .data-table td {
+      padding: 10px var(--space-4);
+      text-align: right;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      font-weight: 400;
+      transition: background var(--transition-fast);
+    }
+    .data-table td.num-col { text-align: center; }
+    .data-table tr:last-child td { border-bottom: none; }
+    /* skill: hover feedback required — no layout shift */
+    .data-table tbody tr:hover td { background: var(--bg-row); }
+    .data-table tbody tr { cursor: default; }
+
+    /* Numeric value — Fira Code, always LTR */
+    .num {
+      font-family: var(--font-data);
+      font-weight: 700;
+      color: var(--amber-hi);
+      direction: ltr;
+      display: inline-block;
+    }
+
+    /* Status tags — dot + label (color not sole indicator) */
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px var(--space-2);
+      font-size: var(--type-label);
+      font-weight: 700;
+      letter-spacing: .06em;
+    }
+    .tag::before {
+      content: '';
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .tag-green {
+      color: var(--green-hi);
+      background: var(--green-soft);
+      border: 1px solid var(--green);
+    }
+    .tag-green::before { background: var(--green-hi); box-shadow: 0 0 4px var(--green-hi); }
+    .tag-red {
+      color: var(--red-hi);
+      background: var(--red-soft);
+      border: 1px solid var(--red);
+    }
+    .tag-red::before { background: var(--red-hi); box-shadow: 0 0 4px var(--red-hi); }
+    .tag-amber {
+      color: var(--amber-hi);
+      background: var(--amber-soft);
+      border: 1px solid var(--amber);
+    }
+    .tag-amber::before { background: var(--amber-hi); box-shadow: 0 0 4px var(--amber-hi); }
+    .tag-blue {
+      color: var(--blue-hi);
+      background: var(--blue-soft);
+      border: 1px solid var(--blue);
+    }
+    .tag-blue::before { background: var(--blue-hi); box-shadow: 0 0 4px var(--blue-hi); }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       TAB PANELS
+    ═══════════════════════════════════════════════════════════════════ */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .stub {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      padding: 60px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: var(--type-body);
+      font-weight: 300;
+      letter-spacing: .08em;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       ANIMATIONS (respects prefers-reduced-motion above)
+    ═══════════════════════════════════════════════════════════════════ */
+    @keyframes fadeUp {
+      from { opacity:0; transform:translateY(8px); }
+      to   { opacity:1; transform:translateY(0);   }
+    }
+    /* Pulse only on critical LED — skill: continuous animation for loading/alerts only */
+    @keyframes pulse-red {
+      0%,100% { box-shadow: 0 0 6px var(--red-hi), 0 0 12px var(--red-glow); }
+      50%      { box-shadow: 0 0 10px var(--red-hi), 0 0 20px var(--red-glow); }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       RESPONSIVE — tested at 375 / 768 / 1024 / 1440 (skill spec)
+    ═══════════════════════════════════════════════════════════════════ */
+    @media (max-width: 1024px) {
+      .cols-2 { grid-template-columns: 1fr; }
+      .header-center { display: none; }
+    }
+    @media (max-width: 768px) {
+      .kpi-grid { grid-template-columns: 1fr 1fr; }
+      main { padding: var(--space-5) 14px 60px; }
+    }
+    @media (max-width: 600px) {
+      header { padding: 0 var(--space-4); }
+    }
+    @media (max-width: 375px) {
+      .kpi-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     HEADER
+═══════════════════════════════════════════════════════════════════ -->
+<header>
+  <div class="logo">
+    <span class="logo-primary">מערכת סידור</span>
+    <span class="logo-secondary">המערך הגריאטרי · Geriatric Department</span>
+  </div>
+
+  <div class="header-center">
+    <div class="sys-stat">
+      <span class="led led-green" aria-label="מערכת פעילה"></span>
+      מערכת פעילה
+    </div>
+    <div class="sys-stat">
+      <span class="led led-amber" aria-label="3 בעיות ממתינות"></span>
+      <span dir="ltr">3</span>&nbsp;בעיות ממתינות
+    </div>
+    <div class="month-readout">יוני 2026</div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:var(--space-4);">
+    <div class="user-block">
+      <span class="name">ד״ר גל ברנאריאל</span>
+      <span class="role">מנהל/ת מערכת</span>
+    </div>
+    <button class="logout-btn" aria-label="יציאה מהמערכת">יציאה</button>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     NAV BAR
+═══════════════════════════════════════════════════════════════════ -->
+<div class="nav-wrap">
+  <nav role="tablist" aria-label="ניווט ראשי">
+    <button class="nav-btn" onclick="switchTab(this,'settings')" role="tab" aria-selected="false" aria-controls="panel-settings">הגדרות</button>
+    <button class="nav-btn" onclick="switchTab(this,'shifts')"   role="tab" aria-selected="false" aria-controls="panel-shifts">סידור תורנויות</button>
+    <button class="nav-btn" onclick="switchTab(this,'staff')"    role="tab" aria-selected="false" aria-controls="panel-staff">צוות</button>
+    <button class="nav-btn active" onclick="switchTab(this,'reports')" role="tab" aria-selected="true" aria-controls="panel-reports">דוחות וניהול</button>
+    <button class="nav-btn" onclick="switchTab(this,'monthly')"  role="tab" aria-selected="false" aria-controls="panel-monthly">סידור חודשי</button>
+    <button class="nav-btn" onclick="switchTab(this,'daily')"    role="tab" aria-selected="false" aria-controls="panel-daily">סידור יומי</button>
+  </nav>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     MAIN
+═══════════════════════════════════════════════════════════════════ -->
+<main>
+
+  <!-- ── REPORTS ──────────────────────────────────────────────────── -->
+  <div class="tab-panel active" id="panel-reports" role="tabpanel">
+
+    <!-- Alert banner — CRITICAL severity -->
+    <div class="alert-banner critical" role="alert">
+      <div class="alert-left">
+        <span class="led led-red" style="animation:pulse-red 1.4s infinite;" aria-hidden="true"></span>
+        <span class="alert-text">
+          <strong>דוח יומי:</strong>
+          <span dir="ltr">3</span> ימי שיא חסימה קריטיים
+          &nbsp;·&nbsp;
+          <span dir="ltr">2</span> אזהרות זמינות
+        </span>
+      </div>
+      <div style="display:flex;align-items:center;gap:var(--space-3);">
+        <span class="alert-time">עודכן 10:02 · היום</span>
+        <button class="btn btn-amber">הרץ ניתוח</button>
+      </div>
+    </div>
+
+    <!-- Section header -->
+    <div class="section-header">
+      <span class="section-title">לוח בקרה</span>
+      <span class="section-meta">יוני 2026 / JUNE 2026</span>
+    </div>
+
+    <!-- KPI cards -->
+    <div class="kpi-grid">
+      <div class="kpi amber" tabindex="0" aria-label="סה׳׳כ צוות: 14">
+        <div class="kpi-label">סה״כ צוות</div>
+        <div class="kpi-value">14</div>
+        <div class="kpi-sub">מתמחים ותורני חוץ</div>
+      </div>
+      <div class="kpi green" tabindex="0" aria-label="הגישו אילוצים: 11">
+        <div class="kpi-label">הגישו אילוצים</div>
+        <div class="kpi-value">11</div>
+        <div class="kpi-sub">עבור חודש יוני</div>
+      </div>
+      <div class="kpi red" tabindex="0" aria-label="ממתינים להגשה: 3">
+        <div class="kpi-label">ממתינים להגשה</div>
+        <div class="kpi-value">03</div>
+        <div class="kpi-sub">נדרש תזכורת</div>
+      </div>
+    </div>
+
+    <!-- Two columns -->
+    <div class="cols-2">
+
+      <!-- Bar chart -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">ספירת תורנויות</span>
+          <span class="panel-badge">יוני 2026</span>
+        </div>
+        <div class="panel-body bars">
+          <div class="bar-row">
+            <span class="bar-name">ד״ר כהן</span>
+            <div class="bar-track" role="progressbar" aria-valuenow="72" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר כהן: 5 תורנויות">
+              <div class="bar-fill a" style="width:72%"></div>
+            </div>
+            <span class="bar-count">5</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-name">ד״ר לוי</span>
+            <div class="bar-track" role="progressbar" aria-valuenow="57" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר לוי: 4 תורנויות">
+              <div class="bar-fill g" style="width:57%"></div>
+            </div>
+            <span class="bar-count">4</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-name">ד״ר ברק</span>
+            <div class="bar-track" role="progressbar" aria-valuenow="85" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר ברק: 6 תורנויות">
+              <div class="bar-fill a" style="width:85%"></div>
+            </div>
+            <span class="bar-count">6</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-name">ד״ר מזרחי</span>
+            <div class="bar-track" role="progressbar" aria-valuenow="42" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר מזרחי: 3 תורנויות">
+              <div class="bar-fill g" style="width:42%"></div>
+            </div>
+            <span class="bar-count">3</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-name">סלאמה קאסם</span>
+            <div class="bar-track" role="progressbar" aria-valuenow="64" aria-valuemin="0" aria-valuemax="100" aria-label="סלאמה קאסם: 5 תורנויות">
+              <div class="bar-fill a" style="width:64%"></div>
+            </div>
+            <span class="bar-count">5</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-name">ד״ר פרץ</span>
+            <div class="bar-track" role="progressbar" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר פרץ: 4 תורנויות">
+              <div class="bar-fill g" style="width:50%"></div>
+            </div>
+            <span class="bar-count">4</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-name">ד״ר אבו-רמי</span>
+            <div class="bar-track" role="progressbar" aria-valuenow="78" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר אבו-רמי: 6 תורנויות">
+              <div class="bar-fill a" style="width:78%"></div>
+            </div>
+            <span class="bar-count">6</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status table -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">סטטוס הגשות</span>
+          <button class="btn btn-ghost" style="font-size:var(--type-caption);padding:4px 10px;" aria-label="שלח תזכורת לעובדים שטרם הגישו">שלח תזכורת</button>
+        </div>
+        <div class="panel-body">
+          <table class="data-table" aria-label="טבלת סטטוס הגשות">
+            <thead>
+              <tr>
+                <th scope="col">שם</th>
+                <th scope="col">תפקיד</th>
+                <th scope="col" class="num-col">חסימות</th>
+                <th scope="col">סטטוס</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>ד״ר כהן</td>
+                <td>מתמחה</td>
+                <td class="num-col"><span class="num">7</span></td>
+                <td><span class="tag tag-green">הוגש</span></td>
+              </tr>
+              <tr>
+                <td>ד״ר לוי</td>
+                <td>מתמחה</td>
+                <td class="num-col"><span class="num">5</span></td>
+                <td><span class="tag tag-green">הוגש</span></td>
+              </tr>
+              <tr>
+                <td>ד״ר ברק</td>
+                <td>מתמחה</td>
+                <td class="num-col"><span class="num">3</span></td>
+                <td><span class="tag tag-green">הוגש</span></td>
+              </tr>
+              <tr>
+                <td>ד״ר מזרחי</td>
+                <td>תורן חוץ</td>
+                <td class="num-col"><span class="num">—</span></td>
+                <td><span class="tag tag-red">טרם הוגש</span></td>
+              </tr>
+              <tr>
+                <td>סלאמה קאסם</td>
+                <td>מתמחה</td>
+                <td class="num-col"><span class="num">8</span></td>
+                <td><span class="tag tag-green">הוגש</span></td>
+              </tr>
+              <tr>
+                <td>ד״ר פרץ</td>
+                <td>תורן חוץ</td>
+                <td class="num-col"><span class="num">—</span></td>
+                <td><span class="tag tag-red">טרם הוגש</span></td>
+              </tr>
+              <tr>
+                <td>ד״ר אבו-רמי</td>
+                <td>מתמחה</td>
+                <td class="num-col"><span class="num">6</span></td>
+                <td><span class="tag tag-green">הוגש</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /cols-2 -->
+  </div><!-- /panel-reports -->
+
+  <!-- ── STUBS ─────────────────────────────────────────────────────── -->
+  <div class="tab-panel" id="panel-settings" role="tabpanel">
+    <div class="section-header"><span class="section-title">הגדרות</span></div>
+    <div class="stub">בקרוב</div>
+  </div>
+
+  <div class="tab-panel" id="panel-shifts" role="tabpanel">
+    <div class="section-header"><span class="section-title">סידור תורנויות</span></div>
+    <div class="stub">בקרוב</div>
+  </div>
+
+  <div class="tab-panel" id="panel-staff" role="tabpanel">
+    <div class="section-header"><span class="section-title">צוות</span></div>
+    <div class="stub">בקרוב</div>
+  </div>
+
+  <div class="tab-panel" id="panel-monthly" role="tabpanel">
+    <div class="section-header"><span class="section-title">סידור חודשי</span></div>
+    <div class="stub">בקרוב</div>
+  </div>
+
+  <div class="tab-panel" id="panel-daily" role="tabpanel">
+    <div class="section-header"><span class="section-title">סידור יומי</span></div>
+    <div class="stub">בקרוב</div>
+  </div>
+
+</main>
+
+<script>
+  function switchTab(btn, key) {
+    document.querySelectorAll('.tab-panel').forEach(p => {
+      p.classList.remove('active');
+    });
+    document.querySelectorAll('.nav-btn').forEach(b => {
+      b.classList.remove('active');
+      b.setAttribute('aria-selected', 'false');
+    });
+    document.getElementById('panel-' + key).classList.add('active');
+    btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
+  }
+
+  // Keyboard nav: arrow keys between tabs (skill: keyboard-nav rule)
+  document.querySelector('nav').addEventListener('keydown', function(e) {
+    const tabs = [...document.querySelectorAll('.nav-btn')];
+    const idx = tabs.indexOf(document.activeElement);
+    if (idx === -1) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      const next = e.key === 'ArrowLeft'
+        ? tabs[(idx + 1) % tabs.length]
+        : tabs[(idx - 1 + tabs.length) % tabs.length];
+      next.focus();
+      next.click();
+    }
+  });
+</script>
+</body>
+</html>

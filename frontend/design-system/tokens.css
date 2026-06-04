@@ -1,0 +1,92 @@
+/**
+ * Design System Tokens — המערך הגריאטרי Admin Frontend
+ * Healthcare / RTL / Precision Instrument + OLED Dark Mode variant
+ *
+ * Generated via ui-ux-pro-max skill (2026-05-27):
+ *   Style:      Dark Mode (OLED) — WCAG AAA
+ *   Typography: Fira Code (data/numbers) + Heebo (Hebrew text)
+ *   Colors:     Deep black bg, amber warning accent, semantic green/red/blue
+ *
+ * Link in every HTML page:
+ *   <link rel="stylesheet" href="../design-system/tokens.css">
+ */
+
+:root {
+  /* ── Surfaces (OLED-optimised — skill: bg #020617) ───────────────── */
+  --bg:          #050C18;   /* deeper than before; near-OLED black with navy tint */
+  --bg-card:     #0A1420;   /* card surfaces */
+  --bg-row:      #0D1824;   /* table row hover, inset sections */
+
+  /* ── Borders ──────────────────────────────────────────────────────── */
+  --border:      #14202E;
+  --border-hi:   #1C2E48;
+  --border-glow: #284060;
+
+  /* ── Text (skill: #F8FAFC; adjusted for instrument-panel softness) ── */
+  --text:        #C8DCF4;   /* brighter than before, still soft navy-white */
+  --text-dim:    #4A6888;   /* labels, meta — 3:1+ on --bg-card */
+  --text-faint:  #1E3040;   /* decorative only */
+
+  /* ── Semantic: Warning / Primary Accent (Amber) ───────────────────── */
+  --amber:       #C87800;
+  --amber-hi:    #E8A020;
+  --amber-glow:  rgba(232,160,32,.20);   /* reduced from .25 */
+  --amber-soft:  rgba(200,120,0,.10);
+
+  /* ── Semantic: Positive (Green) — skill CTA: #22C55E ─────────────── */
+  --green:       #0A7850;
+  --green-hi:    #22C55E;   /* updated to skill recommendation */
+  --green-glow:  rgba(34,197,94,.18);
+  --green-soft:  rgba(10,120,80,.10);
+
+  /* ── Semantic: Critical (Red) ─────────────────────────────────────── */
+  --red:         #900000;
+  --red-hi:      #D83030;
+  --red-glow:    rgba(216,48,48,.18);
+  --red-soft:    rgba(144,0,0,.10);
+
+  /* ── Semantic: Info (Blue) ────────────────────────────────────────── */
+  --blue:        #1A4A80;
+  --blue-hi:     #4A9AE8;
+  --blue-glow:   rgba(74,154,232,.18);
+  --blue-soft:   rgba(26,74,128,.10);
+
+  /* ── Typography ───────────────────────────────────────────────────── */
+  /* Heebo: Hebrew text (RTL UI labels, nav, body copy)                 */
+  /* Fira Code: numeric/data values (KPI numbers, counts, timestamps)   */
+  --font:        'Heebo', sans-serif;
+  --font-data:   'Fira Code', 'Heebo', monospace;
+
+  --type-label:   11px;   /* column headers, meta — all-caps */
+  --type-body:    13px;   /* table cells, descriptions */
+  --type-caption: 11px;   /* timestamps, secondary meta */
+  --type-title:   15px;   /* panel titles */
+  --type-heading: 20px;   /* section headings */
+  --type-kpi:     52px;   /* KPI display numbers */
+  --type-nav:     13px;   /* nav items */
+
+  /* ── Spacing (4px base — matches skill: xs/sm/md/lg/xl) ──────────── */
+  --space-1:   4px;    /* xs */
+  --space-2:   8px;    /* sm */
+  --space-3:  12px;
+  --space-4:  16px;    /* md */
+  --space-5:  20px;
+  --space-6:  24px;    /* lg */
+  --space-8:  32px;    /* xl */
+  --space-12: 48px;    /* 2xl */
+
+  /* ── Shadows (from skill MASTER.md) ──────────────────────────────── */
+  --shadow-sm:  0 1px 2px rgba(0,0,0,.30);
+  --shadow-md:  0 4px 6px rgba(0,0,0,.40);
+  --shadow-lg:  0 10px 15px rgba(0,0,0,.45);
+  --shadow-xl:  0 20px 25px rgba(0,0,0,.50);
+
+  /* ── Layout ───────────────────────────────────────────────────────── */
+  --nav-h:    48px;
+  --header-h: 58px;
+
+  /* ── Transitions (skill: 150-300ms) ──────────────────────────────── */
+  --transition-fast:   150ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow:   300ms ease;
+}
