@@ -521,7 +521,8 @@ def _export_dept_grid(dept_name, year_month, view_month):
         result = _build_batched_day_data(dept_name, year_month, view_month)
         if not result or result[0] is None:
             return False
-        _employees, per_day_workers, per_day_toranet, per_day_absent = result
+        (_employees, per_day_workers, per_day_toranet, per_day_absent,
+         per_day_workers_by_side) = result
 
         toranet_label = "תורן פנגר" if dept_name == "פנימית גריאטרית" else "תורן שיקום"
 
@@ -538,14 +539,28 @@ def _export_dept_grid(dept_name, year_month, view_month):
                for d in days}
         })
 
-        # Section עובדים
-        rows.append({'#': '— עובדים —', **{str(d): '' for d in days}})
-        for i in range(max_work_rows):
-            row = {'#': ''}
-            for d in days:
-                lst = per_day_workers.get(d, [])
-                row[str(d)] = lst[i] if i < len(lst) else ''
-            rows.append(row)
+        if per_day_workers_by_side is not None:
+            # פנימית: one block per side (🌸 ורוד then 🔵 כחול), each רופא בכיר→מתמחים
+            for _s in PNIM_SIDES:
+                _max_s = max((len(v.get(_s, [])) for v in per_day_workers_by_side.values()),
+                             default=0)
+                rows.append({'#': f"{PNIM_ICONS[_s]} צד {_s}",
+                             **{str(d): '' for d in days}})
+                for i in range(max(_max_s, 1)):
+                    row = {'#': ''}
+                    for d in days:
+                        lst = per_day_workers_by_side.get(d, {}).get(_s, [])
+                        row[str(d)] = lst[i] if i < len(lst) else ''
+                    rows.append(row)
+        else:
+            # Section עובדים
+            rows.append({'#': '— עובדים —', **{str(d): '' for d in days}})
+            for i in range(max_work_rows):
+                row = {'#': ''}
+                for d in days:
+                    lst = per_day_workers.get(d, [])
+                    row[str(d)] = lst[i] if i < len(lst) else ''
+                rows.append(row)
 
         # תורן row (single data row)
         row_t = {'#': toranet_label}
@@ -800,8 +815,11 @@ _BATCHED_SHIKUM_DEPTS    = {"שיקום גריאטרי א'", "שיקום גרי�
 def _build_batched_day_data(dept_name, year_month, view_month):
     """
     Build per-day batches for the batched export format.
-    Returns (employees, per_day_workers, per_day_toranet, per_day_absent)
-    or (None, None, None, None) if no data.
+    Returns (employees, per_day_workers, per_day_toranet, per_day_absent,
+             per_day_workers_by_side) or a 5-tuple of None if no data.
+
+    `per_day_workers_by_side` is None for non-פנימית depts; for פנימית it is
+    {d: {'ורוד': [...], 'כחול': [...]}} with each side ordered רופא בכיר→מתמחים.
 
     Batch rules:
       - Regular day : workers = dept_rotation employees not absent (sorted by role)
@@ -809,24 +827,43 @@ def _build_batched_day_data(dept_name, year_month, view_month):
       - Saturday    : workers = [] (nothing for שיקום; only תורן for פנימית)
       - תורן        : from _get_night_duty()
       - absent      : employees with ABSENT status
+      - day-specific transfers (Feature 3): folded into that day's workers only
     """
     year = 2026
     num_days = calendar.monthrange(year, view_month)[1]
     days = list(range(1, num_days + 1))
+    is_pnim = (dept_name == PNIM_DEPT)
 
     dr = st.session_state.dept_rotation
     if dr.empty or 'employee' not in dr.columns:
-        return None, None, None, None
+        return None, None, None, None, None
     mask = ((dr['year_month'].astype(str) == year_month) &
             (dr['daily_dept'].astype(str) == dept_name))
     employees = dr[mask]['employee'].astype(str).str.strip().tolist()
-    if not employees:
-        return None, None, None, None
+
+    # Side map (פנימית) + day-specific incoming transfers
+    side_map = {}
+    if is_pnim and 'side' in dr.columns:
+        side_map = (dr[dr['year_month'].astype(str) == year_month]
+                    .set_index('employee')['side']
+                    .fillna('').astype(str).str.strip().to_dict())
+    incoming = _incoming_transfers(dept_name, year_month)   # {emp: {'days':set,'side':str}}
+    transfer_side = {e: r.get('side', '') for e, r in incoming.items()}
+
+    if not employees and not incoming:
+        return None, None, None, None, None
     employees = _sort_employees_by_role(employees)
+
+    def _emp_side(emp):
+        s = side_map.get(emp, '')
+        if not s:
+            s = transfer_side.get(emp, '')
+        return s
 
     per_day_workers = {}
     per_day_toranet = {}
     per_day_absent  = {}
+    per_day_workers_by_side = {} if is_pnim else None
 
     for d in days:
         date_str = f"{year}-{view_month:02d}-{d:02d}"
@@ -843,13 +880,13 @@ def _build_batched_day_data(dept_name, year_month, view_month):
         elif is_friday:
             # Friday: workers = שישי בוקר workers for this dept.
             # Absences hidden (it's a given).
-            workers = _get_fri_shift_workers(date_str, dept_name)
+            workers = list(_get_fri_shift_workers(date_str, dept_name))
         else:
             # Regular weekday (Sun–Thu)
             for emp in employees:
                 status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
                 if status == "":
-                    # מנהל מחלקה not planted on this day → skip
+                    # מנהל מחלקה not planted (or transferred out) this day → skip
                     continue
                 if status in _BATCHED_ABSENT_STATUSES:
                     _note = _wsd_get_note(date_str, emp)
@@ -860,15 +897,33 @@ def _build_batched_day_data(dept_name, year_month, view_month):
                 else:
                     workers.append(emp)
 
+        # Fold day-specific incoming transfers into this day's workers
+        for emp, rec in incoming.items():
+            if d in rec['days'] and emp not in workers:
+                status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
+                if status and status not in _BATCHED_ABSENT_STATUSES:
+                    workers.append(emp)
+
+        workers = _sort_employees_by_role(workers)
         per_day_workers[d] = workers
         per_day_toranet[d] = _get_night_duty(date_str, dept_name)
         per_day_absent[d]  = absent
 
-    return employees, per_day_workers, per_day_toranet, per_day_absent
+        if is_pnim:
+            by_side = {s: [] for s in PNIM_SIDES}
+            for emp in workers:
+                s = _emp_side(emp)
+                if s in by_side:
+                    by_side[s].append(emp)   # drop side-less workers
+            per_day_workers_by_side[d] = by_side
+
+    return (employees, per_day_workers, per_day_toranet, per_day_absent,
+            per_day_workers_by_side)
 
 
 def _write_batched_sheet(ws, dept_name, year_month, view_month,
-                         per_day_workers, per_day_toranet, per_day_absent):
+                         per_day_workers, per_day_toranet, per_day_absent,
+                         per_day_workers_by_side=None):
     """
     Write batched schedule data into an existing openpyxl Worksheet.
     Layout (rows × cols-per-day):
@@ -939,35 +994,56 @@ def _write_batched_sheet(ws, dept_name, year_month, view_month,
              alignment=Alignment(horizontal='center', vertical='center', wrap_text=True))
     ws.row_dimensions[2].height = 26
 
-    # ── Row 3: עובדים section label ──────────────────────────────────────
+    # ── Worker section ───────────────────────────────────────────────────
     r = 3
-    _set(r, 1, "עובדים",
-         font=Font(bold=True, size=9, color="166534"),
-         fill=f_sec_work,
-         alignment=Alignment(horizontal='right'))
-    for d in days:
-        _set(r, d + 1, fill=f_sec_work)
-    r += 1
 
-    # Worker rows
-    for i in range(max_work_rows):
-        _set(r, 1)
+    def _write_worker_rows(getter, n_rows):
+        """Write n_rows worker-slot rows; getter(d) → that day's name list."""
+        nonlocal r
+        for i in range(n_rows):
+            _set(r, 1)
+            for d in days:
+                wd_idx = (date(year, view_month, d).weekday() + 1) % 7
+                lst = getter(d)
+                val = lst[i] if i < len(lst) else ""
+                if wd_idx == 6:
+                    bg = f_sat_cell
+                elif wd_idx == 5:
+                    bg = f_fri_cell
+                else:
+                    bg = f_work_cell
+                _set(r, d + 1, val,
+                     font=Font(size=9),
+                     fill=bg,
+                     alignment=Alignment(horizontal='right', vertical='center'))
+            r += 1
+
+    if per_day_workers_by_side is not None:
+        # פנימית: one labelled block per side (🌸 ורוד then 🔵 כחול)
+        f_side = {"ורוד": PatternFill("solid", fgColor="FCE7F3"),
+                  "כחול": PatternFill("solid", fgColor="DBEAFE")}
+        for _s in PNIM_SIDES:
+            _max_s = max((len(v.get(_s, [])) for v in per_day_workers_by_side.values()),
+                         default=0)
+            _set(r, 1, f"{PNIM_ICONS[_s]} צד {_s}",
+                 font=Font(bold=True, size=9, color="1E293B"),
+                 fill=f_side.get(_s, f_sec_work),
+                 alignment=Alignment(horizontal='right'))
+            for d in days:
+                _set(r, d + 1, fill=f_side.get(_s, f_sec_work))
+            r += 1
+            _write_worker_rows(
+                lambda d, _s=_s: per_day_workers_by_side.get(d, {}).get(_s, []),
+                max(_max_s, 1))
+    else:
+        _set(r, 1, "עובדים",
+             font=Font(bold=True, size=9, color="166534"),
+             fill=f_sec_work,
+             alignment=Alignment(horizontal='right'))
         for d in days:
-            date_obj = date(year, view_month, d)
-            wd_idx   = (date_obj.weekday() + 1) % 7
-            lst = per_day_workers.get(d, [])
-            val = lst[i] if i < len(lst) else ""
-            if wd_idx == 6:
-                bg = f_sat_cell
-            elif wd_idx == 5:
-                bg = f_fri_cell
-            else:
-                bg = f_work_cell
-            _set(r, d + 1, val,
-                 font=Font(size=9),
-                 fill=bg,
-                 alignment=Alignment(horizontal='right', vertical='center'))
+            _set(r, d + 1, fill=f_sec_work)
         r += 1
+        _write_worker_rows(lambda d: per_day_workers.get(d, []), max_work_rows)
 
     # ── תורן row (label + data in same row) ──────────────────────────────
     _set(r, 1, toranet_label,
@@ -1017,7 +1093,7 @@ def _export_dept_grid_batched(dept_name, year_month, view_month):
     """
     try:
         import openpyxl
-        employees, pw, pt, pa = _build_batched_day_data(
+        employees, pw, pt, pa, pws = _build_batched_day_data(
             dept_name, year_month, view_month)
         if employees is None:
             return None, None
@@ -1027,7 +1103,7 @@ def _export_dept_grid_batched(dept_name, year_month, view_month):
         safe_title = dept_name.replace("'", "").replace('"', '').replace('/', '_')[:31]
         ws.title = safe_title
 
-        _write_batched_sheet(ws, dept_name, year_month, view_month, pw, pt, pa)
+        _write_batched_sheet(ws, dept_name, year_month, view_month, pw, pt, pa, pws)
 
         buf = io.BytesIO()
         wb.save(buf)
@@ -1050,13 +1126,13 @@ def _export_all_depts_batched(year_month, view_month):
         any_added = False
 
         for dept_name in DAILY_DEPTS_ALL:
-            employees, pw, pt, pa = _build_batched_day_data(
+            employees, pw, pt, pa, pws = _build_batched_day_data(
                 dept_name, year_month, view_month)
             if employees is None:
                 continue
             safe_title = dept_name.replace("'", "").replace('"', '').replace('/', '_')[:31]
             ws = wb.create_sheet(title=safe_title)
-            _write_batched_sheet(ws, dept_name, year_month, view_month, pw, pt, pa)
+            _write_batched_sheet(ws, dept_name, year_month, view_month, pw, pt, pa, pws)
             any_added = True
 
         if not any_added:
@@ -1108,10 +1184,12 @@ def _rebuild_wsd_index():
             key = (str(r['date']), str(r.get('employee', '')).strip())
             raw_manual = r.get('is_manual', False)
             idx[key] = {
-                'status':    str(r.get('status', 'עובד')),
-                'note':      str(r.get('note', '') or ''),
-                'is_manual': raw_manual if isinstance(raw_manual, bool)
-                             else str(raw_manual).strip().lower() == 'true',
+                'status':     str(r.get('status', 'עובד')),
+                'note':       str(r.get('note', '') or ''),
+                'is_manual':  raw_manual if isinstance(raw_manual, bool)
+                              else str(raw_manual).strip().lower() == 'true',
+                'daily_dept': str(r.get('daily_dept', '') or ''),
+                'side':       str(r.get('side', '') or ''),
             }
     st.session_state.wsd_index = idx
 
@@ -1161,11 +1239,13 @@ def _wsd_is_manual(date_str, employee):
         idx = st.session_state.wsd_index
     return idx.get((str(date_str), str(employee).strip()), {}).get('is_manual', False)
 
-def _wsd_upsert(date_str, employee, daily_dept, status, is_manual=True, note=""):
+def _wsd_upsert(date_str, employee, daily_dept, status, is_manual=True, note="", side=""):
     """Insert/update one row in work_schedule_daily; persist to sheet."""
     wsd = st.session_state.work_schedule_daily.copy()
     if wsd.empty or 'date' not in wsd.columns:
-        wsd = pd.DataFrame(columns=['date','employee','daily_dept','status','note','is_manual'])
+        wsd = pd.DataFrame(columns=['date','employee','daily_dept','status','note','is_manual','side'])
+    if 'side' not in wsd.columns:
+        wsd['side'] = ''
     emp_n = str(employee).strip()
     is_manual_str = str(is_manual)   # ArrowString columns reject bool; store "True"/"False"
     m = (wsd['date'].astype(str) == date_str) & (wsd['employee'].astype(str).str.strip() == emp_n)
@@ -1174,16 +1254,76 @@ def _wsd_upsert(date_str, employee, daily_dept, status, is_manual=True, note="")
         wsd.loc[m, 'is_manual']  = is_manual_str
         wsd.loc[m, 'daily_dept'] = daily_dept
         wsd.loc[m, 'note']       = note  # always update — empty string clears the note
+        # side is sticky: an empty side (e.g. an in-grid status click) keeps the
+        # existing value so a transfer's side isn't wiped by routine edits.
+        if side:
+            wsd.loc[m, 'side'] = side
     else:
         wsd = pd.concat([wsd, pd.DataFrame([{
             'date': date_str, 'employee': emp_n, 'daily_dept': daily_dept,
-            'status': status, 'note': note, 'is_manual': is_manual_str,
+            'status': status, 'note': note, 'is_manual': is_manual_str, 'side': side,
         }])], ignore_index=True)
     st.session_state.work_schedule_daily = wsd
     _rebuild_wsd_index()   # keep O(1) index in sync
     # Fire-and-forget write: UI updates instantly; gspread write happens in
     # a background thread so the click doesn't freeze waiting for Google Sheets.
     _save_async("work_schedule_daily", wsd.copy())
+
+
+def _wsd_delete(date_str, employee):
+    """Remove one row from work_schedule_daily; persist. Used to undo a temporary transfer."""
+    wsd = st.session_state.work_schedule_daily.copy()
+    if wsd.empty or 'date' not in wsd.columns:
+        return
+    emp_n = str(employee).strip()
+    m = (wsd['date'].astype(str) == date_str) & (wsd['employee'].astype(str).str.strip() == emp_n)
+    if m.any():
+        wsd = wsd[~m].reset_index(drop=True)
+        st.session_state.work_schedule_daily = wsd
+        _rebuild_wsd_index()
+        _save_async("work_schedule_daily", wsd.copy())
+
+
+def _incoming_transfers(dept, year_month):
+    """
+    Day-specific temporary transfers INTO `dept` for the given month.
+    A transfer = a manual WSD row whose daily_dept == dept, on a date in this month,
+    for an employee who is NOT a regular dept_rotation member of this dept.
+    Returns {employee: {'days': {day_ints}, 'side': '<side>'}}.
+    """
+    result = {}
+    idx = st.session_state.get('wsd_index')
+    if idx is None:
+        _rebuild_wsd_index()
+        idx = st.session_state.wsd_index
+    # Regular members of this dept (excluded — their manual rows aren't transfers)
+    members = set()
+    try:
+        dr = st.session_state.dept_rotation
+        if not dr.empty and 'employee' in dr.columns:
+            dmask = ((dr['year_month'].astype(str) == year_month) &
+                     (dr['daily_dept'].astype(str) == dept))
+            members = set(dr[dmask]['employee'].astype(str).str.strip().tolist())
+    except Exception:
+        pass
+    for (date_str, emp), entry in idx.items():
+        if not entry.get('is_manual'):
+            continue
+        if str(entry.get('daily_dept', '') or '') != dept:
+            continue
+        if not str(date_str).startswith(year_month):
+            continue
+        if emp in members:
+            continue
+        try:
+            day_int = int(str(date_str).split('-')[2])
+        except Exception:
+            continue
+        rec = result.setdefault(emp, {'days': set(), 'side': ''})
+        rec['days'].add(day_int)
+        if entry.get('side'):
+            rec['side'] = entry['side']
+    return result
 
 # Status cycle for in-grid editing (clicks rotate through these)
 _GRID_STATUS_CYCLE = {
@@ -1344,11 +1484,16 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
                 except Exception:
                     pass
 
-        # 1. Manual override in WSD (is_manual=True) — human decision, beats all auto logic
+        # 1. Manual override in WSD (is_manual=True) — human decision, beats all auto logic.
+        #    Dept-aware: a manual row whose daily_dept differs from the queried dept means the
+        #    employee was transferred elsewhere that day → blank here (pulled out of home dept).
         try:
             idx = st.session_state.get('wsd_index', {})
             entry = idx.get((date_str, emp), {})
             if entry.get('is_manual'):
+                ent_dept = str(entry.get('daily_dept', '') or '')
+                if daily_dept and ent_dept and ent_dept != str(daily_dept):
+                    return ""
                 return entry['status']
         except Exception:
             pass
@@ -1622,7 +1767,8 @@ def _render_dept_grid_readonly_DEPRECATED(dept_name, year_month, view_month, hig
 def _render_dept_grid(dept_name, year_month, view_month, key_ns,
                       employees=None, max_days=None,
                       readonly=False, highlight_user=None,
-                      allow_temp_add=False):
+                      allow_temp_add=False, side_groups=None,
+                      transfer_days=None):
     """
     Render a dept × month grid.
 
@@ -1631,6 +1777,13 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns,
                                (no clicking, no notes popover). Used in the
                                employee's סידור יומי view.
     highlight_user           : if set, that employee's name gets ▶ + bold.
+    side_groups              : פנימית only — dict {'ורוד':[emps], 'כחול':[emps]}.
+                               When set, each week's employee rows are grouped
+                               under a coloured side label (per-week interleave).
+    transfer_days            : dict {employee: {day_ints}} for day-specific
+                               temporary transfers. Such an employee is active
+                               ONLY on the listed days; all other day cells in
+                               their row render as a muted locked '—'.
     """
     # Inline gradient styles for readonly mode (must match the CSS keyed by prefix)
     _RO_CELL_STYLES = {
@@ -1684,16 +1837,51 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns,
                     (dr['daily_dept'].astype(str) == dept_name))
             employees = dr[mask]['employee'].astype(str).str.strip().tolist()
 
-    if allow_temp_add and not readonly:
-        _temp_key = f"temp_emps_{key_ns}"
-        _temp_emps = st.session_state.get(_temp_key, [])
-        _emp_set = {str(e).strip() for e in (employees or [])}
-        employees = (employees or []) + [e for e in _temp_emps if e not in _emp_set]
+    # Merge day-specific temporary transfers (persisted in work_schedule_daily).
+    # When transfer_days is supplied by the caller (פנימית path), it has already
+    # folded transfers into `employees` + `side_groups`; don't double-merge here.
+    if transfer_days is None:
+        _inc = _incoming_transfers(dept_name, year_month)
+        if _inc:
+            _emp_set = {str(e).strip() for e in (employees or [])}
+            employees = (employees or []) + [e for e in _inc if e not in _emp_set]
+            transfer_days = {e: rec['days'] for e, rec in _inc.items()}
 
     if not employees:
         st.info(f"אין עובדים משובצים ל-{dept_name} בחודש זה.")
         if not allow_temp_add:
             return
+
+    # ── Side grouping + day-specific transfer helpers ───────────────────
+    _transfer_days = transfer_days or {}
+
+    def _week_row_items():
+        """Flat row sequence for the week loop: ('__label__', side) | ('emp', name).
+        Lets us inject per-side labels without re-indenting the row body."""
+        items = []
+        if side_groups:
+            for _s in PNIM_SIDES:
+                _g = side_groups.get(_s, [])
+                if _g:
+                    items.append(('__label__', _s))
+                    items.extend(('emp', e) for e in _g)
+        else:
+            items.extend(('emp', e) for e in employees)
+        return items
+
+    def _side_label_row(side):
+        color = PNIM_COLORS.get(side, "#f1f5f9")
+        icon  = PNIM_ICONS.get(side, "")
+        st.markdown(
+            f"<div style='background:{color};padding:5px 12px;border-radius:7px;"
+            f"margin:6px 0 2px;font-weight:700;font-size:0.9rem;color:#1e293b;"
+            f"text-align:right'>{icon}&nbsp;צד {side}</div>",
+            unsafe_allow_html=True)
+
+    def _is_locked_day(emp, d):
+        """True when emp is a day-specific transfer and d is NOT an active day."""
+        days = _transfer_days.get(str(emp).strip())
+        return days is not None and d not in days
 
 
     # ── Shared setup ────────────────────────────────────────────────────
@@ -1800,7 +1988,10 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                         unsafe_allow_html=True)
 
             # Employee rows: full-name banner (full width) + 7-col button row
-            for emp in employees:
+            for _kind, emp in _week_row_items():
+                if _kind == '__label__':
+                    _side_label_row(emp)
+                    continue
                 _is_me_m = (highlight_user is not None and
                             str(emp).strip() == str(highlight_user).strip())
                 _name_bg = "#fef3c7" if _is_me_m else "#f1f5f9"
@@ -1818,6 +2009,9 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                     with row_cols[_ci]:
                         if d == 0:
                             st.write("")
+                            continue
+                        if _is_locked_day(emp, d):
+                            _ro_cell("—", "wsdcell_e")
                             continue
                         date_str   = f"{year}-{view_month:02d}-{d:02d}"
                         cur_status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
@@ -1952,13 +2146,19 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
             num_cols[7].write("")
 
             # Employee rows
-            for emp in employees:
+            for _kind, emp in _week_row_items():
+                if _kind == '__label__':
+                    _side_label_row(emp)
+                    continue
                 row_cols = st.columns(_COL_W_D)
                 row_cols[7].markdown(_emp_name_html(emp), unsafe_allow_html=True)
                 for _ci, d in enumerate(week_rtl):
                     with row_cols[_ci]:
                         if d == 0:
                             st.write("")
+                            continue
+                        if _is_locked_day(emp, d):
+                            _ro_cell("—", "wsdcell_e")
                             continue
                         date_str   = f"{year}-{view_month:02d}-{d:02d}"
                         cur_status = _derive_auto_status(date_str, emp, daily_dept=dept_name)
@@ -2051,61 +2251,93 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                     f"{cell_txt}</div>",
                     unsafe_allow_html=True)
 
-    # ── Temporary employee transfer form ───────────────────────────────────
+    # ── Day-specific temporary transfer form (persisted to work_schedule_daily) ──
     if allow_temp_add and not readonly:
-        _temp_key = f"temp_emps_{key_ns}"
-        _cur_temps = st.session_state.get(_temp_key, [])
+        _is_pnim = (dept_name == PNIM_DEPT)
         st.divider()
         st.markdown(
             "<div style='background:#f0fdf4;border:1px solid #86efac;border-radius:8px;"
             "padding:10px 14px;text-align:right;margin-bottom:6px'>"
-            "<b>➕ העברה זמנית — הוסף עובד/ת ממחלקה אחרת</b></div>",
+            "<b>➕ העברה זמנית — הוסף עובד/ת ממחלקה אחרת ליום מסוים</b></div>",
             unsafe_allow_html=True)
 
+        # Employees already permanently rostered to this dept this month — not addable
+        _roster_set = set()
+        try:
+            _dr = st.session_state.dept_rotation
+            if not _dr.empty and 'employee' in _dr.columns:
+                _rmask = ((_dr['year_month'].astype(str) == year_month) &
+                          (_dr['daily_dept'].astype(str) == dept_name))
+                _roster_set = set(_dr[_rmask]['employee'].astype(str).str.strip().tolist())
+        except Exception:
+            pass
         _all_staff_names = []
         if not st.session_state.staff.empty and 'name' in st.session_state.staff.columns:
             _all_staff_names = (st.session_state.staff['name']
                                 .astype(str).str.strip().tolist())
-        _current_emp_set = {str(e).strip() for e in employees}
         _available_to_add = [n for n in _all_staff_names
-                             if n and n not in _current_emp_set]
+                             if n and n not in _roster_set]
 
-        _ta_c1, _ta_c2 = st.columns([4, 1])
+        _month_start = date(year, view_month, 1)
+        _month_end   = date(year, view_month, num_days)
+        if _is_pnim:
+            _ta_c1, _ta_c2, _ta_c3, _ta_c4 = st.columns([3, 2, 2, 1])
+        else:
+            _ta_c1, _ta_c2, _ta_c4 = st.columns([4, 2, 1])
+            _ta_c3 = None
         with _ta_c1:
             _sel_ta = st.selectbox(
-                "בחר/י עובד/ת להוספה זמנית לסידור:",
-                ["—"] + _available_to_add,
+                "עובד/ת:", ["—"] + _available_to_add,
                 key=f"temp_emp_sel_{key_ns}")
         with _ta_c2:
+            _sel_date = st.date_input(
+                "תאריך:", value=_month_start,
+                min_value=_month_start, max_value=_month_end,
+                format="DD/MM/YYYY", key=f"temp_emp_date_{key_ns}")
+        _sel_side = ""
+        if _is_pnim and _ta_c3 is not None:
+            with _ta_c3:
+                _sel_side = st.selectbox(
+                    "צד:", PNIM_SIDES, key=f"temp_emp_side_{key_ns}")
+        with _ta_c4:
             st.write("")
             if st.button("➕ הוסף", key=f"temp_emp_add_{key_ns}",
                          use_container_width=True):
-                if _sel_ta and _sel_ta != "—":
-                    _cur_list = st.session_state.get(_temp_key, [])
-                    if _sel_ta not in _cur_list:
-                        st.session_state[_temp_key] = _cur_list + [_sel_ta]
+                if _sel_ta and _sel_ta != "—" and _sel_date:
+                    _ds = _sel_date.strftime("%Y-%m-%d")
+                    _wsd_upsert(_ds, _sel_ta, dept_name, "עובד",
+                                is_manual=True, side=_sel_side)
                     st.rerun()
 
-        if _cur_temps:
-            st.markdown("**עובדים/ות זמניים בסידור זה (בפעילות הנוכחית בלבד):**")
-            for _te in list(_cur_temps):
-                _tr1, _tr2 = st.columns([5, 1])
-                _tr1.markdown(f"• {_te}")
-                if _tr2.button("✕ הסר", key=f"temp_emp_rm_{key_ns}_{_te}",
-                               use_container_width=True):
-                    _updated = [x for x in st.session_state.get(_temp_key, []) if x != _te]
-                    st.session_state[_temp_key] = _updated
-                    st.rerun()
+        # List existing day-specific transfers into this dept this month
+        _existing = _incoming_transfers(dept_name, year_month)
+        if _existing:
+            st.markdown("**העברות זמניות בחודש זה:**")
+            for _te in sorted(_existing.keys()):
+                _rec = _existing[_te]
+                for _dday in sorted(_rec['days']):
+                    _ds = f"{year}-{view_month:02d}-{_dday:02d}"
+                    _side_txt = (f" · {PNIM_ICONS.get(_rec['side'], '')} {_rec['side']}"
+                                 if _is_pnim and _rec.get('side') else "")
+                    _tr1, _tr2 = st.columns([5, 1])
+                    _tr1.markdown(f"• {_te} — {_dday}/{view_month}{_side_txt}")
+                    if _tr2.button("✕ הסר", key=f"temp_emp_rm_{key_ns}_{_te}_{_dday}",
+                                   use_container_width=True):
+                        _wsd_delete(_ds, _te)
+                        st.rerun()
 
 
 def _render_pnim_sided(year_month, view_month, key_ns,
                        employees, readonly=False,
                        highlight_user=None, allow_temp_add=False):
-    """Render פנימית גריאטרית with 🌸 ורוד / 🔵 כחול section headers.
+    """Render פנימית גריאטרית with per-week 🌸 ורוד / 🔵 כחול interleaving.
 
     Employees are split by their `side` field in dept_rotation, then sorted
-    within each group: רופא בכיר first, then מתמחה alphabetically.
-    Employees with no side assigned appear under a grey "ללא צד" section.
+    within each group: רופא בכיר first, then מתמחה alphabetically. Day-specific
+    temporary transfers are merged into their stored side. Employees with no
+    side assigned are surfaced via a non-blocking caption (no grid section).
+    A single `_render_dept_grid` call drives the whole layout (one mobile toggle
+    + one CSS block) with the weekly side labels emitted inside the week loop.
     """
     # Build side map from dept_rotation
     dr = st.session_state.dept_rotation
@@ -2130,57 +2362,38 @@ def _render_pnim_sided(year_month, view_month, key_ns,
 
     emp_strs = [str(e).strip() for e in employees]
 
-    def _group(side_val):
-        return _sorted_group([e for e in emp_strs if _side_map.get(e, '') == side_val])
+    # Roster members per side
+    pink = _sorted_group([e for e in emp_strs if _side_map.get(e, '') == 'ורוד'])
+    blue = _sorted_group([e for e in emp_strs if _side_map.get(e, '') == 'כחול'])
+    unassigned = _sorted_group([e for e in emp_strs if _side_map.get(e, '') == ''])
 
-    for side in PNIM_SIDES:
-        icon  = PNIM_ICONS[side]
-        color = PNIM_COLORS[side]
-        group = _group(side)
-        st.markdown(
-            f"<div style='background:{color};padding:8px 18px;border-radius:10px;"
-            f"margin:16px 0 6px;font-weight:700;font-size:1.05rem;color:#1e293b'>"
-            f"{icon}&nbsp;&nbsp;צד {side}</div>",
-            unsafe_allow_html=True,
-        )
-        if group:
-            _render_dept_grid(
-                PNIM_DEPT, year_month, view_month, f"{key_ns}_{side}",
-                employees=group,
-                readonly=readonly,
-                highlight_user=highlight_user,
-                allow_temp_add=False,
-            )
-        else:
-            st.caption(f"אין עובדים משובצים לצד {side} בחודש זה.")
+    # Day-specific temporary transfers INTO פנימית — fold into the matching side
+    _inc = _incoming_transfers(PNIM_DEPT, year_month)
+    _transfer_days = {}
+    for _emp, _rec in _inc.items():
+        _transfer_days[_emp] = _rec['days']
+        _tside = _rec.get('side') or ''
+        if _tside == 'כחול':
+            if _emp not in blue:
+                blue.append(_emp)
+        else:  # default any sideless / ורוד transfer to ורוד
+            if _emp not in pink:
+                pink.append(_emp)
 
-    # Employees not yet assigned to a side
-    unassigned = _group('')
     if unassigned:
-        st.markdown(
-            "<div style='background:#f1f5f9;padding:8px 18px;border-radius:10px;"
-            "margin:16px 0 6px;font-weight:600;font-size:1rem;color:#64748b'>"
-            "⬜ ללא צד</div>",
-            unsafe_allow_html=True,
-        )
-        _render_dept_grid(
-            PNIM_DEPT, year_month, view_month, f"{key_ns}_none",
-            employees=unassigned,
-            readonly=readonly,
-            highlight_user=highlight_user,
-            allow_temp_add=False,
-        )
+        st.caption(f"⚠️ {len(unassigned)} עובדים ללא צד — שבץ/י צד בגאנט: "
+                   + ", ".join(unassigned))
 
-    # Temp-employee transfer: delegate to _render_dept_grid with full employee list.
-    # Pass employees=[] so no rows are rendered twice — only the add/remove form shows.
-    if allow_temp_add and not readonly:
-        st.markdown("---")
-        _render_dept_grid(
-            PNIM_DEPT, year_month, view_month, key_ns,
-            employees=[],          # grid rows rendered above; here only the temp-add UI
-            readonly=False,
-            allow_temp_add=True,
-        )
+    side_groups = {'ורוד': pink, 'כחול': blue}
+    _render_dept_grid(
+        PNIM_DEPT, year_month, view_month, key_ns,
+        employees=pink + blue,
+        side_groups=side_groups,
+        transfer_days=_transfer_days,
+        readonly=readonly,
+        highlight_user=highlight_user,
+        allow_temp_add=allow_temp_add,
+    )
 
 
 def log_event(event_type, detail_1='', detail_2=''):
@@ -2381,7 +2594,7 @@ def init_db():
         "absence_requests":     ['id', 'employee', 'start_date', 'end_date', 'type',
                                  'status', 'dept_at_request', 'manager_email',
                                  'approved_by', 'notes', 'created_at', 'responded_at'],
-        "work_schedule_daily":  ['date', 'employee', 'daily_dept', 'status', 'note', 'is_manual'],
+        "work_schedule_daily":  ['date', 'employee', 'daily_dept', 'status', 'note', 'is_manual', 'side'],
     }
     SETTINGS_DEFAULTS = [
         ('active_month',        str((date.today().replace(day=1) + timedelta(days=32)).month)),
@@ -2926,10 +3139,12 @@ if 'work_schedule_daily' not in st.session_state:
     df = get_db_data("work_schedule_daily")
     if df.empty or 'date' not in df.columns:
         df = pd.DataFrame(columns=[
-            'date', 'employee', 'daily_dept', 'status', 'note', 'is_manual'])
+            'date', 'employee', 'daily_dept', 'status', 'note', 'is_manual', 'side'])
     else:
         # Scope to 2026 only — prevents multi-year data from bloating session state
         df = df[df['date'].astype(str).str.startswith('2026')]
+    if 'side' not in df.columns:
+        df['side'] = ''
     st.session_state.work_schedule_daily = df
     _rebuild_wsd_index()   # build O(1) lookup index at session start
 elif 'wsd_index' not in st.session_state:
