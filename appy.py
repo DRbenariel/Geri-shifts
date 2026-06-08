@@ -2721,6 +2721,12 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
             return bg, fg, typ[:3] or "·"
         return "#f8fafc", "#cbd5e1", ""
 
+    # RTL ordering: name column is LAST (rightmost in display), days laid out
+    # in reverse so day 1 sits at the right (next to the name) and day N at the
+    # left. Mirrors the _render_dept_grid desktop layout.
+    days_rtl = list(reversed(days))
+    name_col = num_days   # last column index
+
     for dept_n in sorted(by_dept.keys()):
         st.markdown(
             f"<div style='background:#f1f5f9;padding:6px 12px;border-radius:7px;"
@@ -2728,19 +2734,18 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
             f"text-align:right'>📌 {dept_n}</div>",
             unsafe_allow_html=True)
 
-        # Day-letter + number header row (RTL: rightmost = day 1)
-        col_widths = [3] + [1] * num_days   # name col wider
+        col_widths = [1] * num_days + [3]   # name col LAST + wider
         hdr_cols = st.columns(col_widths)
-        hdr_cols[0].markdown(
+        hdr_cols[name_col].markdown(
             "<div style='font-weight:700;font-size:0.78rem;text-align:right;"
             "padding:4px 8px'>עובד/ת / יום</div>",
             unsafe_allow_html=True)
-        for i, d in enumerate(days):
+        for i, d in enumerate(days_rtl):
             wi = (date(year, month, d).weekday() + 1) % 7
             is_wk = wi in (5, 6)
             hbg = "#fef2f2" if is_wk else "#eef2ff"
             hfg = "#b91c1c" if is_wk else "#3730a3"
-            hdr_cols[i + 1].markdown(
+            hdr_cols[i].markdown(
                 f"<div style='background:{hbg};color:{hfg};text-align:center;"
                 f"padding:2px 0;border-radius:5px;font-size:0.65rem;line-height:1.2'>"
                 f"{d}<br>{_wd_label(d)}</div>",
@@ -2749,12 +2754,12 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
         for emp in sorted(by_dept[dept_n].keys()):
             items_by_day = {d: t for d, t in by_dept[dept_n][emp]}
             row_cols = st.columns(col_widths)
-            row_cols[0].markdown(
+            row_cols[name_col].markdown(
                 f"<div style='font-weight:600;font-size:0.78rem;color:#0f172a;"
                 f"padding:4px 8px;background:white;border-radius:5px;"
                 f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>",
                 unsafe_allow_html=True)
-            for i, d in enumerate(days):
+            for i, d in enumerate(days_rtl):
                 bg, fg, lbl = _cell_for(emp, d, items_by_day)
                 # Conflict day overlay
                 _ttl = ""
@@ -2764,7 +2769,7 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
                     if _others:
                         _border = "2px solid #ef4444"
                         _ttl = f" title='חפיפה: {', '.join(_others)}'"
-                row_cols[i + 1].markdown(
+                row_cols[i].markdown(
                     f"<div{_ttl} style='background:{bg};color:{fg};text-align:center;"
                     f"padding:3px 0;border-radius:5px;border:{_border};"
                     f"font-size:0.7rem;font-weight:700;min-height:22px;line-height:1.2'>"
