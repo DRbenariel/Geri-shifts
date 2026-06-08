@@ -257,6 +257,26 @@ def _reject_request(req_id, responder_name):
     _build_approved_map()   # keep cache in sync immediately
     return result
 
+
+def _delete_absence_request(req_id):
+    """Permanently delete one row from `absence_requests` by id.
+    Used for hard-removing an APPROVED request the admin/manager decides was
+    a mistake — distinct from _reject_request which keeps a paper trail."""
+    try:
+        df = st.session_state.absence_requests
+        if df.empty or 'id' not in df.columns:
+            return False
+        m = df['id'].astype(str) == str(req_id)
+        if not m.any():
+            return False
+        new_df = df[~m].reset_index(drop=True)
+        st.session_state.absence_requests = new_df
+        save_to_db("absence_requests", new_df)
+        _build_approved_map()
+        return True
+    except Exception:
+        return False
+
 def _generate_work_schedule(year_month, view_month):
     """
     Generate work_schedule_daily for one month.
@@ -6969,6 +6989,47 @@ elif role in ("מנהל/ת", "מנהל על"):
         _gantt_year, _gantt_month = _sw_month_selector_12("nb_adm_gantt")
         _render_absence_gantt(_gantt_year, _gantt_month)
 
+        if st.session_state.pop('show_nb_adm_del_ok', False):
+            st.success("🗑️ הבקשה נמחקה.")
+
+        # Hard-delete an approved request (admin power-tool).
+        with st.expander("🗑️ מחיקת בקשה מאושרת", expanded=False):
+            _del_df = st.session_state.absence_requests.copy()
+            if _del_df.empty or 'status' not in _del_df.columns:
+                st.info("אין בקשות במערכת.")
+            else:
+                _del_df['_status'] = _del_df['status'].astype(str).str.lower()
+                _del_df = _del_df[_del_df['_status'] == 'approved']
+                if _del_df.empty:
+                    st.info("אין בקשות מאושרות למחיקה.")
+                else:
+                    _del_df['_label'] = _del_df.apply(
+                        lambda r: (f"{str(r.get('employee', '')).strip()} · "
+                                   f"{_emp_dept_for_date(r.get('employee', ''), r.get('start_date', '')) or '—'} · "
+                                   f"{str(r.get('start_date', ''))[:10]} – {str(r.get('end_date', ''))[:10]} · "
+                                   f"{str(r.get('type', '') or '').strip()}"),
+                        axis=1)
+                    _del_options = _del_df[['id', '_label']].values.tolist()
+                    _label_to_id = {lbl: rid for rid, lbl in _del_options}
+                    _sel_del = st.selectbox(
+                        "בחר/י בקשה למחיקה:",
+                        ["—"] + [lbl for _, lbl in _del_options],
+                        key="nb_adm_del_sel")
+                    _confirm_del = st.checkbox(
+                        "✓ אני בטוח/ה — המחיקה אינה הפיכה",
+                        key="nb_adm_del_confirm",
+                        value=False)
+                    if st.button("🗑️ מחק בקשה", key="nb_adm_del_btn",
+                                 disabled=not (_sel_del and _sel_del != "—"
+                                               and _confirm_del),
+                                 type="primary"):
+                        _rid = _label_to_id.get(_sel_del)
+                        if _rid and _delete_absence_request(_rid):
+                            st.session_state['show_nb_adm_del_ok'] = True
+                            st.rerun()
+                        else:
+                            st.error("שגיאה במחיקה.")
+
         # Original tabular view kept as fallback for raw inspection.
         with st.expander("📋 תצוגת טבלה (כל הבקשות העתידיות שאושרו)", expanded=False):
             ar_nb2 = st.session_state.absence_requests.copy()
@@ -7887,6 +7948,54 @@ else:
             _mgr_gantt_year, _mgr_gantt_month = _sw_month_selector_12("nb_mgr_gantt")
             _render_absence_gantt(_mgr_gantt_year, _mgr_gantt_month,
                                   dept_filter=set(_mgr_managed_depts))
+
+            if st.session_state.pop('show_nb_mgr_del_ok', False):
+                st.success("🗑️ הבקשה נמחקה.")
+
+            # Hard-delete an approved request, scoped to managed depts.
+            with st.expander("🗑️ מחיקת בקשה מאושרת", expanded=False):
+                _mgr_del_df = st.session_state.absence_requests.copy()
+                if _mgr_del_df.empty or 'status' not in _mgr_del_df.columns:
+                    st.info("אין בקשות במערכת.")
+                else:
+                    _mgr_del_df['_status'] = _mgr_del_df['status'].astype(str).str.lower()
+                    _mgr_del_df = _mgr_del_df[_mgr_del_df['_status'] == 'approved'].copy()
+                    # Only show requests whose canonical dept is in this manager's scope
+                    _mgr_del_df['_dept_canon'] = _mgr_del_df.apply(
+                        lambda r: _emp_dept_for_date(r.get('employee', ''),
+                                                     r.get('start_date', '')) or '',
+                        axis=1)
+                    _mgr_del_df = _mgr_del_df[
+                        _mgr_del_df['_dept_canon'].isin(_mgr_managed_depts)]
+                    if _mgr_del_df.empty:
+                        st.info("אין בקשות מאושרות במחלקות בניהולך.")
+                    else:
+                        _mgr_del_df['_label'] = _mgr_del_df.apply(
+                            lambda r: (f"{str(r.get('employee', '')).strip()} · "
+                                       f"{r.get('_dept_canon', '') or '—'} · "
+                                       f"{str(r.get('start_date', ''))[:10]} – {str(r.get('end_date', ''))[:10]} · "
+                                       f"{str(r.get('type', '') or '').strip()}"),
+                            axis=1)
+                        _mgr_del_opts = _mgr_del_df[['id', '_label']].values.tolist()
+                        _mgr_label_to_id = {lbl: rid for rid, lbl in _mgr_del_opts}
+                        _mgr_sel_del = st.selectbox(
+                            "בחר/י בקשה למחיקה:",
+                            ["—"] + [lbl for _, lbl in _mgr_del_opts],
+                            key="nb_mgr_del_sel")
+                        _mgr_confirm_del = st.checkbox(
+                            "✓ אני בטוח/ה — המחיקה אינה הפיכה",
+                            key="nb_mgr_del_confirm",
+                            value=False)
+                        if st.button("🗑️ מחק בקשה", key="nb_mgr_del_btn",
+                                     disabled=not (_mgr_sel_del and _mgr_sel_del != "—"
+                                                   and _mgr_confirm_del),
+                                     type="primary"):
+                            _mgr_rid = _mgr_label_to_id.get(_mgr_sel_del)
+                            if _mgr_rid and _delete_absence_request(_mgr_rid):
+                                st.session_state['show_nb_mgr_del_ok'] = True
+                                st.rerun()
+                            else:
+                                st.error("שגיאה במחיקה.")
 
             with st.expander("📋 תצוגת טבלה (כל הבקשות העתידיות שאושרו)", expanded=False):
                 if _ar_mgr.empty:
