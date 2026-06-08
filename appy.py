@@ -1518,6 +1518,14 @@ def _format_absence_conflict_warning(conflicts) -> str:
     return "⚠️ חופש כבר אושר מאותה מחלקה בתאריכים אלו: " + " · ".join(parts)
 
 
+def _format_absence_conflict_question(conflicts) -> str:
+    """Approver-facing variant: warning + explicit yes/no question."""
+    if not conflicts:
+        return ""
+    return (_format_absence_conflict_warning(conflicts)
+            + "  \nהאם לאשר בקשת היעדרות בכל זאת?")
+
+
 # Status cycle for in-grid editing (clicks rotate through these)
 _GRID_STATUS_CYCLE = {
     "":             "עובד",    # empty (manager-unplanted) → first click plants עובד
@@ -6950,25 +6958,8 @@ elif role in ("מנהל/ת", "מנהל על"):
                 _ar_appr_nb = _ar_appr_nb[_ar_appr_nb['status'] == 'approved']
                 for idx, row in pen_nb.iterrows():
                     with st.container(border=True):
-                        cc1, cc2, cc3, cc4, cc5, cc6 = st.columns([2, 1.5, 1.5, 1.5, 1, 1])
-                        cc1.markdown(f"**{row.get('employee', '—')}**")
-                        cc2.write(_emp_dept_for_date(row.get('employee', ''),
-                                                     row.get('start_date', '')) or '—')
-                        cc3.write(f"{row['start_date']} – {row['end_date']}")
-                        cc4.write(row.get('type', '—'))
+                        # Compute conflicts up front — they drive the approve UX.
                         req_id = str(row.get('id', idx))
-                        if cc5.button("✅ אשר", key=f"nb_adm_ap_{req_id}",
-                                      use_container_width=True):
-                            _approve_request(req_id, str(user_name).strip())
-                            st.rerun()
-                        if cc6.button("❌ דחה", key=f"nb_adm_rj_{req_id}",
-                                      use_container_width=True):
-                            _reject_request(req_id, str(user_name).strip())
-                            st.rerun()
-                        # Overlap warning (Feature 1+2): normalize dept on BOTH sides
-                        # via the Gantt-canonical helper so e.g. a stale 'שיקום' row and
-                        # a fresh 'שיקום גריאטרי א'' row are correctly recognized as the
-                        # same logical dept.
                         _rs_d  = pd.to_datetime(row.get('start_date', ''), errors='coerce')
                         _re_d  = pd.to_datetime(row.get('end_date', ''), errors='coerce')
                         _remp  = str(row.get('employee', '')).strip()
@@ -6976,8 +6967,31 @@ elif role in ("מנהל/ת", "מנהל על"):
                         _row_conflicts = _absence_conflicts(
                             _remp, _rdept_canon, _rs_d, _re_d,
                             exclude_id=row.get('id'))
+
+                        cc1, cc2, cc3, cc4, cc5, cc6 = st.columns([2, 1.5, 1.5, 1.5, 1, 1])
+                        cc1.markdown(f"**{row.get('employee', '—')}**")
+                        cc2.write(_emp_dept_for_date(row.get('employee', ''),
+                                                     row.get('start_date', '')) or '—')
+                        cc3.write(f"{row['start_date']} – {row['end_date']}")
+                        cc4.write(row.get('type', '—'))
+                        # Conflict → disable the inline ✅ button; an explicit
+                        # confirm button appears below the warning instead.
+                        if cc5.button("✅ אשר", key=f"nb_adm_ap_{req_id}",
+                                      use_container_width=True,
+                                      disabled=bool(_row_conflicts)):
+                            _approve_request(req_id, str(user_name).strip())
+                            st.rerun()
+                        if cc6.button("❌ דחה", key=f"nb_adm_rj_{req_id}",
+                                      use_container_width=True):
+                            _reject_request(req_id, str(user_name).strip())
+                            st.rerun()
                         if _row_conflicts:
-                            st.warning(_format_absence_conflict_warning(_row_conflicts))
+                            st.warning(_format_absence_conflict_question(_row_conflicts))
+                            if st.button("✅ כן, אשר למרות החפיפה",
+                                         key=f"nb_adm_ap_force_{req_id}",
+                                         type="primary"):
+                                _approve_request(req_id, str(user_name).strip())
+                                st.rerun()
                         if row.get('notes'):
                             st.caption(f"💬 {row['notes']}")
 
@@ -7085,14 +7099,22 @@ elif role in ("מנהל/ת", "מנהל על"):
 
         # Pre-write conflict warning (Feature 2): show overlap with already-approved
         # absences in the same (Gantt-canonical) dept BEFORE the user clicks submit.
+        _adm_nb_conflicts = []
         if adm_nb_emp and adm_nb_end >= adm_nb_start:
             _adm_nb_dept_preview = _emp_dept_for_date(adm_nb_emp, adm_nb_start)
             _adm_nb_conflicts = _absence_conflicts(
                 adm_nb_emp, _adm_nb_dept_preview, adm_nb_start, adm_nb_end)
-            if _adm_nb_conflicts:
-                st.warning(_format_absence_conflict_warning(_adm_nb_conflicts))
+        # Conflict-confirmation flow: when there's an overlap, the regular save
+        # button is replaced by an explicit "yes, save despite overlap" button.
+        _adm_nb_force = False
+        if _adm_nb_conflicts:
+            st.warning(_format_absence_conflict_question(_adm_nb_conflicts))
+            _adm_nb_force = st.button(
+                "✅ כן, הוסף למרות החפיפה",
+                key="nb_adm_submit_force", type="primary")
 
-        if st.button("✅ הוסף היעדרות מאושרת", key="nb_adm_submit"):
+        if (not _adm_nb_conflicts and
+            st.button("✅ הוסף היעדרות מאושרת", key="nb_adm_submit")) or _adm_nb_force:
             if adm_nb_end < adm_nb_start:
                 st.error("תאריך סיום לפני תאריך התחלה.")
             else:
@@ -7910,34 +7932,37 @@ else:
                     _ar_appr_mgr = _ar_appr_mgr[_ar_appr_mgr['status'] == 'approved']
                     for _idx, _row in _pen_mgr.iterrows():
                         with st.container(border=True):
+                            # Conflict-check via the unified helper (normalises dept on both
+                            # sides) — drives the approve UX below.
+                            _rid = str(_row.get('id', _idx))
+                            _rs2 = pd.to_datetime(_row.get('start_date', ''), errors='coerce')
+                            _re2 = pd.to_datetime(_row.get('end_date', ''), errors='coerce')
+                            _remp2 = str(_row.get('employee', '')).strip()
+                            _rdept2_canon = _emp_dept_for_date(_remp2, _rs2)
+                            _row_conflicts2 = _absence_conflicts(
+                                _remp2, _rdept2_canon, _rs2, _re2,
+                                exclude_id=_row.get('id'))
+
                             _c1, _c2, _c3, _c4, _c5 = st.columns([2, 2, 2, 1, 1])
                             _c1.markdown(f"**{_row.get('employee', '—')}**")
                             _c2.write(f"{_row['start_date']} – {_row['end_date']}")
                             _c3.write(_row.get('type', '—'))
-                            _rid = str(_row.get('id', _idx))
                             if _c4.button("✅ אשר", key=f"nb_mgr_ap_{_rid}",
-                                          use_container_width=True):
+                                          use_container_width=True,
+                                          disabled=bool(_row_conflicts2)):
                                 _approve_request(_rid, str(user_name).strip())
                                 st.rerun()
                             if _c5.button("❌ דחה", key=f"nb_mgr_rj_{_rid}",
                                           use_container_width=True):
                                 _reject_request(_rid, str(user_name).strip())
                                 st.rerun()
-                            # Overlap warning: other employees in same dept already approved
-                            _rs2 = pd.to_datetime(_row.get('start_date', ''), errors='coerce')
-                            _re2 = pd.to_datetime(_row.get('end_date', ''), errors='coerce')
-                            _rdept2 = str(_row.get('dept_at_request', ''))
-                            _remp2  = str(_row.get('employee', '')).strip()
-                            _ovlp2 = _ar_appr_mgr[
-                                (_ar_appr_mgr['employee'].astype(str).str.strip() != _remp2) &
-                                (_ar_appr_mgr['dept_at_request'].astype(str).apply(_norm_dept) ==
-                                 _norm_dept(_rdept2)) &
-                                (_ar_appr_mgr['_sd'] <= _re2) &
-                                (_ar_appr_mgr['_ed'] >= _rs2)
-                            ]
-                            if not _ovlp2.empty:
-                                _cnames2 = ', '.join(_ovlp2['employee'].astype(str).str.strip().unique())
-                                st.warning(f"⚠️ חופש כבר אושר ל: **{_cnames2}** מאותה מחלקה בתאריכים אלו")
+                            if _row_conflicts2:
+                                st.warning(_format_absence_conflict_question(_row_conflicts2))
+                                if st.button("✅ כן, אשר למרות החפיפה",
+                                             key=f"nb_mgr_ap_force_{_rid}",
+                                             type="primary"):
+                                    _approve_request(_rid, str(user_name).strip())
+                                    st.rerun()
                             if _row.get('notes'):
                                 st.caption(f"💬 {_row['notes']}")
 
@@ -8056,14 +8081,22 @@ else:
 
             # Pre-write conflict warning (Feature 2): show same-dept overlap
             # against approved absences BEFORE the manager submits.
+            _nb_mgr_conflicts = []
             if _nb_mgr_sel_emp and _nb_mgr_end >= _nb_mgr_start:
                 _nb_mgr_dept_preview = _emp_dept_for_date(_nb_mgr_sel_emp, _nb_mgr_start)
                 _nb_mgr_conflicts = _absence_conflicts(
                     _nb_mgr_sel_emp, _nb_mgr_dept_preview, _nb_mgr_start, _nb_mgr_end)
-                if _nb_mgr_conflicts:
-                    st.warning(_format_absence_conflict_warning(_nb_mgr_conflicts))
+            # Conflict-confirmation flow: replace the regular save button with an
+            # explicit "yes, save despite overlap" button when a conflict exists.
+            _nb_mgr_force = False
+            if _nb_mgr_conflicts:
+                st.warning(_format_absence_conflict_question(_nb_mgr_conflicts))
+                _nb_mgr_force = st.button(
+                    "✅ כן, הוסף למרות החפיפה",
+                    key="nb_mgr_submit_force", type="primary")
 
-            if st.button("✅ הוסף היעדרות מאושרת", key="nb_mgr_submit"):
+            if (not _nb_mgr_conflicts and
+                st.button("✅ הוסף היעדרות מאושרת", key="nb_mgr_submit")) or _nb_mgr_force:
                 if _nb_mgr_end < _nb_mgr_start:
                     st.error("תאריך סיום לפני תאריך התחלה.")
                 else:
