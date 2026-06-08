@@ -498,7 +498,7 @@ def _export_schedule_wide(view_month):
     except Exception as e:
         return False, str(e)
 
-def _export_dept_grid(dept_name, year_month, view_month):
+def _export_dept_grid(dept_name, year_month, view_month, year=None):
     """
     Export the dept grid to a Google Sheets worksheet `WSD_<dept>_<year_month>`,
     matching the same 3-section batched layout as the Excel export
@@ -513,12 +513,17 @@ def _export_dept_grid(dept_name, year_month, view_month):
     Saturday: only תורן (workers + absences hidden).
     """
     try:
-        year = 2026
+        # Feature 4: derive year from caller (or year_month prefix), defaulting to 2026.
+        if year is None:
+            try:
+                year = int(str(year_month).split('-')[0])
+            except Exception:
+                year = 2026
         num_days = calendar.monthrange(year, view_month)[1]
         days = list(range(1, num_days + 1))
         WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
 
-        result = _build_batched_day_data(dept_name, year_month, view_month)
+        result = _build_batched_day_data(dept_name, year_month, view_month, year=year)
         if not result or result[0] is None:
             return False
         (_employees, per_day_workers, per_day_toranet, per_day_absent,
@@ -812,7 +817,7 @@ _BATCHED_ABSENT_STATUSES = {"חופש", "202", "אחרי תורנות", "אחר"
 _BATCHED_SHIKUM_DEPTS    = {"שיקום גריאטרי א'", "שיקום גריאטרי ב'"}
 
 
-def _build_batched_day_data(dept_name, year_month, view_month):
+def _build_batched_day_data(dept_name, year_month, view_month, year=None):
     """
     Build per-day batches for the batched export format.
     Returns (employees, per_day_workers, per_day_toranet, per_day_absent,
@@ -829,7 +834,12 @@ def _build_batched_day_data(dept_name, year_month, view_month):
       - absent      : employees with ABSENT status
       - day-specific transfers (Feature 3): folded into that day's workers only
     """
-    year = 2026
+    # Feature 4: derive year from caller (or year_month prefix), defaulting to 2026.
+    if year is None:
+        try:
+            year = int(str(year_month).split('-')[0])
+        except Exception:
+            year = 2026
     num_days = calendar.monthrange(year, view_month)[1]
     days = list(range(1, num_days + 1))
     is_pnim = (dept_name == PNIM_DEPT)
@@ -923,7 +933,7 @@ def _build_batched_day_data(dept_name, year_month, view_month):
 
 def _write_batched_sheet(ws, dept_name, year_month, view_month,
                          per_day_workers, per_day_toranet, per_day_absent,
-                         per_day_workers_by_side=None):
+                         per_day_workers_by_side=None, year=None):
     """
     Write batched schedule data into an existing openpyxl Worksheet.
     Layout (rows × cols-per-day):
@@ -939,7 +949,12 @@ def _write_batched_sheet(ws, dept_name, year_month, view_month,
     import openpyxl
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
-    year = 2026
+    # Feature 4: derive year from caller (or year_month prefix), defaulting to 2026.
+    if year is None:
+        try:
+            year = int(str(year_month).split('-')[0])
+        except Exception:
+            year = 2026
     num_days = calendar.monthrange(year, view_month)[1]
     days = list(range(1, num_days + 1))
     WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
@@ -1324,6 +1339,164 @@ def _incoming_transfers(dept, year_month):
         if entry.get('side'):
             rec['side'] = entry['side']
     return result
+
+
+# ── Dept resolution single source of truth (Gantt-first) ───────────────────
+def _emp_dept_for_date(employee, date_str_or_obj) -> str:
+    """
+    Return the Gantt-canonical daily_dept for (employee, the year-month of date).
+    Used wherever `dept_at_request` is written/displayed so the same logical dept
+    renders consistently (e.g. 'שיקום גריאטרי א'' instead of generic 'שיקום').
+    Fallback to staff.dept only when no dept_rotation row exists for that month.
+    """
+    try:
+        emp_n = str(employee).strip()
+        if not emp_n:
+            return ""
+        if hasattr(date_str_or_obj, 'strftime'):
+            ym = date_str_or_obj.strftime('%Y-%m')
+        else:
+            ym = str(date_str_or_obj)[:7]
+        dr = st.session_state.get('dept_rotation', pd.DataFrame())
+        if not dr.empty and 'employee' in dr.columns:
+            mask = ((dr['year_month'].astype(str) == ym) &
+                    (dr['employee'].astype(str).str.strip() == emp_n))
+            if mask.any():
+                dd = str(dr[mask].iloc[0].get('daily_dept', '') or '').strip()
+                if dd:
+                    return dd
+        # Fallback: legacy staff.dept (generic 'שיקום' / 'פנימית גריאטרית')
+        sf = st.session_state.get('staff', pd.DataFrame())
+        if not sf.empty and 'name' in sf.columns and 'dept' in sf.columns:
+            srow = sf[sf['name'].astype(str).str.strip() == emp_n]
+            if not srow.empty:
+                return str(srow.iloc[0].get('dept', '') or '').strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _emp_night_dept(employee, year_month) -> str:
+    """
+    Return the NIGHT-SHIFT dept ('שיקום' or 'פנימית גריאטרית') for an employee
+    in the given year-month. Gantt-first, with intern-default fallback.
+
+      • dept_rotation.daily_dept contains 'שיקום' → 'שיקום'
+      • dept_rotation.daily_dept == 'פנימית גריאטרית' → 'פנימית גריאטרית'
+      • no rotation row + role == 'מתמחה'           → 'פנימית גריאטרית'
+      • no rotation row + any other role            → staff.dept (legacy fallback)
+    """
+    try:
+        emp_n = str(employee).strip()
+        if not emp_n:
+            return ""
+        ym = str(year_month)
+        dr = st.session_state.get('dept_rotation', pd.DataFrame())
+        if not dr.empty and 'employee' in dr.columns:
+            mask = ((dr['year_month'].astype(str) == ym) &
+                    (dr['employee'].astype(str).str.strip() == emp_n))
+            if mask.any():
+                dd = str(dr[mask].iloc[0].get('daily_dept', '') or '').strip()
+                if 'שיקום' in dd:
+                    return 'שיקום'
+                if dd == 'פנימית גריאטרית':
+                    return 'פנימית גריאטרית'
+        # No Gantt row → intern default to פנימית; others fall back to staff.dept
+        sf = st.session_state.get('staff', pd.DataFrame())
+        if not sf.empty and 'name' in sf.columns:
+            srow = sf[sf['name'].astype(str).str.strip() == emp_n]
+            if not srow.empty:
+                role = str(srow.iloc[0].get('type', '') or '').strip()
+                if role == 'מתמחה':
+                    return 'פנימית גריאטרית'
+                if 'dept' in sf.columns:
+                    return str(srow.iloc[0].get('dept', '') or '').strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _absence_conflicts(employee, dept, start_date, end_date,
+                       absence_df=None, exclude_id=None):
+    """
+    Return a list of conflict dicts for OTHER employees whose APPROVED absence
+    overlaps [start_date, end_date] AND whose normalized dept matches.
+
+    `dept` is compared *as the Gantt-canonical value* — use the value returned
+    by `_emp_dept_for_date(employee, start_date)` on the caller side, and we
+    re-normalize the OTHER employees' dept here so e.g. a stale 'שיקום' row and
+    a fresh 'שיקום גריאטרי א'' row are treated as the same logical dept ONLY
+    when both resolve to the same Gantt value.
+
+    Each item: {employee, start, end, type, overlap_start, overlap_end}.
+    `exclude_id` skips one absence_requests row by id (used on self-edit).
+    """
+    out = []
+    try:
+        emp_n = str(employee).strip()
+        dept_n = str(dept or '').strip()
+        if not dept_n:
+            return out
+        # Coerce inputs to date
+        def _to_date(v):
+            if hasattr(v, 'strftime') and not isinstance(v, str):
+                return v if isinstance(v, date) else v.date()
+            return datetime.strptime(str(v)[:10], "%Y-%m-%d").date()
+        sd = _to_date(start_date); ed = _to_date(end_date)
+        if ed < sd:
+            sd, ed = ed, sd
+        df = absence_df if absence_df is not None else st.session_state.get(
+            'absence_requests', pd.DataFrame())
+        if df.empty or 'status' not in df.columns:
+            return out
+        df2 = df.copy()
+        df2['_status'] = df2['status'].astype(str).str.lower()
+        df2['_emp']    = df2['employee'].astype(str).str.strip()
+        df2 = df2[(df2['_status'] == 'approved') & (df2['_emp'] != emp_n)]
+        for _, r in df2.iterrows():
+            try:
+                r_sd = _to_date(r['start_date'])
+                r_ed = _to_date(r['end_date'])
+            except Exception:
+                continue
+            if r_ed < r_sd:
+                r_sd, r_ed = r_ed, r_sd
+            ov_s = max(sd, r_sd); ov_e = min(ed, r_ed)
+            if ov_s > ov_e:
+                continue
+            if exclude_id is not None and str(r.get('id', '')) == str(exclude_id):
+                continue
+            # Normalize the OTHER employee's dept via Gantt for fair comparison
+            other_dept = _emp_dept_for_date(r['_emp'], r_sd)
+            if str(other_dept).strip() != dept_n:
+                continue
+            out.append({
+                'employee': r['_emp'],
+                'start':    r_sd,
+                'end':      r_ed,
+                'type':     str(r.get('type', '') or ''),
+                'overlap_start': ov_s,
+                'overlap_end':   ov_e,
+            })
+    except Exception:
+        pass
+    return out
+
+
+def _format_absence_conflict_warning(conflicts) -> str:
+    """Render a Hebrew warning string for one or more absence conflicts."""
+    if not conflicts:
+        return ""
+    parts = []
+    for c in conflicts:
+        if c['overlap_start'] == c['overlap_end']:
+            rng = c['overlap_start'].strftime('%d/%m')
+        else:
+            rng = (f"{c['overlap_start'].strftime('%d/%m')}–"
+                   f"{c['overlap_end'].strftime('%d/%m')}")
+        parts.append(f"{c['employee']} ({rng})")
+    return "⚠️ חופש כבר אושר מאותה מחלקה בתאריכים אלו: " + " · ".join(parts)
+
 
 # Status cycle for in-grid editing (clicks rotate through these)
 _GRID_STATUS_CYCLE = {
@@ -1768,7 +1941,7 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns,
                       employees=None, max_days=None,
                       readonly=False, highlight_user=None,
                       allow_temp_add=False, side_groups=None,
-                      transfer_days=None):
+                      transfer_days=None, year=None):
     """
     Render a dept × month grid.
 
@@ -1820,7 +1993,12 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns,
                 f"padding:4px 8px;background:white;border-radius:6px;"
                 f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>")
 
-    year = 2026
+    # Feature 4: derive year from caller (or year_month prefix), defaulting to 2026.
+    if year is None:
+        try:
+            year = int(str(year_month).split('-')[0])
+        except Exception:
+            year = 2026
     num_days = calendar.monthrange(year, view_month)[1]
     seg1 = list(range(1, 11))
     seg2 = list(range(11, 21))
@@ -2329,7 +2507,8 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
 
 def _render_pnim_sided(year_month, view_month, key_ns,
                        employees, readonly=False,
-                       highlight_user=None, allow_temp_add=False):
+                       highlight_user=None, allow_temp_add=False,
+                       year=None):
     """Render פנימית גריאטרית with per-week 🌸 ורוד / 🔵 כחול interleaving.
 
     Employees are split by their `side` field in dept_rotation, then sorted
@@ -2393,7 +2572,176 @@ def _render_pnim_sided(year_month, view_month, key_ns,
         readonly=readonly,
         highlight_user=highlight_user,
         allow_temp_add=allow_temp_add,
+        year=year,
     )
+
+
+# ── Feature 3: approved-absence Gantt view ────────────────────────────────
+_ABSENCE_GANTT_COLORS = {
+    "חופש":          ("#dbeafe", "#1e3a8a"),
+    "חופש עתידי":    ("#dbeafe", "#1e3a8a"),
+    "202":           ("#fef08a", "#854d0e"),
+    "היעדרות אחרת":  ("#e2e8f0", "#475569"),
+}
+
+def _render_absence_gantt(year: int, month: int, dept_filter=None):
+    """
+    Render approved future absences as a Gantt-style grid:
+      • Rows grouped by Gantt-canonical dept (via _emp_dept_for_date), then employee.
+      • Columns = days 1..N of (year, month).
+      • Cells coloured by absence type; overlap days (≥2 employees same dept) get
+        a red inset border + tooltip listing the other absent employee(s).
+    `dept_filter` is an optional iterable of normalized dept names; when given,
+    only employees whose canonical dept is in this set are shown.
+    """
+    num_days = calendar.monthrange(year, month)[1]
+    days = list(range(1, num_days + 1))
+    month_start = date(year, month, 1)
+    month_end   = date(year, month, num_days)
+
+    ar = st.session_state.get('absence_requests', pd.DataFrame())
+    if ar.empty or 'status' not in ar.columns:
+        st.info("אין בקשות שאושרו בחודש זה.")
+        return
+
+    ar2 = ar.copy()
+    ar2['_status'] = ar2['status'].astype(str).str.lower()
+    ar2 = ar2[ar2['_status'] == 'approved']
+    if ar2.empty:
+        st.info("אין בקשות שאושרו בחודש זה.")
+        return
+
+    def _to_date(v):
+        try:
+            if hasattr(v, 'strftime') and not isinstance(v, str):
+                return v if isinstance(v, date) else v.date()
+            return datetime.strptime(str(v)[:10], '%Y-%m-%d').date()
+        except Exception:
+            return None
+
+    # Collect (emp, dept_canon, sd, ed, type) intersecting this month
+    rows = []
+    for _, r in ar2.iterrows():
+        sd = _to_date(r.get('start_date'))
+        ed = _to_date(r.get('end_date'))
+        if not sd or not ed:
+            continue
+        if ed < sd:
+            sd, ed = ed, sd
+        # Intersect with [month_start, month_end]
+        i_s = max(sd, month_start); i_e = min(ed, month_end)
+        if i_s > i_e:
+            continue
+        emp = str(r.get('employee', '')).strip()
+        dept_canon = _emp_dept_for_date(emp, sd) or '—'
+        if dept_filter and dept_canon not in dept_filter:
+            continue
+        rows.append({
+            'emp':  emp,
+            'dept': dept_canon,
+            'sd':   i_s,
+            'ed':   i_e,
+            'type': str(r.get('type', '') or '').strip() or 'חופש',
+        })
+
+    if not rows:
+        st.info("אין בקשות שאושרו בחודש זה.")
+        return
+
+    # Group by (dept, employee) → list of (day_int, type)
+    by_dept = {}
+    for row in rows:
+        cur = row['sd']
+        while cur <= row['ed']:
+            d = cur.day
+            by_dept.setdefault(row['dept'], {}).setdefault(row['emp'], []).append((d, row['type']))
+            cur = cur + timedelta(days=1)
+
+    # Compute conflict days per (dept, day) — ≥2 distinct employees absent that day
+    conflicts = {}   # {(dept, day_int): [emp1, emp2, ...]}
+    for dept_n, emps in by_dept.items():
+        day_to_emps = {}
+        for emp, items in emps.items():
+            for d, _t in items:
+                day_to_emps.setdefault(d, set()).add(emp)
+        for d, eset in day_to_emps.items():
+            if len(eset) >= 2:
+                conflicts[(dept_n, d)] = sorted(eset)
+
+    # Legend
+    st.markdown(
+        "<div style='direction:rtl;font-size:0.78rem;color:#475569;margin:6px 0 4px;line-height:2'>"
+        "<span style='background:#dbeafe;border-radius:4px;padding:1px 10px'>&nbsp;</span> חופש &nbsp;|&nbsp; "
+        "<span style='background:#fef08a;border-radius:4px;padding:1px 10px'>&nbsp;</span> 202 &nbsp;|&nbsp; "
+        "<span style='background:#e2e8f0;border-radius:4px;padding:1px 10px'>&nbsp;</span> היעדרות אחרת &nbsp;|&nbsp; "
+        "<span style='background:#dbeafe;border:2px solid #ef4444;border-radius:4px;padding:1px 10px'>&nbsp;</span> "
+        "חפיפה במחלקה</div>",
+        unsafe_allow_html=True)
+
+    # RTL day-number header. Use ~26 cols: 1 emp-name col + 25 days. For 28-31
+    # day months, split into segments to keep cells legible.
+    WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
+
+    def _wd_label(d):
+        wi = (date(year, month, d).weekday() + 1) % 7
+        return WD[wi]
+
+    def _cell_for(emp, d, items_by_day):
+        if d in items_by_day:
+            typ = items_by_day[d]
+            bg, fg = _ABSENCE_GANTT_COLORS.get(typ, ("#cbd5e1", "#0f172a"))
+            return bg, fg, typ[:3] or "·"
+        return "#f8fafc", "#cbd5e1", ""
+
+    for dept_n in sorted(by_dept.keys()):
+        st.markdown(
+            f"<div style='background:#f1f5f9;padding:6px 12px;border-radius:7px;"
+            f"margin:14px 0 4px;font-weight:700;font-size:0.95rem;color:#1e293b;"
+            f"text-align:right'>📌 {dept_n}</div>",
+            unsafe_allow_html=True)
+
+        # Day-letter + number header row (RTL: rightmost = day 1)
+        col_widths = [3] + [1] * num_days   # name col wider
+        hdr_cols = st.columns(col_widths)
+        hdr_cols[0].markdown(
+            "<div style='font-weight:700;font-size:0.78rem;text-align:right;"
+            "padding:4px 8px'>עובד/ת / יום</div>",
+            unsafe_allow_html=True)
+        for i, d in enumerate(days):
+            wi = (date(year, month, d).weekday() + 1) % 7
+            is_wk = wi in (5, 6)
+            hbg = "#fef2f2" if is_wk else "#eef2ff"
+            hfg = "#b91c1c" if is_wk else "#3730a3"
+            hdr_cols[i + 1].markdown(
+                f"<div style='background:{hbg};color:{hfg};text-align:center;"
+                f"padding:2px 0;border-radius:5px;font-size:0.65rem;line-height:1.2'>"
+                f"{d}<br>{_wd_label(d)}</div>",
+                unsafe_allow_html=True)
+
+        for emp in sorted(by_dept[dept_n].keys()):
+            items_by_day = {d: t for d, t in by_dept[dept_n][emp]}
+            row_cols = st.columns(col_widths)
+            row_cols[0].markdown(
+                f"<div style='font-weight:600;font-size:0.78rem;color:#0f172a;"
+                f"padding:4px 8px;background:white;border-radius:5px;"
+                f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>",
+                unsafe_allow_html=True)
+            for i, d in enumerate(days):
+                bg, fg, lbl = _cell_for(emp, d, items_by_day)
+                # Conflict day overlay
+                _ttl = ""
+                _border = "1px solid #e2e8f0"
+                if (dept_n, d) in conflicts and emp in items_by_day:
+                    _others = [n for n in conflicts[(dept_n, d)] if n != emp]
+                    if _others:
+                        _border = "2px solid #ef4444"
+                        _ttl = f" title='חפיפה: {', '.join(_others)}'"
+                row_cols[i + 1].markdown(
+                    f"<div{_ttl} style='background:{bg};color:{fg};text-align:center;"
+                    f"padding:3px 0;border-radius:5px;border:{_border};"
+                    f"font-size:0.7rem;font-weight:700;min-height:22px;line-height:1.2'>"
+                    f"{lbl}</div>",
+                    unsafe_allow_html=True)
 
 
 def log_event(event_type, detail_1='', detail_2=''):
@@ -2869,15 +3217,19 @@ def check_assignment_validity(schedule_data, person_name, check_date, target_dep
     if 'חוץ' in p_type and 'פנימית' in target_dept:
         return False, "External cannot work Internal"
 
-    # Home Dept Check
+    # Home Dept Check — Feature 5: derive the night-shift dept from the Gantt
+    # (`dept_rotation`) for the year-month of check_date instead of reading the
+    # legacy staff.dept column. Falls back to staff.dept when no rotation row.
     if not ignore_home_restrict:
         only_home = person.get('only_home_dept', False)
         if only_home:
              target_context = target_dept
              if "שישי בוקר" in target_dept:
                  target_context = "שיקום" if "שיקום" in target_dept else "פנימית גריאטרית"
-             if person['dept'] != 'כללי' and person['dept'] != target_context:
-                 return False, f"Restricted to Home Dept ({person['dept']})"
+             _person_home_dept = _emp_night_dept(person_name, str(check_date)[:7]) \
+                 or str(person.get('dept', '') or '')
+             if _person_home_dept != 'כללי' and _person_home_dept != target_context:
+                 return False, f"Restricted to Home Dept ({_person_home_dept})"
 
     # --- 2. Hard User Constraints ---
     req_date_str = requests_df['date'].astype(str)
@@ -3451,16 +3803,19 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 if any(s for s in new_schedule if s['date'] == d_str and s['employee'] == name):
                     continue
 
-                # --- Department Restriction Check ---
+                # --- Department Restriction Check (Feature 5: Gantt-canonical) ---
                 only_home = person.get('only_home_dept', False)
                 if only_home:
                      # Determine target shift's "Real" Department context
                      target_context = dept
                      if "שישי בוקר" in dept:
                          target_context = "שיקום" if "שיקום" in dept else "פנימית גריאטרית"
-                     
-                     # Enforce restriction (General staff usually exempt unless we want otherwise)
-                     if person['dept'] != 'כללי' and person['dept'] != target_context:
+
+                     # Resolve night-shift home dept from the Gantt for this month,
+                     # falling back to staff.dept when no rotation row exists.
+                     _person_home_dept = _emp_night_dept(name, f"{year}-{month:02d}") \
+                         or str(person.get('dept', '') or '')
+                     if _person_home_dept != 'כללי' and _person_home_dept != target_context:
                          # failure_reasons.append(f"{name}: מוגבל למחלקת אם")
                          continue
                 # ------------------------------------
@@ -3584,10 +3939,11 @@ def run_smart_scheduling(year, month, only_weekends=False):
                         if d.weekday() == 3:
                             score -= thu_counts[name] * 200
                             
-                    # פקטור מחלקה - העדפה למחלקת האם!
+                    # פקטור מחלקה - העדפה למחלקת האם! (Feature 5: Gantt-canonical)
                     # אם המועמד שייך למחלקה הנוכחית או ל'כללי' - מקבל בונוס
                     # אם המועמד ממחלקה אחרת - נמצא רק בעדיפות אחרונה (ענישה)
-                    cand_dept = cand['dept']
+                    cand_dept = (_emp_night_dept(name, d.strftime('%Y-%m'))
+                                 or str(cand.get('dept', '') or ''))
                     
                     # בדיקת התאמה מלאה - אם מוגבל למחלקת אם, הציון לא רלוונטי כי הוא נפסל למעלה,
                     # אבל כאן זה נותן בונוס למי שנמצא במחלקה הנכונה
@@ -3808,8 +4164,13 @@ def run_smart_scheduling(year, month, only_weekends=False):
                 # אם זה תורן חוץ - מחפשים מחליף (מתמחה משיקום)
                 # קריטריונים: מחלקת שיקום, פנוי בשישי, עומד בבדיקת מנוחה ±2 ימים
                 candidates = []
+                _fri_ym = fri_str[:7]
                 for _, row in staff_df.iterrows():
-                    if row['type'] == 'מתמחה' and row['dept'] == 'שיקום' and row['name'] != worker_name:
+                    if row['type'] != 'מתמחה' or row['name'] == worker_name:
+                        continue
+                    # Feature 5: pull dept from the Gantt for this month (not staff.dept).
+                    _row_dept = _emp_night_dept(row['name'], _fri_ym) or str(row.get('dept', '') or '')
+                    if _row_dept == 'שיקום':
                         emp = row['name']
                         
                         # האם פנוי ביום שישי (אילוץ - חסם)
@@ -4899,6 +5260,44 @@ def _sw_month_selector(active_m: int, key_ns: str) -> int:
             st.session_state[sk] = active_m
             st.rerun()
     return st.session_state[sk]
+
+
+def _sw_month_selector_12(key_ns: str) -> tuple[int, int]:
+    """
+    Auto-advancing 12-month forward selector for the 'סידור עבודה' tab.
+    Returns (year, month). Recomputes the window from `datetime.now()` on every
+    render so it rolls forward automatically when a new month begins.
+
+    Example: in June 2026 → 'יוני 26 / יולי 26 / ... / מאי 27'.
+             In July 2026 (one render later) → 'יולי 26 / ... / יוני 27'.
+    """
+    now = datetime.now()
+    months = []
+    for i in range(12):
+        m_idx = (now.month - 1 + i) % 12
+        y     = now.year + (now.month - 1 + i) // 12
+        months.append((y, m_idx + 1))
+    labels = [f"{_HEB_MONTHS[m - 1]} {str(y)[-2:]}" for (y, m) in months]
+    sk = f"{key_ns}_vym"
+    # Stale-selection guard: if a previously-stored (y, m) dropped out of the
+    # rolling window, fall back to the current (now) month.
+    cur_key = (now.year, now.month)
+    cur = st.session_state.get(sk)
+    if cur not in months:
+        st.session_state[sk] = cur_key
+        cur = cur_key
+    cur_idx = months.index(cur)
+    c1, _ = st.columns([3, 9])
+    with c1:
+        sel_label = st.selectbox(
+            "חודש:", labels, index=cur_idx,
+            key=f"{key_ns}_sel12", label_visibility="collapsed")
+    new_idx = labels.index(sel_label)
+    if months[new_idx] != cur:
+        st.session_state[sk] = months[new_idx]
+        st.rerun()
+    return months[new_idx]
+
 
 try:
     daily_active_month_int = int(_get_setting('daily_active_month', active_month_int))
@@ -6465,10 +6864,11 @@ elif role in ("מנהל/ת", "מנהל על"):
         st.caption("בחר מחלקה לראות אותה כפי שמנהל המחלקה רואה.")
 
         sel_dept_admin = st.selectbox("מחלקה לתצוגה:", DAILY_DEPTS_ALL, key="adm_sy_dept")
-        adm_view_m = _sw_month_selector(daily_active_month_int, "sw_adm")
-        adm_y_m = f"2026-{adm_view_m:02d}"
+        # Feature 4: 12-month rolling forward window (auto-advances on month change).
+        adm_year, adm_view_m = _sw_month_selector_12("sw_adm")
+        adm_y_m = f"{adm_year}-{adm_view_m:02d}"
 
-        st.markdown(f"#### לוח {sel_dept_admin} — {_HEB_MONTHS[adm_view_m-1]} 2026")
+        st.markdown(f"#### לוח {sel_dept_admin} — {_HEB_MONTHS[adm_view_m-1]} {adm_year}")
 
         # Build employees: dept_rotation + ALL managers of this dept.
         # Managers always appear as rows; their cells default to empty
@@ -6486,11 +6886,12 @@ elif role in ("מנהל/ת", "מנהל על"):
 
         if sel_dept_admin == PNIM_DEPT:
             _render_pnim_sided(adm_y_m, adm_view_m, "adm_mgrview",
-                               employees=_all_adm_emps, allow_temp_add=True)
+                               employees=_all_adm_emps, allow_temp_add=True,
+                               year=adm_year)
         else:
             _render_dept_grid(sel_dept_admin, adm_y_m, adm_view_m,
                               "adm_mgrview", employees=_all_adm_emps,
-                              allow_temp_add=True)
+                              allow_temp_add=True, year=adm_year)
 
         st.divider()
         _render_export_buttons(sel_dept_admin, adm_y_m, adm_view_m,
@@ -6531,7 +6932,8 @@ elif role in ("מנהל/ת", "מנהל על"):
                     with st.container(border=True):
                         cc1, cc2, cc3, cc4, cc5, cc6 = st.columns([2, 1.5, 1.5, 1.5, 1, 1])
                         cc1.markdown(f"**{row.get('employee', '—')}**")
-                        cc2.write(row.get('dept_at_request', '—'))
+                        cc2.write(_emp_dept_for_date(row.get('employee', ''),
+                                                     row.get('start_date', '')) or '—')
                         cc3.write(f"{row['start_date']} – {row['end_date']}")
                         cc4.write(row.get('type', '—'))
                         req_id = str(row.get('id', idx))
@@ -6543,49 +6945,58 @@ elif role in ("מנהל/ת", "מנהל על"):
                                       use_container_width=True):
                             _reject_request(req_id, str(user_name).strip())
                             st.rerun()
-                        # Overlap warning: other employees in same dept already approved
-                        _rs = pd.to_datetime(row.get('start_date', ''), errors='coerce')
-                        _re = pd.to_datetime(row.get('end_date', ''), errors='coerce')
-                        _rdept = str(row.get('dept_at_request', ''))
+                        # Overlap warning (Feature 1+2): normalize dept on BOTH sides
+                        # via the Gantt-canonical helper so e.g. a stale 'שיקום' row and
+                        # a fresh 'שיקום גריאטרי א'' row are correctly recognized as the
+                        # same logical dept.
+                        _rs_d  = pd.to_datetime(row.get('start_date', ''), errors='coerce')
+                        _re_d  = pd.to_datetime(row.get('end_date', ''), errors='coerce')
                         _remp  = str(row.get('employee', '')).strip()
-                        _ovlp = _ar_appr_nb[
-                            (_ar_appr_nb['employee'].astype(str).str.strip() != _remp) &
-                            (_ar_appr_nb['dept_at_request'].astype(str) == _rdept) &
-                            (_ar_appr_nb['_sd'] <= _re) &
-                            (_ar_appr_nb['_ed'] >= _rs)
-                        ]
-                        if not _ovlp.empty:
-                            _cnames = ', '.join(_ovlp['employee'].astype(str).str.strip().unique())
-                            st.warning(f"⚠️ חופש כבר אושר ל: **{_cnames}** מאותה מחלקה בתאריכים אלו")
+                        _rdept_canon = _emp_dept_for_date(_remp, _rs_d)
+                        _row_conflicts = _absence_conflicts(
+                            _remp, _rdept_canon, _rs_d, _re_d,
+                            exclude_id=row.get('id'))
+                        if _row_conflicts:
+                            st.warning(_format_absence_conflict_warning(_row_conflicts))
                         if row.get('notes'):
                             st.caption(f"💬 {row['notes']}")
 
         st.divider()
 
-        # ── Section 2: בקשות שאושרו — כל העתידיות ────────────────
-        st.markdown("#### ✅ בקשות שאושרו — עתידיות")
-        ar_nb2 = st.session_state.absence_requests.copy()
-        if not ar_nb2.empty and 'status' in ar_nb2.columns:
-            ar_nb2['status']    = ar_nb2['status'].astype(str).str.lower()
-            ar_nb2['end_date']  = pd.to_datetime(ar_nb2['end_date'], errors='coerce')
-            ar_nb2['start_date'] = pd.to_datetime(ar_nb2['start_date'], errors='coerce')
-            _today_ts = pd.Timestamp(date.today())
-            ap_nb2 = ar_nb2[
-                (ar_nb2['status'] == 'approved') &
-                (ar_nb2['end_date'] >= _today_ts)
-            ].copy()
-            if ap_nb2.empty:
-                st.info("אין בקשות שאושרו לתאריכים עתידיים.")
+        # ── Section 2: Gantt-style approved-absence view (Feature 3) ────
+        st.markdown("#### ✅ בקשות שאושרו — תצוגת גאנט")
+        # 12-month selector for which month to visualise (auto-advancing).
+        _gantt_year, _gantt_month = _sw_month_selector_12("nb_adm_gantt")
+        _render_absence_gantt(_gantt_year, _gantt_month)
+
+        # Original tabular view kept as fallback for raw inspection.
+        with st.expander("📋 תצוגת טבלה (כל הבקשות העתידיות שאושרו)", expanded=False):
+            ar_nb2 = st.session_state.absence_requests.copy()
+            if not ar_nb2.empty and 'status' in ar_nb2.columns:
+                ar_nb2['status']    = ar_nb2['status'].astype(str).str.lower()
+                ar_nb2['end_date']  = pd.to_datetime(ar_nb2['end_date'], errors='coerce')
+                ar_nb2['start_date'] = pd.to_datetime(ar_nb2['start_date'], errors='coerce')
+                _today_ts = pd.Timestamp(date.today())
+                ap_nb2 = ar_nb2[
+                    (ar_nb2['status'] == 'approved') &
+                    (ar_nb2['end_date'] >= _today_ts)
+                ].copy()
+                if ap_nb2.empty:
+                    st.info("אין בקשות שאושרו לתאריכים עתידיים.")
+                else:
+                    # Normalize dept_at_request via Gantt for display (Feature 1).
+                    ap_nb2['_dept_canon'] = ap_nb2.apply(
+                        lambda r: _emp_dept_for_date(r['employee'], r['start_date']) or '—',
+                        axis=1)
+                    ap_nb2 = ap_nb2.sort_values(['_dept_canon', 'start_date'])
+                    _show_nb2 = ap_nb2[['employee', '_dept_canon', 'start_date', 'end_date',
+                                        'type', 'approved_by']].copy()
+                    _show_nb2.columns = ['עובד/ת', 'מחלקה', 'מתאריך', 'עד תאריך', 'סוג', 'אושר ע"י']
+                    _show_nb2['מתאריך']  = _show_nb2['מתאריך'].dt.strftime('%Y-%m-%d')
+                    _show_nb2['עד תאריך'] = _show_nb2['עד תאריך'].dt.strftime('%Y-%m-%d')
+                    st.dataframe(_show_nb2, use_container_width=True, hide_index=True)
             else:
-                ap_nb2 = ap_nb2.sort_values(['dept_at_request', 'start_date'])
-                _show_nb2 = ap_nb2[['employee', 'dept_at_request', 'start_date', 'end_date',
-                                    'type', 'approved_by']].copy()
-                _show_nb2.columns = ['עובד/ת', 'מחלקה', 'מתאריך', 'עד תאריך', 'סוג', 'אושר ע"י']
-                _show_nb2['מתאריך']  = _show_nb2['מתאריך'].dt.strftime('%Y-%m-%d')
-                _show_nb2['עד תאריך'] = _show_nb2['עד תאריך'].dt.strftime('%Y-%m-%d')
-                st.dataframe(_show_nb2, use_container_width=True, hide_index=True)
-        else:
-            st.info("אין בקשות שאושרו.")
+                st.info("אין בקשות שאושרו.")
 
         st.divider()
 
@@ -6611,12 +7022,22 @@ elif role in ("מנהל/ת", "מנהל על"):
         adm_nb_type = st.selectbox("סוג היעדרות:", ["חופש", "202", "היעדרות אחרת"], key="nb_adm_type")
         adm_nb_note = st.text_input("הערה (אופציונלי):", key="nb_adm_note")
 
+        # Pre-write conflict warning (Feature 2): show overlap with already-approved
+        # absences in the same (Gantt-canonical) dept BEFORE the user clicks submit.
+        if adm_nb_emp and adm_nb_end >= adm_nb_start:
+            _adm_nb_dept_preview = _emp_dept_for_date(adm_nb_emp, adm_nb_start)
+            _adm_nb_conflicts = _absence_conflicts(
+                adm_nb_emp, _adm_nb_dept_preview, adm_nb_start, adm_nb_end)
+            if _adm_nb_conflicts:
+                st.warning(_format_absence_conflict_warning(_adm_nb_conflicts))
+
         if st.button("✅ הוסף היעדרות מאושרת", key="nb_adm_submit"):
             if adm_nb_end < adm_nb_start:
                 st.error("תאריך סיום לפני תאריך התחלה.")
             else:
-                emp_row_nb = sf_all_nb[sf_all_nb['name'].astype(str).str.strip() == adm_nb_emp]
-                emp_dept_nb = str(emp_row_nb.iloc[0].get('dept', '')) if not emp_row_nb.empty else ''
+                # Gantt-canonical dept (Feature 1) — falls back to staff.dept only
+                # when no dept_rotation row exists for the requested year-month.
+                emp_dept_nb = _emp_dept_for_date(adm_nb_emp, adm_nb_start)
                 new_nb_row = {
                     'id':              str(uuid.uuid4()),
                     'employee':        adm_nb_emp,
@@ -7054,6 +7475,17 @@ else:
 
         if _vac_sel or _202_sel:
             st.divider()
+            # ── Conflict warning (Feature 2) — show same-dept overlap with already-approved
+            # absences BEFORE the user clicks "שמור". Soft warning, doesn't block submission.
+            _ea_first_day = (_vac_sel + _202_sel)[0]
+            _ea_first_date = date(2026, daily_active_month_int, _ea_first_day)
+            _ea_last_day = (_vac_sel + _202_sel)[-1]
+            _ea_last_date = date(2026, daily_active_month_int, _ea_last_day)
+            _ea_dept_preview = _emp_dept_for_date(user_name, _ea_first_date)
+            _ea_conflicts = _absence_conflicts(
+                user_name, _ea_dept_preview, _ea_first_date, _ea_last_date)
+            if _ea_conflicts:
+                st.warning(_format_absence_conflict_warning(_ea_conflicts))
             _btn_col, _msg_col = st.columns([1, 4])
             with _msg_col:
                 _lines = []
@@ -7076,17 +7508,14 @@ else:
                 if st.button("💾 שמור", use_container_width=True,
                              key=f"dayabs_save_{daily_active_month_int}",
                              type="primary", disabled=not can_submit):
-                    # ── Lookup dept + manager email ───────────────────
-                    _dr2 = st.session_state.dept_rotation
-                    _dept_at_req = ""
+                    # ── Lookup dept + manager email (Feature 1 — Gantt-canonical) ───────────────────
+                    # _emp_dept_for_date returns dept_rotation.daily_dept for the request's
+                    # year-month, with a staff.dept fallback if the user hasn't yet been
+                    # placed on the Gantt for that month.
+                    _ea_first_d = (_vac_sel + _202_sel)[0]
+                    _dept_at_req = _emp_dept_for_date(
+                        user_name, date(2026, daily_active_month_int, _ea_first_d))
                     _mgr_email   = ""
-                    if not _dr2.empty and 'employee' in _dr2.columns:
-                        _my_rot = _dr2[
-                            (_dr2['employee'].astype(str).str.strip() == str(user_name).strip()) &
-                            (_dr2['year_month'].astype(str) == da_year_month)
-                        ]
-                        if not _my_rot.empty:
-                            _dept_at_req = str(_my_rot.iloc[0].get('daily_dept', '')).strip()
                     if _dept_at_req:
                         for _, _sr in st.session_state.staff.iterrows():
                             if str(_sr.get('type', '')).strip() != 'מנהל מחלקה':
@@ -7312,9 +7741,10 @@ else:
             else:
                 st.caption(f"מחלקות בניהולך: {' | '.join(managed_depts)}")
 
-                mgr_view_m = _sw_month_selector(daily_active_month_int, "sw_mgr")
-                da_y_m = f"2026-{mgr_view_m:02d}"
-                st.markdown(f"#### לוח מחלקה — {_HEB_MONTHS[mgr_view_m-1]} 2026")
+                # Feature 4: 12-month rolling forward window (auto-advances on month change).
+                mgr_year, mgr_view_m = _sw_month_selector_12("sw_mgr")
+                da_y_m = f"{mgr_year}-{mgr_view_m:02d}"
+                st.markdown(f"#### לוח מחלקה — {_HEB_MONTHS[mgr_view_m-1]} {mgr_year}")
                 st.caption("עורך/ת מחלקה: לחץ/י על תא לשינוי סטטוס. שורתך מצורפת לכל מחלקה — עריכה ישירה.")
                 def _compose_mgr_emps(d_name):
                     dr = st.session_state.dept_rotation
@@ -7334,10 +7764,12 @@ else:
                 def _mgr_render_dept(d_name, emps, ns):
                     if d_name == PNIM_DEPT:
                         _render_pnim_sided(da_y_m, mgr_view_m, ns,
-                                           employees=emps, allow_temp_add=True)
+                                           employees=emps, allow_temp_add=True,
+                                           year=mgr_year)
                     else:
                         _render_dept_grid(d_name, da_y_m, mgr_view_m,
-                                          ns, employees=emps, allow_temp_add=True)
+                                          ns, employees=emps, allow_temp_add=True,
+                                          year=mgr_year)
 
                 if len(managed_depts) > 1:
                     sub_dept_tabs = st.tabs(managed_depts)
@@ -7450,29 +7882,39 @@ else:
 
             st.divider()
 
-            # ── Section 2: בקשות שאושרו — עתידיות ────────────────
-            st.markdown("#### ✅ בקשות שאושרו — עתידיות")
-            if _ar_mgr.empty:
-                st.info("אין בקשות שאושרו.")
-            else:
-                _ar_mgr2 = _ar_mgr.copy()
-                _ar_mgr2['end_date']   = pd.to_datetime(_ar_mgr2['end_date'], errors='coerce')
-                _ar_mgr2['start_date'] = pd.to_datetime(_ar_mgr2['start_date'], errors='coerce')
-                _today_mgr = pd.Timestamp(date.today())
-                _ap_mgr = _ar_mgr2[
-                    (_ar_mgr2['status'] == 'approved') &
-                    (_dept_match_mgr | _emp_match_mgr) &
-                    (_ar_mgr2['end_date'] >= _today_mgr)
-                ].copy()
-                if _ap_mgr.empty:
-                    st.info("אין בקשות שאושרו לתאריכים עתידיים.")
+            # ── Section 2: Gantt-style approved-absence view (Feature 3) ────
+            st.markdown("#### ✅ בקשות שאושרו — תצוגת גאנט")
+            _mgr_gantt_year, _mgr_gantt_month = _sw_month_selector_12("nb_mgr_gantt")
+            _render_absence_gantt(_mgr_gantt_year, _mgr_gantt_month,
+                                  dept_filter=set(_mgr_managed_depts))
+
+            with st.expander("📋 תצוגת טבלה (כל הבקשות העתידיות שאושרו)", expanded=False):
+                if _ar_mgr.empty:
+                    st.info("אין בקשות שאושרו.")
                 else:
-                    _ap_mgr = _ap_mgr.sort_values('start_date')
-                    _show_mgr = _ap_mgr[['employee', 'start_date', 'end_date', 'type', 'approved_by']].copy()
-                    _show_mgr.columns = ['עובד/ת', 'מתאריך', 'עד תאריך', 'סוג', 'אושר ע"י']
-                    _show_mgr['מתאריך']  = _show_mgr['מתאריך'].dt.strftime('%Y-%m-%d')
-                    _show_mgr['עד תאריך'] = _show_mgr['עד תאריך'].dt.strftime('%Y-%m-%d')
-                    st.dataframe(_show_mgr, use_container_width=True, hide_index=True)
+                    _ar_mgr2 = _ar_mgr.copy()
+                    _ar_mgr2['end_date']   = pd.to_datetime(_ar_mgr2['end_date'], errors='coerce')
+                    _ar_mgr2['start_date'] = pd.to_datetime(_ar_mgr2['start_date'], errors='coerce')
+                    _today_mgr = pd.Timestamp(date.today())
+                    _ap_mgr = _ar_mgr2[
+                        (_ar_mgr2['status'] == 'approved') &
+                        (_dept_match_mgr | _emp_match_mgr) &
+                        (_ar_mgr2['end_date'] >= _today_mgr)
+                    ].copy()
+                    if _ap_mgr.empty:
+                        st.info("אין בקשות שאושרו לתאריכים עתידיים.")
+                    else:
+                        # Normalize dept via Gantt for display (Feature 1).
+                        _ap_mgr['_dept_canon'] = _ap_mgr.apply(
+                            lambda r: _emp_dept_for_date(r['employee'], r['start_date']) or '—',
+                            axis=1)
+                        _ap_mgr = _ap_mgr.sort_values(['_dept_canon', 'start_date'])
+                        _show_mgr = _ap_mgr[['employee', '_dept_canon', 'start_date',
+                                              'end_date', 'type', 'approved_by']].copy()
+                        _show_mgr.columns = ['עובד/ת', 'מחלקה', 'מתאריך', 'עד תאריך', 'סוג', 'אושר ע"י']
+                        _show_mgr['מתאריך']  = _show_mgr['מתאריך'].dt.strftime('%Y-%m-%d')
+                        _show_mgr['עד תאריך'] = _show_mgr['עד תאריך'].dt.strftime('%Y-%m-%d')
+                        st.dataframe(_show_mgr, use_container_width=True, hide_index=True)
 
             st.divider()
 
@@ -7503,11 +7945,23 @@ else:
                                          key="nb_mgr_type")
             _nb_mgr_note = st.text_input("הערה (אופציונלי):", key="nb_mgr_note")
 
+            # Pre-write conflict warning (Feature 2): show same-dept overlap
+            # against approved absences BEFORE the manager submits.
+            if _nb_mgr_sel_emp and _nb_mgr_end >= _nb_mgr_start:
+                _nb_mgr_dept_preview = _emp_dept_for_date(_nb_mgr_sel_emp, _nb_mgr_start)
+                _nb_mgr_conflicts = _absence_conflicts(
+                    _nb_mgr_sel_emp, _nb_mgr_dept_preview, _nb_mgr_start, _nb_mgr_end)
+                if _nb_mgr_conflicts:
+                    st.warning(_format_absence_conflict_warning(_nb_mgr_conflicts))
+
             if st.button("✅ הוסף היעדרות מאושרת", key="nb_mgr_submit"):
                 if _nb_mgr_end < _nb_mgr_start:
                     st.error("תאריך סיום לפני תאריך התחלה.")
                 else:
-                    _nb_emp_dept = _mgr_managed_depts[0] if _mgr_managed_depts else ''
+                    # Gantt-canonical dept (Feature 1) — replaces the old
+                    # _mgr_managed_depts[0] shortcut which captured the *manager's*
+                    # dept rather than the *employee's* actual Gantt dept.
+                    _nb_emp_dept = _emp_dept_for_date(_nb_mgr_sel_emp, _nb_mgr_start)
                     _nb_new_row = {
                         'id':              str(uuid.uuid4()),
                         'employee':        _nb_mgr_sel_emp,
@@ -7536,9 +7990,10 @@ else:
                 st.success("✅ היעדרות נוספה ואושרה — תופיע בלוח מיד.")
 
     if selected_nav == 'סידור עבודה' and role not in ("מנהל מחלקה",):
-        # מתמחה / רופא בכיר — read-only full department calendar
-        view_m = _sw_month_selector(daily_active_month_int, "sw_emp")
-        es_year_month = f"2026-{view_m:02d}"
+        # מתמחה / רופא בכיר — read-only full department calendar.
+        # Feature 4: 12-month rolling forward window (auto-advances on month change).
+        emp_year, view_m = _sw_month_selector_12("sw_emp")
+        es_year_month = f"{emp_year}-{view_m:02d}"
 
         # Resolve the user's daily dept for this month
         dr = st.session_state.dept_rotation
@@ -7551,7 +8006,7 @@ else:
             if not my_row.empty:
                 my_dept = str(my_row.iloc[0].get('daily_dept', '—'))
 
-        st.subheader(f"🗓️ לוח מחלקה — {_HEB_MONTHS[view_m-1]} 2026")
+        st.subheader(f"🗓️ לוח מחלקה — {_HEB_MONTHS[view_m-1]} {emp_year}")
         if my_dept == "—":
             st.info("טרם שובצת למחלקה בחודש זה. פנה/י למנהל המערכת.")
         else:
@@ -7570,11 +8025,13 @@ else:
             if my_dept == PNIM_DEPT:
                 _render_pnim_sided(es_year_month, view_m, "user_view",
                                    employees=_u_all,
-                                   readonly=True, highlight_user=user_name)
+                                   readonly=True, highlight_user=user_name,
+                                   year=emp_year)
             else:
                 _render_dept_grid(my_dept, es_year_month, view_m,
                                   "user_view", employees=_u_all,
-                                  readonly=True, highlight_user=user_name)
+                                  readonly=True, highlight_user=user_name,
+                                  year=emp_year)
 
         # ── Personal schedule Excel download ──────────────────────────
         st.markdown("---")

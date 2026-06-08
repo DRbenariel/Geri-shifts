@@ -36,7 +36,7 @@ All reads/writes go through `get_db_data()` / `save_to_db()` — never access Sh
 ## Google Sheets structure
 | Sheet | Key columns |
 |---|---|
-| `staff` | name, type, dept, monthly_quota, weekend_quota, password, only_home_dept, **email**, **manage_depts** |
+| `staff` | name, type, **dept** (LEGACY — night-shift fallback only; canonical dept comes from `dept_rotation` via `_emp_night_dept`. New interns w/o a Gantt rotation default to `פנימית גריאטרית`.), monthly_quota, weekend_quota, password, only_home_dept, **email**, **manage_depts** |
 | `schedule` | date, dept, employee, is_manual, empty_reason |
 | `requests` | employee, date, status |
 | `special_days` | date, description, day_type |
@@ -45,9 +45,9 @@ All reads/writes go through `get_db_data()` / `save_to_db()` — never access Sh
 | `daily_report` | generated_at, month, severity, problem_type, description |
 | `swap_requests` | requester, requester_date, requester_dept, candidate, candidate_date, candidate_dept, swap_type, chain_ext, chain_ext_dept, created_at, status |
 | `analytics_log` | event_id, session_id, timestamp, user_name, user_role, event_type, detail_1, detail_2, device_type, ua_string, viewport_width, active_month, day_of_month |
-| **`dept_rotation`** | employee, year_month (YYYY-MM), daily_dept |
+| **`dept_rotation`** | employee, year_month (YYYY-MM), daily_dept, **side** (ורוד/כחול — פנימית only) |
 | **`absence_requests`** | id (uuid), employee, start_date, end_date, type (חופש/202/חופש עתידי/היעדרות אחרת), status (pending/approved/rejected), dept_at_request, manager_email, approved_by, notes, created_at, responded_at |
-| **`work_schedule_daily`** | date, employee, daily_dept, status, note, is_manual |
+| **`work_schedule_daily`** | date, employee, daily_dept, status, note, is_manual, **side** (ורוד/כחול — set only for פנימית day-specific transfers; sticky on routine edits) |
 | **`WSD_<dept>_<year_month>`** | per-dept wide-format export — rows=employees, cols=days 1..N, cells=status emoji. Created on demand by the "ייצוא" sub-tab in סידור חודשי. |
 
 ## Algorithm notes
@@ -215,9 +215,23 @@ Gate: `daily_requests_open` setting. Admin opens/closes via 🔓/🔒 button in 
 - `_get_setting(key, default)` / `_set_setting(key, value)` — settings sheet read/write
 - `_approve_request(req_id, responder)` / `_reject_request(req_id, responder)` — wrap `_update_absence_status()` which updates row + emails requester
 - `_generate_work_schedule(year_month, view_month)` — main scheduler
-- `_wsd_get_status(date_str, employee, default)` / `_wsd_upsert(date, emp, dept, status, is_manual, note)` — work_schedule_daily I/O
-- `_render_dept_grid(dept_name, year_month, view_month, key_ns, employees, max_days, allow_temp_add=False)` — shared editable grid (admin + manager use it). Pass `allow_temp_add=True` to show the "העברה זמנית" form at the bottom — lets admin/manager add any staff member to the grid for the current session (stored in `st.session_state[f"temp_emps_{key_ns}"]`).
+- `_wsd_get_status(date_str, employee, default)` — O(1) status lookup via `wsd_index`
+- **`_emp_dept_for_date(emp, date)`** — Gantt-canonical dept for an employee on a given date. Reads `dept_rotation.daily_dept` for the date's year-month; falls back to `staff.dept` only when no rotation row. Single source of truth for `dept_at_request` writes and renders.
+- **`_emp_night_dept(emp, year_month)`** — night-shift dept resolver. Returns `שיקום` for any `שיקום…` rotation, `פנימית גריאטרית` for that rotation, intern-default `פנימית גריאטרית` when no rotation, else falls back to `staff.dept`. Used by `run_smart_scheduling`, `check_assignment_validity`, the Friday-post-pass, and the scoring fn.
+- **`_absence_conflicts(emp, dept, sd, ed, df=None, exclude_id=None)`** + **`_format_absence_conflict_warning(conflicts)`** — same-dept overlap detection for approved absences. Both sides are normalized via `_emp_dept_for_date`, so a stale `שיקום` row and a fresh `שיקום גריאטרי א'` row are matched only when both resolve to the same Gantt-canonical dept. Wired into admin/manager pre-approved-add, employee day-absence submit, and the pending-approve warning.
+- **`_sw_month_selector_12(key_ns) -> (year, month)`** — auto-advancing 12-month forward selectbox (rolls forward when a new month begins). Used by the "סידור עבודה" tab for admin, manager-on-duty, and employee-read-only callsites.
+- **`_render_absence_gantt(year, month, dept_filter=None)`** — Gantt-style approved-absence visualization replacing the old section-2 table in ניהול בקשות. Rows grouped by Gantt-canonical dept then employee; cells coloured by absence type; same-dept overlap days get a red inset border + tooltip.
+- `_wsd_upsert(date, emp, dept, status, is_manual=True, note="", side="")` — work_schedule_daily I/O. **`side` is sticky**: passing `side=""` preserves any existing value, so routine in-grid clicks don't wipe a transfer's side.
+- `_wsd_delete(date_str, employee)` — drop one (date, employee) row; persisted. Used by the "✕ הסר" button to undo a day-specific transfer (restores employee to home dept automatically).
+- `_incoming_transfers(dept, year_month)` — scans `wsd_index` for manual rows whose `daily_dept == dept` for an employee NOT in this dept's `dept_rotation` for the month. Returns `{employee: {'days': {day_ints}, 'side': '<side>'}}`. Single source of truth for both the grid `transfer_days` map and the export fold.
+- `_rebuild_wsd_index()` — stores `status`, `note`, `is_manual`, **`daily_dept`**, **`side`** per (date, employee). Called after every WSD mutation.
+- `_render_dept_grid(dept_name, year_month, view_month, key_ns, employees=None, max_days=None, readonly=False, highlight_user=None, allow_temp_add=False, side_groups=None, transfer_days=None)` — shared editable grid. New params:
+  - `side_groups={'ורוד':[emps], 'כחול':[emps]}` (פנימית only) — emits a coloured side label inside each week's row loop so the layout interleaves ורוד → כחול per week. Single mobile toggle + CSS still injected once (one function call).
+  - `transfer_days={emp: {days}}` — day-specific transfers. Cells outside the listed days render as a muted locked `—` (`wsdcell_e`). When `None` and dept is non-פנימית, the function auto-merges `_incoming_transfers(dept, year_month)` into `employees` and builds the map itself; the פנימית path supplies both explicitly via `_render_pnim_sided`.
+  - `allow_temp_add=True` shows the "העברה זמנית" form: date picker (constrained to view month) + employee selectbox + side picker (פנימית only) + ✕ הסר list. Adds persist via `_wsd_upsert` (no longer a session-only list).
+- `_render_pnim_sided(year_month, view_month, key_ns, employees, ...)` — splits employees by `dept_rotation.side`, folds incoming transfers into pink/blue by their stored side, drops the ללא-צד block (shows a non-blocking caption instead), and calls `_render_dept_grid` **once** with `side_groups` + `transfer_days`.
 - `_export_dept_grid(dept_name, year_month, view_month)` — writes wide-format `WSD_<dept>_<year_month>` sheet
+- `_build_batched_day_data(...)` / `_write_batched_sheet(..., per_day_workers_by_side=None)` — shared by Excel and Google-Sheets exports. Returns 5-tuple; the 5th element `per_day_workers_by_side` is non-None only for פנימית and yields a 🌸 ורוד block then 🔵 כחול block in the output, each ordered רופא בכיר → מתמחים via `_sort_employees_by_role`. Side-less workers are dropped from the sided output.
 - `_export_schedule_wide(view_month)` — old Schedule_Export wide-format export, **moved to "לוח שיבוץ" tab** (was previously in "דוחות וניהול → ייצוא נתונים")
 
 ## Known data quality issues
