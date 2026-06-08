@@ -16,7 +16,7 @@ import time
 calendar.setfirstweekday(calendar.SUNDAY)
 
 # ── Daily-schedule departments (Phase 1+, single source of truth) ──
-DAILY_DEPTS_ALL = ["שיקום גריאטרי א'", "שיקום גריאטרי ב'", "פנימית גריאטרית", "זה״ב"]
+DAILY_DEPTS_ALL = ["שיקום גריאטרי א'", "שיקום גריאטרי ב'", "פנימית גריאטרית", "זה״ב", "בדיקה"]
 
 # ── Hebrew month names (single source of truth) ───────────────────────────────
 _HEB_MONTHS = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני",
