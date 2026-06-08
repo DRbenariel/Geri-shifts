@@ -7243,109 +7243,95 @@ else:
         # -----------------------------------
         st.divider()
         
-        if st.button("עדכן אילוצים ובקשות"):
+        # ── Live "what will be saved" preview ─────────────────────────
+        # (formerly hidden behind a two-step confirm flow — employees were
+        # missing the second button and losing their submissions; collapsed
+        # to a single atomic save here.)
+        _added         = set(selected_from_grid) - set(default_dates)
+        _removed       = set(default_dates)      - set(selected_from_grid)
+        _added_wishes  = set(selected_wishes)    - set(default_wishes)
+        _removed_wishes = set(default_wishes)    - set(selected_wishes)
+        _has_changes = bool(_added or _removed or _added_wishes or _removed_wishes)
+        _is_empty_save = (not selected_from_grid and not selected_wishes
+                          and not default_dates and not default_wishes)
+
+        if _has_changes:
+            _preview_lines = []
+            if _added:
+                _preview_lines.append(f"➕ **נוספו לחסימה:** {', '.join([d.strftime('%d/%m/%Y') for d in sorted(_added)])}")
+            if _removed:
+                _preview_lines.append(f"➖ **הוסרו מחסימה:** {', '.join([d.strftime('%d/%m/%Y') for d in sorted(_removed)])}")
+            if _added_wishes:
+                _preview_lines.append(f"⭐ **נוספו לבקשה:** {', '.join([d.strftime('%d/%m/%Y') for d in sorted(_added_wishes)])}")
+            if _removed_wishes:
+                _preview_lines.append(f"⭐❌ **הוסרו מבקשה:** {', '.join([d.strftime('%d/%m/%Y') for d in sorted(_removed_wishes)])}")
+            if not selected_from_grid and default_dates:
+                st.warning("⚠️ אתה עומד להסיר את **כל** החסימות שלך לחודש זה.")
+            st.info("📋 **השינויים שיישמרו:**\n\n" + "\n\n".join(_preview_lines))
+
+        _save_label = ("💾 שמור אילוצים ובקשות"
+                       if (_has_changes or _is_empty_save)
+                       else "אין שינויים לשמירה")
+        _save_disabled = not (_has_changes or _is_empty_save)
+
+        if st.button(_save_label, type="primary",
+                     use_container_width=True,
+                     disabled=_save_disabled,
+                     key="save_constraints_single"):
             # --- ולידציה (חוקים) ---
-            validation_passed = True
             errors = []
-            
             if len(selected_wishes) > 2:
                 errors.append("שגיאה: ניתן לבחור עד 2 בקשות חיוביות (⭐) בלבד.")
-            
-            # בדיקה שלא בחר באותו יום גם אילוץ וגם בקשה
             overlap = set(selected_from_grid).intersection(set(selected_wishes))
             if overlap:
                 errors.append(f"שגיאה: בחרת באותו יום ({list(overlap)[0].strftime('%d/%m')}) גם אילוץ וגם בקשה. נא בחר רק אחד.")
-
-            if st.session_state.user_role == 'מתמחה': # רק למתמחים
-                # חישוב ימים פנויים
+            if st.session_state.user_role == 'מתמחה':
                 num_days = calendar.monthrange(2026, sel_month)[1]
                 month_days = [date(2026, sel_month, d) for d in range(1, num_days+1)]
                 total_thursdays = len([d for d in month_days if d.weekday() == 3])
-                total_weekends = len([d for d in month_days if d.weekday() in [4, 5]]) # שישי ושבת
-                
+                total_weekends  = len([d for d in month_days if d.weekday() in [4, 5]])
                 blocked_thursdays = len([d for d in selected_from_grid if d.weekday() == 3])
-                blocked_weekends = len([d for d in selected_from_grid if d.weekday() in [4, 5]])
-                
+                blocked_weekends  = len([d for d in selected_from_grid if d.weekday() in [4, 5]])
                 avail_thursdays = total_thursdays - blocked_thursdays
-                avail_weekends = total_weekends - blocked_weekends
-                
-                # Removed bug: errors = [] was here wiping previous validation errors
+                avail_weekends  = total_weekends  - blocked_weekends
                 if avail_thursdays < 2:
-                    errors.append(f"נותר רק יום חמישי אחד פנוי (או פחות). חובה להשאיר לפחות 2 ימי חמישי פנויים.")
+                    errors.append("נותר רק יום חמישי אחד פנוי (או פחות). חובה להשאיר לפחות 2 ימי חמישי פנויים.")
                 if avail_weekends < 4:
                     errors.append(f"נותרו רק {avail_weekends} ימי סוף שבוע פנויים. חובה להשאיר לפחות 4 (שישי/שבת).")
-                
-                if errors:
-                    validation_passed = False
-                    for e in errors: st.error(e)
-            
-            if validation_passed or st.session_state.user_role == 'מנהל/ת':           
-                st.session_state['selected_dates_for_update'] = selected_from_grid
-                st.session_state['selected_wishes_for_update'] = selected_wishes
-                st.session_state['confirm_request_save'] = True
 
-        if st.session_state.get('confirm_request_save', False):
-            selected = st.session_state.get('selected_dates_for_update', [])
-            wishes = st.session_state.get('selected_wishes_for_update', [])
-            
-             # חישוב אילו ימים נוספו ואילו הוסרו (אילוצים)
-            added = set(selected) - set(default_dates)
-            removed = set(default_dates) - set(selected)
-            
-            # חישוב שינויים בבקשות
-            added_wishes = set(wishes) - set(default_wishes)
-            removed_wishes = set(default_wishes) - set(wishes)
-            
-            changes_msg = ""
-            if added: changes_msg += f"➕ **נוספו לחסימה:** {', '.join([d.strftime('%d/%m/%Y') for d in added])}\n\n"
-            if removed: changes_msg += f"➖ **הוסרו מחסימה:** {', '.join([d.strftime('%d/%m/%Y') for d in removed])}\n\n"
-            if added_wishes: changes_msg += f"⭐ **נוספו לבקשה:** {', '.join([d.strftime('%d/%m/%Y') for d in added_wishes])}\n\n"
-            if removed_wishes: changes_msg += f"⭐❌ **הוסרו מבקשה:** {', '.join([d.strftime('%d/%m/%Y') for d in removed_wishes])}\n\n"
-            
-            if not changes_msg and not (not default_dates and not selected):
-                 st.info("לא ביצעת שינויים.")
-                 st.session_state['confirm_request_save'] = False
+            _is_admin = st.session_state.user_role == 'מנהל/ת'
+            if errors and not _is_admin:
+                for e in errors:
+                    st.error(e)
             else:
-                if not selected and default_dates:
-                     st.warning("⚠️ **האם אתה בטוח?** אתה עומד להסיר את **כל** החסימות שלך.")
-                elif changes_msg:
-                     st.info(f"⚠️ **האם אתה בטוח שברצונך לעדכן?**\n\n{changes_msg}")
-                else: 
-                     # מקרה קצה של שמירה ראשונית ריקה או ללא שינוי
-                     pass
+                # משיכת נתונים חיים מהגיליון (עוקף cache למניעת דריסה הדדית בין משתמשים)
+                live = _fetch_live("requests")
+                base = live if not live.empty else st.session_state.requests
 
-                # Vertical Stack Design for Mobile Robustness
-                if st.button("✅ כן, עדכן", type="primary", use_container_width=True):
-                    # משיכת נתונים חיים מהגיליון (עוקף cache למניעת דריסה הדדית בין משתמשים)
-                    live = _fetch_live("requests")
-                    base = live if not live.empty else st.session_state.requests
+                # הסרת כל האילוצים והבקשות הקודמים של המשתמש לחודש זה
+                current_month_prefix = f"2026-{sel_month:02d}"
+                mask_keep = ~((base['employee'].astype(str).str.strip() == str(user_name).strip()) &
+                              (base['date'].astype(str).str.startswith(current_month_prefix)))
+                base = base[mask_keep]
 
-                    # הסרת כל האילוצים והבקשות הקודמים של המשתמש לחודש זה
-                    current_month_prefix = f"2026-{sel_month:02d}"
-                    mask_keep = ~((base['employee'].astype(str).str.strip() == str(user_name).strip()) &
-                                  (base['date'].astype(str).str.startswith(current_month_prefix)))
-                    base = base[mask_keep]
+                # הוספת הרשימה החדשה והמעודכנת
+                new_rows = []
+                if selected_from_grid:
+                    new_rows += [{'employee': user_name, 'date': str(d), 'status': "אילוץ"}
+                                 for d in selected_from_grid]
+                if selected_wishes:
+                    new_rows += [{'employee': user_name, 'date': str(d), 'status': "בקשה"}
+                                 for d in selected_wishes]
 
-                    # הוספת הרשימה החדשה והמעודכנת
-                    new_rows = []
-                    if selected:
-                        new_rows += [{'employee': user_name, 'date': str(d), 'status': "אילוץ"} for d in selected]
-                    if wishes:
-                        new_rows += [{'employee': user_name, 'date': str(d), 'status': "בקשה"} for d in wishes]
-
-                    merged = pd.concat([base, pd.DataFrame(new_rows)], ignore_index=True) if new_rows else base
-                    save_to_db("requests", merged)
-                    _log_async('constraint_submit', str(len(selected)), str(len(wishes)))
-                    st.session_state.requests = merged
-                    _fetch_sheet_data_silently.clear()
-                    st.session_state['confirm_request_save'] = False
-                    st.session_state.pop(f"user_cal_init_{sel_month}", None)
-                    st.session_state['show_update_success'] = True
-                    st.rerun()
-
-                if st.button("❌ בטל", use_container_width=True):
-                    st.session_state['confirm_request_save'] = False
-                    st.rerun()
+                merged = pd.concat([base, pd.DataFrame(new_rows)], ignore_index=True) if new_rows else base
+                save_to_db("requests", merged)
+                _log_async('constraint_submit', str(len(selected_from_grid)), str(len(selected_wishes)))
+                st.session_state.requests = merged
+                _fetch_sheet_data_silently.clear()
+                st.session_state.pop(f"user_cal_init_{sel_month}", None)
+                st.session_state.pop('confirm_request_save', None)   # legacy flag cleanup
+                st.session_state['show_update_success'] = True
+                st.rerun()
 
     if st.session_state.get('show_update_success'):
         st.success("✅ האילוצים עודכנו בהצלחה!")
