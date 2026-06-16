@@ -10,6 +10,16 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Hebrew:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <!-- Design system tokens — single source of truth (ui-ux-pro-max) -->
   <link rel="stylesheet" href="../design-system/tokens.css" />
+  <!-- Theme init (runs before paint to avoid a flash of the wrong theme) -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('geri-theme')
+             || ((window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+    })();
+  </script>
 
   <style>
     /* ═══════════════════════════════════════════════════════════════════
@@ -27,8 +37,9 @@
       min-height: 100vh;
       overflow-x: hidden;
       /* Dot-grid — monitoring system display */
-      background-image: radial-gradient(circle, #192438 1px, transparent 1px);
+      background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
       background-size: 28px 28px;
+      transition: background-color var(--transition-normal), color var(--transition-normal);
     }
 
     /* Scanline overlay — ≤10% opacity (skill: eye-strain spec) */
@@ -40,8 +51,8 @@
         0deg,
         transparent 0px,
         transparent 3px,
-        rgba(0,0,0,.09) 3px,
-        rgba(0,0,0,.09) 4px
+        var(--scan) 3px,
+        var(--scan) 4px
       );
       pointer-events: none;
       z-index: 9999;
@@ -63,6 +74,12 @@
       outline: 2px solid var(--amber-hi);
       outline-offset: 2px;
     }
+
+    /* Light-theme overrides for surfaces that use hand-tuned dark tints */
+    :root[data-theme="light"] .cal-cell.weekend            { background: #E7EEF7; }
+    :root[data-theme="light"] .cal-cell.weekend:hover      { background: #DDE8F3; }
+    :root[data-theme="light"] table.daygrid thead th.wend  { background: #E7EEF7; }
+    :root[data-theme="light"] table.daygrid td.cell.wend   { background: #EDF2F9; }
 
     /* ═══════════════════════════════════════════════════════════════════
        HEADER
@@ -176,6 +193,8 @@
       font-family: var(--font);
     }
     .logout-btn:hover { color: var(--red-hi); border-color: var(--red-hi); }
+    .theme-btn { min-width: 52px; }
+    .theme-btn:hover { color: var(--amber-hi); border-color: var(--amber); }
 
     /* ═══════════════════════════════════════════════════════════════════
        NAV BAR
@@ -1002,6 +1021,7 @@
       <span class="name">ד״ר גל ברנאריאל</span>
       <span class="role">מנהל/ת מערכת</span>
     </div>
+    <button class="logout-btn theme-btn" id="theme-btn" aria-label="החלף ערכת צבעים">בהיר</button>
     <button class="logout-btn" aria-label="יציאה מהמערכת">יציאה</button>
   </div>
 </header>
@@ -2131,6 +2151,19 @@
     toast('שיבוץ חכם מורץ ממודול התורנויות (אלגוריתם השיבוץ)', true));
   ['btn-export-shifts','btn-export-gantt','btn-export-wsd'].forEach(id =>
     document.getElementById(id)?.addEventListener('click', () => toast('ייצוא ל-Sheets בקרוב', true)));
+
+  /* ── theme toggle (state set pre-paint in <head>) ─────────────────── */
+  function syncThemeLabel() {
+    const btn = document.getElementById('theme-btn');
+    if (btn) btn.textContent = document.documentElement.getAttribute('data-theme') === 'light' ? 'כהה' : 'בהיר';
+  }
+  syncThemeLabel();
+  document.getElementById('theme-btn')?.addEventListener('click', () => {
+    const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('geri-theme', next); } catch (e) {}
+    syncThemeLabel();
+  });
 
   /* ════════════════════════════════════════════════════════════════════
      INIT — render fallback immediately, then hydrate from the API

@@ -85,8 +85,59 @@
   --nav-h:    48px;
   --header-h: 58px;
 
+  /* ── Structural chrome (theme-aware) ─────────────────────────────── */
+  --dot:   #192438;            /* dot-grid background dots */
+  --scan:  rgba(0,0,0,.09);    /* scanline overlay tint */
+
   /* ── Transitions (skill: 150-300ms) ──────────────────────────────── */
   --transition-fast:   150ms ease;
   --transition-normal: 200ms ease;
   --transition-slow:   300ms ease;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LIGHT THEME — set on <html data-theme="light">.
+   Keeps the instrument-panel structure; surfaces flip to paper-white,
+   semantic colours deepen for AA contrast on light, glows are damped.
+═══════════════════════════════════════════════════════════════════════ */
+:root[data-theme="light"] {
+  --bg:          #EEF2F8;
+  --bg-card:     #FFFFFF;
+  --bg-row:      #F1F5FB;
+
+  --border:      #DCE3EE;
+  --border-hi:   #C4D0E0;
+  --border-glow: #9FB4D0;
+
+  --text:        #16202C;
+  --text-dim:    #5A6B82;
+  --text-faint:  #A6B3C5;
+
+  --amber:       #D97706;
+  --amber-hi:    #B45309;
+  --amber-glow:  rgba(180,83,9,.14);
+  --amber-soft:  rgba(217,119,6,.10);
+
+  --green:       #16A34A;
+  --green-hi:    #15803D;
+  --green-glow:  rgba(21,128,61,.12);
+  --green-soft:  rgba(22,163,74,.10);
+
+  --red:         #DC2626;
+  --red-hi:      #B91C1C;
+  --red-glow:    rgba(185,28,28,.12);
+  --red-soft:    rgba(220,38,38,.09);
+
+  --blue:        #2563EB;
+  --blue-hi:     #1D4ED8;
+  --blue-glow:   rgba(29,78,216,.12);
+  --blue-soft:   rgba(37,99,235,.09);
+
+  --dot:   #D6DEEA;
+  --scan:  rgba(0,0,0,.02);
+
+  --shadow-sm:  0 1px 2px rgba(20,40,70,.08);
+  --shadow-md:  0 4px 8px rgba(20,40,70,.10);
+  --shadow-lg:  0 10px 20px rgba(20,40,70,.12);
+  --shadow-xl:  0 20px 30px rgba(20,40,70,.14);
 }
