@@ -190,7 +190,7 @@
 
     nav {
       display: flex;
-      justify-content: flex-end;
+      justify-content: flex-start;   /* RTL: flex-start = right edge → tabs hug the right, under the logo */
       overflow-x: auto;
       scrollbar-width: none;
     }
@@ -933,6 +933,18 @@
     .form-field input { font-family: var(--font-data); direction: ltr; }
     .form-field select:focus, .form-field input:focus { outline: none; border-color: var(--border-glow); }
 
+    /* Settings rows */
+    .set-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); flex-wrap: wrap; }
+    .set-desc { font-size: var(--type-body); color: var(--text-dim); line-height: 1.5; max-width: 60%; }
+    .toast {
+      position: fixed; bottom: 24px; inset-inline-start: 24px; z-index: 10000;
+      background: var(--bg-card); border: 1px solid var(--green);
+      border-inline-start: 3px solid var(--green-hi);
+      color: var(--text); font-size: var(--type-body); padding: var(--space-3) var(--space-5);
+      box-shadow: var(--shadow-lg); animation: slideIn .25s ease both;
+    }
+    .toast.err { border-color: var(--red); border-inline-start-color: var(--red-hi); }
+
     @keyframes slideIn {
       from { opacity: 0; transform: translateX(12px); }
       to   { opacity: 1; transform: translateX(0); }
@@ -1023,14 +1035,14 @@
         <span class="led led-red" style="animation:pulse-red 1.4s infinite;" aria-hidden="true"></span>
         <span class="alert-text">
           <strong>דוח יומי:</strong>
-          <span dir="ltr">3</span> ימי שיא חסימה קריטיים
+          <span dir="ltr" id="rep-critical">3</span> ימי שיא חסימה קריטיים
           &nbsp;·&nbsp;
-          <span dir="ltr">2</span> אזהרות זמינות
+          <span dir="ltr" id="rep-warning">2</span> אזהרות זמינות
         </span>
       </div>
       <div style="display:flex;align-items:center;gap:var(--space-3);">
-        <span class="alert-time">עודכן 10:02 · היום</span>
-        <button class="btn btn-amber">הרץ ניתוח</button>
+        <span class="alert-time" id="rep-updated">עודכן 10:02 · היום</span>
+        <button class="btn btn-amber" id="btn-run-analysis">רענן דוח</button>
       </div>
     </div>
 
@@ -1042,19 +1054,19 @@
 
     <!-- KPI cards -->
     <div class="kpi-grid">
-      <div class="kpi amber" tabindex="0" aria-label="סה׳׳כ צוות: 14">
+      <div class="kpi amber" tabindex="0" aria-label="סה׳׳כ צוות">
         <div class="kpi-label">סה״כ צוות</div>
-        <div class="kpi-value">14</div>
+        <div class="kpi-value" id="kpi-total">14</div>
         <div class="kpi-sub">מתמחים ותורני חוץ</div>
       </div>
-      <div class="kpi green" tabindex="0" aria-label="הגישו אילוצים: 11">
+      <div class="kpi green" tabindex="0" aria-label="הגישו אילוצים">
         <div class="kpi-label">הגישו אילוצים</div>
-        <div class="kpi-value">11</div>
-        <div class="kpi-sub">עבור חודש יוני</div>
+        <div class="kpi-value" id="kpi-submitted">11</div>
+        <div class="kpi-sub">עבור החודש הפעיל</div>
       </div>
-      <div class="kpi red" tabindex="0" aria-label="ממתינים להגשה: 3">
+      <div class="kpi red" tabindex="0" aria-label="ממתינים להגשה">
         <div class="kpi-label">ממתינים להגשה</div>
-        <div class="kpi-value">03</div>
+        <div class="kpi-value" id="kpi-pending">03</div>
         <div class="kpi-sub">נדרש תזכורת</div>
       </div>
     </div>
@@ -1068,7 +1080,7 @@
           <span class="panel-title">ספירת תורנויות</span>
           <span class="panel-badge">יוני 2026</span>
         </div>
-        <div class="panel-body bars">
+        <div class="panel-body bars" id="barsBody">
           <div class="bar-row">
             <span class="bar-name">ד״ר כהן</span>
             <div class="bar-track" role="progressbar" aria-valuenow="72" aria-valuemin="0" aria-valuemax="100" aria-label="ד׳׳ר כהן: 5 תורנויות">
@@ -1137,7 +1149,7 @@
                 <th scope="col">סטטוס</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody id="subsBody">
               <tr>
                 <td>ד״ר כהן</td>
                 <td>מתמחה</td>
@@ -1188,10 +1200,86 @@
     </div><!-- /cols-2 -->
   </div><!-- /panel-reports -->
 
-  <!-- ── הגדרות (settings — not in this build pass) ─────────────────── -->
+  <!-- ════════════════════════════════════════════════════════════════
+       הגדרות — SYSTEM SETTINGS (active months, request gate, special days)
+  ════════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-settings" role="tabpanel">
-    <div class="section-header"><span class="section-title">הגדרות</span></div>
-    <div class="stub">בקרוב</div>
+    <div class="section-header">
+      <span class="section-title">הגדרות מערכת</span>
+      <span class="section-meta" id="set-conn">—</span>
+    </div>
+
+    <div class="cols-2">
+      <!-- Night-shift active month -->
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">חודש תורנויות פעיל</span></div>
+        <div class="panel-body" style="padding:var(--space-5);">
+          <div class="set-row">
+            <span class="set-desc">החודש שעבורו עובדים מגישים אילוצים ובקשות לתורנויות לילה.</span>
+            <div class="toolbar-group">
+              <select id="set-active-month" class="search" style="min-width:120px;"></select>
+              <button class="btn btn-amber" id="btn-set-active">החל</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Daily-schedule active month -->
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">חודש סידור עבודה פעיל</span></div>
+        <div class="panel-body" style="padding:var(--space-5);">
+          <div class="set-row">
+            <span class="set-desc">החודש שעבורו עובדים מגישים בקשות חופש / 202. פתיחת חודש חדש פותחת מחדש את ההגשות.</span>
+            <div class="toolbar-group">
+              <select id="set-daily-month" class="search" style="min-width:120px;"></select>
+              <button class="btn btn-amber" id="btn-set-daily">הפוך לחודש פעיל</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Requests gate -->
+    <div class="panel" style="margin-top:var(--space-3);">
+      <div class="panel-head"><span class="panel-title">שער הגשת בקשות חופש</span></div>
+      <div class="panel-body" style="padding:var(--space-5);">
+        <div class="set-row">
+          <span class="set-desc">כשהשער פתוח, עובדים יכולים להגיש בקשות חופש / 202 לחודש הפעיל. בקשות "חופש עתידי" תמיד פתוחות.</span>
+          <div class="toolbar-group">
+            <span class="tag" id="gate-state">—</span>
+            <button class="btn btn-ghost" id="btn-toggle-gate">החלף מצב</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Special days -->
+    <div class="subsection-title">ימים מיוחדים</div>
+    <div class="form-row">
+      <div class="form-field">
+        <label for="sd-date">תאריך</label>
+        <input id="sd-date" type="date" value="2026-06-16" />
+      </div>
+      <div class="form-field" style="flex:1;min-width:200px;">
+        <label for="sd-desc">תיאור</label>
+        <input id="sd-desc" type="text" dir="rtl" style="font-family:var(--font);" placeholder="ערב חג / יום בחירות…" />
+      </div>
+      <div class="form-field">
+        <label for="sd-type">סוג</label>
+        <select id="sd-type">
+          <option>ערב חג</option><option>חג</option><option>יום מיוחד</option>
+        </select>
+      </div>
+      <button class="btn btn-amber" id="btn-add-special" style="min-height:36px;">הוסף</button>
+    </div>
+    <div class="table-wrap" style="margin-top:var(--space-3);">
+      <table class="data-table" aria-label="ימים מיוחדים">
+        <thead><tr><th>תאריך</th><th>תיאור</th><th>סוג</th></tr></thead>
+        <tbody id="specialBody">
+          <tr><td colspan="3" style="color:var(--text-dim);text-align:center;">אין ימים מיוחדים מוגדרים</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <!-- ════════════════════════════════════════════════════════════════
@@ -1206,17 +1294,17 @@
 
     <div class="toolbar">
       <div class="toolbar-group">
-        <div class="seg" role="group" aria-label="בחירת חודש">
-          <button>מאי</button>
-          <button class="on">יוני</button>
-          <button>יולי</button>
+        <div class="seg" id="shiftMonthSeg" role="group" aria-label="בחירת חודש">
+          <button data-month="5">מאי</button>
+          <button class="on" data-month="6">יוני</button>
+          <button data-month="7">יולי</button>
         </div>
         <span class="sys-stat"><span class="led led-red" aria-hidden="true"></span>
-          <span dir="ltr">3</span>&nbsp;ימים ללא שיבוץ מלא</span>
+          <span dir="ltr" id="shiftGapCount">3</span>&nbsp;ימים ללא שיבוץ מלא</span>
       </div>
       <div class="toolbar-group">
-        <button class="btn btn-ghost">ייצוא לוח</button>
-        <button class="btn btn-amber">שיבוץ חכם</button>
+        <button class="btn btn-ghost" id="btn-export-shifts">ייצוא לוח</button>
+        <button class="btn btn-amber" id="btn-smart-schedule">שיבוץ חכם</button>
       </div>
     </div>
 
@@ -1236,7 +1324,7 @@
   <div class="tab-panel" id="panel-staff" role="tabpanel">
     <div class="section-header">
       <span class="section-title">צוות</span>
-      <span class="section-meta"><span dir="ltr">10</span> אנשי צוות פעילים</span>
+      <span class="section-meta"><span dir="ltr" id="staffCount">10</span> אנשי צוות פעילים</span>
     </div>
 
     <div class="toolbar">
@@ -1244,9 +1332,23 @@
         <input class="search" type="search" placeholder="חיפוש לפי שם או מחלקה…" aria-label="חיפוש צוות" />
       </div>
       <div class="toolbar-group">
-        <button class="btn btn-ghost">ייצוא CSV</button>
-        <button class="btn btn-amber">הוסף איש צוות</button>
+        <button class="btn btn-ghost" id="btn-staff-csv">ייצוא CSV</button>
+        <button class="btn btn-amber" id="btn-staff-add">הוסף איש צוות</button>
       </div>
+    </div>
+
+    <!-- add / edit form (hidden until 'הוסף' or 'עריכה') -->
+    <div class="form-row" id="staffForm" style="display:none;margin-bottom:var(--space-3);">
+      <div class="form-field"><label for="sf-name">שם</label><input id="sf-name" type="text" dir="rtl" style="font-family:var(--font);" /></div>
+      <div class="form-field"><label for="sf-type">תפקיד</label>
+        <select id="sf-type"><option>מתמחה</option><option>תורן חוץ</option><option>רופא בכיר</option><option>מנהל מחלקה</option><option>מנהל/ת</option></select>
+      </div>
+      <div class="form-field"><label for="sf-dept">מחלקה</label><input id="sf-dept" type="text" dir="rtl" style="font-family:var(--font);" /></div>
+      <div class="form-field"><label for="sf-quota">מכסה חודשית</label><input id="sf-quota" type="number" min="0" /></div>
+      <div class="form-field"><label for="sf-wquota">מכסת סופ״ש</label><input id="sf-wquota" type="number" min="0" /></div>
+      <div class="form-field" style="flex:1;min-width:180px;"><label for="sf-email">אימייל</label><input id="sf-email" type="email" dir="ltr" /></div>
+      <button class="btn btn-amber" id="btn-staff-save" style="min-height:36px;">שמור</button>
+      <button class="btn btn-ghost" id="btn-staff-cancel" style="min-height:36px;">ביטול</button>
     </div>
 
     <div class="table-wrap">
@@ -1263,7 +1365,7 @@
             <th scope="col"></th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="staffBody">
           <tr>
             <td>ד״ר כהן</td><td><span class="role-pill">מתמחה</span></td><td>פנימית גריאטרית</td>
             <td class="num-col"><span class="quota">6</span></td><td class="num-col"><span class="quota">1</span></td>
@@ -1341,15 +1443,15 @@
 
     <div class="toolbar">
       <div class="toolbar-group">
-        <div class="seg" role="group" aria-label="בחירת חודש">
-          <button>מאי</button>
-          <button class="on">יוני</button>
-          <button>יולי</button>
+        <div class="seg" id="ganttMonthSeg" role="group" aria-label="בחירת חודש">
+          <button data-month="5">מאי</button>
+          <button class="on" data-month="6">יוני</button>
+          <button data-month="7">יולי</button>
         </div>
       </div>
       <div class="toolbar-group">
-        <button class="btn btn-ghost">ייצוא</button>
-        <button class="btn btn-amber">הפוך לחודש פעיל</button>
+        <button class="btn btn-ghost" id="btn-export-gantt">ייצוא</button>
+        <button class="btn btn-amber" id="btn-gantt-active">הפוך לחודש פעיל</button>
       </div>
     </div>
 
@@ -1384,8 +1486,8 @@
         </div>
       </div>
       <div class="toolbar-group">
-        <button class="btn btn-ghost">ייצוא מחלקה</button>
-        <button class="btn btn-amber">צור סידור</button>
+        <button class="btn btn-ghost" id="btn-export-wsd">ייצוא מחלקה</button>
+        <button class="btn btn-amber" id="btn-generate-wsd">צור סידור</button>
       </div>
     </div>
 
@@ -1414,10 +1516,10 @@
     <!-- Section 1: pending queue -->
     <div class="subsection-title">
       בקשות ממתינות לאישור
-      <span class="count-badge">3</span>
+      <span class="count-badge" id="reqPendingCount">3</span>
     </div>
 
-    <div class="queue">
+    <div class="queue" id="reqQueue">
       <div class="req">
         <div class="req-main">
           <span class="req-emp">ד״ר לוי</span>
@@ -1468,7 +1570,7 @@
     <!-- Section 2: approved future requests -->
     <div class="subsection-title">
       היעדרויות מאושרות עתידיות
-      <span class="count-badge">4</span>
+      <span class="count-badge" id="reqApprovedCount">4</span>
     </div>
     <div class="table-wrap">
       <table class="data-table" aria-label="היעדרויות מאושרות עתידיות">
@@ -1481,7 +1583,7 @@
             <th scope="col">אושר ע״י</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="approvedBody">
           <tr>
             <td>ד״ר כהן</td><td>פנימית גריאטרית</td><td><span class="tag tag-blue">חופש</span></td>
             <td><span class="num">2026-06-25 → 2026-06-27</span></td><td>ד״ר שמש</td>
@@ -1526,7 +1628,7 @@
         <label for="pa-to">עד תאריך</label>
         <input id="pa-to" type="date" value="2026-06-16" />
       </div>
-      <button class="btn btn-amber" style="min-height:36px;">הוסף ואשר</button>
+      <button class="btn btn-amber" id="btn-preapprove" style="min-height:36px;">הוסף ואשר</button>
     </div>
   </div>
 
@@ -1562,136 +1664,481 @@
   });
 
   /* ════════════════════════════════════════════════════════════════════
-     SAMPLE DATA — June 2026 (1st = Monday). Static prototype fixtures.
-     Real app pulls these from get_db_data() / work_schedule_daily etc.
+     DATA LAYER — talks to frontend/server.py (Flask → Google Sheets).
+     Every loader fetches live data; if the API is empty / unreachable
+     (design mode), it falls back to the sample fixtures so the UI still
+     renders fully populated for design review.
   ════════════════════════════════════════════════════════════════════ */
-  const HE_DOW   = ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
-  const DAYS     = 30;
-  const TODAY    = 16;
-  const LEAD_PAD = 1;                 // day 1 is Monday → 1 leading (Sunday) blank
-  const FRIDAYS  = [5, 12, 19, 26];
-  const isWeekend = d => { const dow = d % 7; return dow === 5 || dow === 6; };  // Fri/Sat
+  const YEAR      = 2026;
+  const TODAY     = 16;                 // June 16 2026 highlight
+  const HE_DOW    = ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
+  const MONTHS_HE = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];
 
-  /* ── סידור תורנויות calendar ───────────────────────────────────────── */
-  const PEN = ['ד״ר כהן','ד״ר אבו-רמי','סלאמה קאסם','לין חיר אל דין','ד״ר נחום'];
-  const REH = ['ד״ר לוי','ד״ר פרץ','ד״ר שמש','ד״ר מזרחי','ד״ר ברק'];
-  const SHIFT_GAPS = [18, 25, 26];   // unfilled slots → critical (matches alert banner)
-  const SPECIAL    = [19];           // special day marker (e.g. holiday eve)
+  let activeMonth = 6;   // night-shift schedule + gantt + reports
+  let dailyMonth  = 6;   // work-schedule (סידור עבודה)
+  let wsdDept     = 'reha';
 
-  function buildCalendar() {
-    const grid = document.getElementById('calGrid');
-    if (!grid || grid.childElementCount) return;
-    let html = HE_DOW.map(n => `<div class="cal-dow" role="columnheader">${n}</div>`).join('');
-    for (let i = 0; i < LEAD_PAD; i++) html += `<div class="cal-cell pad" aria-hidden="true"></div>`;
-    for (let d = 1; d <= DAYS; d++) {
-      const wend = isWeekend(d), fri = FRIDAYS.includes(d), gap = SHIFT_GAPS.includes(d), spec = SPECIAL.includes(d);
-      const cls = ['cal-cell', wend && 'weekend', spec && 'special'].filter(Boolean).join(' ');
-      const today = d === TODAY ? ' style="box-shadow:inset 0 0 0 1px var(--amber-hi);"' : '';
-      const penName = PEN[d % PEN.length], rehName = REH[d % REH.length];
-      let chips = gap
-        ? `<div class="chip gap"><span class="cd"></span>חסר שיבוץ<span class="chip-dept">פנ׳</span></div>`
-        : `<div class="chip pen"><span class="cd"></span>${penName}<span class="chip-dept">פנ׳</span></div>`;
-      chips += `<div class="chip reh"><span class="cd"></span>${rehName}<span class="chip-dept">שיק׳</span></div>`;
-      if (fri) chips += `<div class="chip fri"><span class="cd"></span>שישי בוקר<span class="chip-dept">×4</span></div>`;
-      html += `<div class="${cls}" role="gridcell" tabindex="0"${today}><span class="cal-daynum">${d}</span>${chips}</div>`;
-    }
-    const trail = (7 - ((LEAD_PAD + DAYS) % 7)) % 7;
-    for (let i = 0; i < trail; i++) html += `<div class="cal-cell pad" aria-hidden="true"></div>`;
-    grid.innerHTML = html;
+  const SEG_DEPT_HE = { reha:'שיקום גריאטרי א', rehb:'שיקום גריאטרי ב', pen:'פנימית גריאטרית' };
+  const DEPT_BAND   = { pen:['g-pen','פג'], reha:['g-reha','שא'], rehb:['g-rehb','שב'] };
+  const STATUS      = { work:['s-work','ע'], vac:['s-vac','ח'], h202:['s-202','202'], after:['s-after','א״ת'], other:['s-other','·'] };
+  const STATUS_HE   = { 'עובד':'work', 'חופש':'vac', '202':'h202', 'אחרי תורנות':'after', 'אחר':'other' };
+  const STATUS_CYCLE = ['work','vac','h202','after','other'];
+  const STATUS_TO_HE = { work:'עובד', vac:'חופש', h202:'202', after:'אחרי תורנות', other:'אחר' };
+
+  /* ── API helpers ──────────────────────────────────────────────────── */
+  async function apiGet(p)  { try { const r = await fetch(p); return r.ok ? await r.json() : null; } catch (e) { return null; } }
+  async function apiPost(p, b) {
+    try {
+      const r = await fetch(p, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b||{}) });
+      return await r.json();
+    } catch (e) { return { ok:false, error:String(e) }; }
+  }
+  function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  function toast(msg, isErr) {
+    const t = document.createElement('div');
+    t.className = 'toast' + (isErr ? ' err' : '');
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2800);
   }
 
-  /* ── shared day-grid header (1..30 with weekend tint) ─────────────── */
-  function dayHeader(firstLabel) {
-    let h = `<thead><tr><th class="emp-col" scope="col">${firstLabel}</th>`;
-    for (let d = 1; d <= DAYS; d++) h += `<th scope="col" class="${isWeekend(d) ? 'wend' : ''}">${d}</th>`;
-    return h + '</tr></thead>';
+  /* ── date helpers (real calendar maths per month) ─────────────────── */
+  function monthDays(m) { return new Date(YEAR, m, 0).getDate(); }
+  function leadPad(m)   { return new Date(YEAR, m - 1, 1).getDay(); }      // 0=Sun
+  function dow(m, d)    { return new Date(YEAR, m - 1, d).getDay(); }
+  function isWend(m, d) { const w = dow(m, d); return w === 5 || w === 6; } // Fri/Sat
+  function deptKeyOf(s) {
+    s = String(s).trim();
+    if (s.indexOf('פנימית') >= 0) return 'pen';
+    if (/ב\s*['׳"]?\s*$/.test(s)) return 'rehb';
+    if (s.indexOf('שיקום') >= 0)  return 'reha';
+    return 'pen';
   }
 
-  /* ── גאנט חודשי — continuous dept bands ────────────────────────────── */
-  const DEPT_BAND = { pen: ['g-pen','פג'], reha: ['g-reha','שא'], rehb: ['g-rehb','שב'] };
-  const ROTATION = [
-    { name:'ד״ר כהן',       role:'מתמחה',     dept:'pen',  breaks:[25,26,27] },
-    { name:'סלאמה קאסם',    role:'מתמחה',     dept:'pen',  breaks:[30] },
-    { name:'לין חיר אל דין', role:'מתמחה',     dept:'pen',  breaks:[7,8] },
-    { name:'ד״ר לוי',       role:'מתמחה',     dept:'reha', breaks:[22,23,24] },
-    { name:'ד״ר פרץ',       role:'רופא בכיר', dept:'reha', breaks:[] },
-    { name:'ד״ר ברק',       role:'מתמחה',     dept:'rehb', breaks:[18] },
-    { name:'ד״ר שמש',       role:'מנהל מחלקה', dept:'rehb', breaks:[13,14] },
+  /* ── SAMPLE FALLBACK fixtures (used only when API has no data) ─────── */
+  const SAMPLE_PEN  = ['ד״ר כהן','ד״ר אבו-רמי','סלאמה קאסם','לין חיר אל דין','ד״ר נחום'];
+  const SAMPLE_REH  = ['ד״ר לוי','ד״ר פרץ','ד״ר שמש','ד״ר מזרחי','ד״ר ברק'];
+  const SAMPLE_GAPS = [18, 25, 26];
+  const SAMPLE_ROT  = [
+    { name:'ד״ר כהן', role:'מתמחה', dept:'pen', breaks:[25,26,27] },
+    { name:'סלאמה קאסם', role:'מתמחה', dept:'pen', breaks:[30] },
+    { name:'לין חיר אל דין', role:'מתמחה', dept:'pen', breaks:[7,8] },
+    { name:'ד״ר לוי', role:'מתמחה', dept:'reha', breaks:[22,23,24] },
+    { name:'ד״ר פרץ', role:'רופא בכיר', dept:'reha', breaks:[] },
+    { name:'ד״ר ברק', role:'מתמחה', dept:'rehb', breaks:[18] },
+    { name:'ד״ר שמש', role:'מנהל מחלקה', dept:'rehb', breaks:[13,14] },
   ];
-  function buildGantt() {
-    const t = document.getElementById('ganttTable');
-    if (!t || t.childElementCount) return;
-    let html = dayHeader('עובד') + '<tbody>';
-    ROTATION.forEach(emp => {
-      const [bandCls, abbr] = DEPT_BAND[emp.dept];
-      html += `<tr><td class="emp-col">${emp.name}<span class="emp-role">${emp.role}</span></td>`;
-      for (let d = 1; d <= DAYS; d++) {
-        const wend = isWeekend(d) ? ' wend' : '';
-        if (emp.breaks.includes(d)) html += `<td class="cell${wend}"><span class="g-fill g-brk"></span></td>`;
-        else html += `<td class="cell${wend}"><span class="g-fill ${bandCls}">${abbr}</span></td>`;
-      }
-      html += '</tr>';
-    });
-    t.innerHTML = html + '</tbody>';
-  }
-
-  /* ── סידור עבודה — per-cell status codes, per dept ─────────────────── */
-  const STATUS = {
-    work:  ['s-work','ע'], vac:['s-vac','ח'], h202:['s-202','202'],
-    after: ['s-after','א״ת'], other:['s-other','·']
-  };
-  const WSD = {
+  const SAMPLE_WSD = {
     reha: { label:'שיקום גריאטרי א׳', emps:[
-      { name:'ד״ר לוי',  role:'מתמחה',     ov:{6:'after',22:'vac',23:'vac',24:'vac'} },
-      { name:'ד״ר פרץ',  role:'רופא בכיר', ov:{12:'202'} },
-      { name:'ד״ר נחום', role:'מתמחה',     ov:{2:'vac',3:'vac',13:'after'} },
+      { name:'ד״ר לוי', role:'מתמחה', ov:{6:'after',22:'vac',23:'vac',24:'vac'} },
+      { name:'ד״ר פרץ', role:'רופא בכיר', ov:{12:'h202'} },
+      { name:'ד״ר נחום', role:'מתמחה', ov:{2:'vac',3:'vac',13:'after'} },
     ]},
     rehb: { label:'שיקום גריאטרי ב׳', emps:[
-      { name:'ד״ר ברק',  role:'מתמחה',      ov:{18:'vac',19:'202'} },
-      { name:'ד״ר שמש',  role:'מנהל מחלקה',  ov:{13:'vac',14:'vac'} },
-      { name:'ד״ר מזרחי', role:'תורן חוץ',   ov:{9:'after',10:'after'} },
+      { name:'ד״ר ברק', role:'מתמחה', ov:{18:'vac',19:'h202'} },
+      { name:'ד״ר שמש', role:'מנהל מחלקה', ov:{13:'vac',14:'vac'} },
+      { name:'ד״ר מזרחי', role:'תורן חוץ', ov:{9:'after',10:'after'} },
     ]},
     pen: { label:'פנימית גריאטרית', emps:[
-      { name:'ד״ר כהן',        role:'מתמחה', ov:{25:'vac',26:'vac',27:'vac'} },
-      { name:'סלאמה קאסם',     role:'מתמחה', ov:{30:'202',7:'after'} },
-      { name:'ד״ר אבו-רמי',    role:'מתמחה', ov:{19:'202'} },
+      { name:'ד״ר כהן', role:'מתמחה', ov:{25:'vac',26:'vac',27:'vac'} },
+      { name:'סלאמה קאסם', role:'מתמחה', ov:{30:'h202',7:'after'} },
+      { name:'ד״ר אבו-רמי', role:'מתמחה', ov:{19:'h202'} },
       { name:'לין חיר אל דין', role:'מתמחה', ov:{7:'vac',8:'vac'} },
     ]},
   };
-  function buildWsd(deptKey) {
-    const t = document.getElementById('wsdTable');
-    if (!t) return;
-    const dept = WSD[deptKey];
-    let html = dayHeader(dept.label) + '<tbody>';
-    dept.emps.forEach(emp => {
-      html += `<tr><td class="emp-col">${emp.name}<span class="emp-role">${emp.role}</span></td>`;
-      for (let d = 1; d <= DAYS; d++) {
-        const wend = isWeekend(d) ? ' wend' : '';
-        const st = emp.ov[d] || (isWeekend(d) ? 'other' : 'work');
-        const [cls, code] = STATUS[st];
-        html += `<td class="cell scell${wend}" tabindex="0"><span class="s-code ${cls}">${code}</span></td>`;
+
+  /* ════════════════════════════════════════════════════════════════════
+     RENDERERS
+  ════════════════════════════════════════════════════════════════════ */
+  function renderCalendar(schedule, special) {
+    const grid = document.getElementById('calGrid'); if (!grid) return;
+    const m = activeMonth, days = monthDays(m), lead = leadPad(m);
+    const specialSet = new Set((special || []).map(s => parseInt(String(s.date).slice(8,10),10)));
+    let assign = null, gapCount = 0;
+    if (schedule && schedule.length) {
+      assign = {};
+      schedule.forEach(r => {
+        const day = parseInt(String(r.date).slice(8,10), 10);
+        (assign[day] ||= { pen:null, reh:null, fri:false });
+        const dept = String(r.dept || '');
+        if (dept === 'פנימית גריאטרית') assign[day].pen = r.employee;
+        else if (dept === 'שיקום') assign[day].reh = r.employee;
+        else if (dept.indexOf('שישי בוקר') === 0) assign[day].fri = true;
+      });
+    }
+    let html = HE_DOW.map(n => `<div class="cal-dow" role="columnheader">${n}</div>`).join('');
+    for (let i = 0; i < lead; i++) html += `<div class="cal-cell pad" aria-hidden="true"></div>`;
+    for (let d = 1; d <= days; d++) {
+      const wend = isWend(m, d), fri = dow(m, d) === 5, spec = specialSet.has(d);
+      const cls = ['cal-cell', wend && 'weekend', spec && 'special'].filter(Boolean).join(' ');
+      const today = (m === 6 && d === TODAY) ? ' style="box-shadow:inset 0 0 0 1px var(--amber-hi);"' : '';
+      let pen, reh, hasFri;
+      if (assign) { const a = assign[d] || {}; pen = a.pen; reh = a.reh; hasFri = a.fri; }
+      else { pen = SAMPLE_GAPS.includes(d) ? null : SAMPLE_PEN[d % SAMPLE_PEN.length]; reh = SAMPLE_REH[d % SAMPLE_REH.length]; hasFri = fri; }
+      let chips = pen
+        ? `<div class="chip pen"><span class="cd"></span>${pen}<span class="chip-dept">פנ׳</span></div>`
+        : `<div class="chip gap"><span class="cd"></span>חסר שיבוץ<span class="chip-dept">פנ׳</span></div>`;
+      chips += reh
+        ? `<div class="chip reh"><span class="cd"></span>${reh}<span class="chip-dept">שיק׳</span></div>`
+        : `<div class="chip gap"><span class="cd"></span>חסר שיבוץ<span class="chip-dept">שיק׳</span></div>`;
+      if (!pen || !reh) gapCount++;
+      if (fri || hasFri) chips += `<div class="chip fri"><span class="cd"></span>שישי בוקר<span class="chip-dept">×4</span></div>`;
+      html += `<div class="${cls}" role="gridcell" tabindex="0"${today}><span class="cal-daynum">${d}</span>${chips}</div>`;
+    }
+    const trail = (7 - ((lead + days) % 7)) % 7;
+    for (let i = 0; i < trail; i++) html += `<div class="cal-cell pad" aria-hidden="true"></div>`;
+    grid.innerHTML = html;
+    setText('shiftGapCount', gapCount);
+  }
+
+  function dayHeader(firstLabel, m) {
+    let h = `<thead><tr><th class="emp-col" scope="col">${firstLabel}</th>`;
+    const days = monthDays(m);
+    for (let d = 1; d <= days; d++) h += `<th scope="col" class="${isWend(m, d) ? 'wend' : ''}">${d}</th>`;
+    return h + '</tr></thead>';
+  }
+
+  function renderGantt(rotation, wsd) {
+    const t = document.getElementById('ganttTable'); if (!t) return;
+    const m = activeMonth, days = monthDays(m);
+    let rows;
+    if (rotation && rotation.length) {
+      const brk = {};
+      (wsd || []).forEach(r => {
+        const st = String(r.status || '');
+        if (st && st !== 'עובד') (brk[String(r.employee).trim()] ||= new Set()).add(parseInt(String(r.date).slice(8,10),10));
+      });
+      rows = rotation.map(r => {
+        const nm = String(r.employee).trim();
+        return { name:nm, role:'', dept:deptKeyOf(r.daily_dept), breaks:brk[nm] || new Set() };
+      });
+    } else {
+      rows = SAMPLE_ROT.map(r => ({ name:r.name, role:r.role, dept:r.dept, breaks:new Set(r.breaks) }));
+    }
+    let html = dayHeader('עובד', m) + '<tbody>';
+    rows.forEach(emp => {
+      const [bandCls, abbr] = DEPT_BAND[emp.dept] || DEPT_BAND.pen;
+      html += `<tr><td class="emp-col">${emp.name}${emp.role ? `<span class="emp-role">${emp.role}</span>` : ''}</td>`;
+      for (let d = 1; d <= days; d++) {
+        const wend = isWend(m, d) ? ' wend' : '';
+        html += emp.breaks.has(d)
+          ? `<td class="cell${wend}"><span class="g-fill g-brk"></span></td>`
+          : `<td class="cell${wend}"><span class="g-fill ${bandCls}">${abbr}</span></td>`;
       }
       html += '</tr>';
     });
     t.innerHTML = html + '</tbody>';
   }
 
-  // Dept segmented control for סידור עבודה
-  const wsdSeg = document.getElementById('wsdDeptSeg');
-  if (wsdSeg) {
-    wsdSeg.addEventListener('click', e => {
-      const btn = e.target.closest('button[data-dept]');
-      if (!btn) return;
-      wsdSeg.querySelectorAll('button').forEach(b => b.classList.remove('on'));
-      btn.classList.add('on');
-      buildWsd(btn.dataset.dept);
+  function renderWsd(deptKey, rows) {
+    const t = document.getElementById('wsdTable'); if (!t) return;
+    const m = dailyMonth, days = monthDays(m);
+    const label = SAMPLE_WSD[deptKey].label;
+    let emps;
+    if (rows && rows.length) {
+      const byEmp = {};
+      rows.forEach(r => {
+        const nm = String(r.employee).trim();
+        (byEmp[nm] ||= { name:nm, role:'', dept:r.daily_dept, ov:{} });
+        byEmp[nm].ov[parseInt(String(r.date).slice(8,10),10)] = STATUS_HE[String(r.status).trim()] || 'work';
+      });
+      emps = Object.values(byEmp);
+    } else {
+      emps = SAMPLE_WSD[deptKey].emps.map(e => ({ name:e.name, role:e.role, dept:label, ov:e.ov }));
+    }
+    let html = dayHeader(label, m) + '<tbody>';
+    emps.forEach(emp => {
+      html += `<tr><td class="emp-col">${emp.name}${emp.role ? `<span class="emp-role">${emp.role}</span>` : ''}</td>`;
+      for (let d = 1; d <= days; d++) {
+        const wend = isWend(m, d) ? ' wend' : '';
+        const st = emp.ov[d] || (isWend(m, d) ? 'other' : 'work');
+        const [cls, code] = STATUS[st] || STATUS.work;
+        const ds = `${YEAR}-${pad2(m)}-${pad2(d)}`;
+        html += `<td class="cell scell${wend}" tabindex="0" data-date="${ds}" data-emp="${emp.name}" data-dept="${emp.dept || label}" data-st="${st}"><span class="s-code ${cls}">${code}</span></td>`;
+      }
+      html += '</tr>';
     });
+    t.innerHTML = html + '</tbody>';
   }
 
-  // Render all grids on load (cheap; panels are display:none until selected)
-  buildCalendar();
-  buildGantt();
-  buildWsd('reha');
+  /* ════════════════════════════════════════════════════════════════════
+     LOADERS
+  ════════════════════════════════════════════════════════════════════ */
+  async function loadReports() {
+    const sum = await apiGet(`/api/reports/summary?month=${activeMonth}`);
+    if (sum && sum.total_staff > 0) {
+      setText('kpi-total', sum.total_staff);
+      setText('kpi-submitted', sum.submitted);
+      setText('kpi-pending', pad2(sum.pending));
+      if (sum.bars && sum.bars.length) {
+        const max = Math.max(...sum.bars.map(b => b.count), 1);
+        document.getElementById('barsBody').innerHTML = sum.bars.slice(0, 8).map(b => {
+          const pct = Math.round(b.count / max * 100), cls = pct >= 70 ? 'a' : 'g';
+          return `<div class="bar-row"><span class="bar-name">${b.name}</span>`
+               + `<div class="bar-track" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${b.name}: ${b.count}">`
+               + `<div class="bar-fill ${cls}" style="width:${pct}%"></div></div>`
+               + `<span class="bar-count">${b.count}</span></div>`;
+        }).join('');
+      }
+      if (sum.submissions && sum.submissions.length) {
+        document.getElementById('subsBody').innerHTML = sum.submissions.map(s => {
+          const tag = s.status === 'הוגש' ? 'tag-green' : 'tag-red';
+          return `<tr><td>${s.name}</td><td>${s.role}</td><td class="num-col"><span class="num">${s.blocks || '—'}</span></td>`
+               + `<td><span class="tag ${tag}">${s.status}</span></td></tr>`;
+        }).join('');
+      }
+    }
+    const rep = await apiGet('/api/report');
+    if (rep) {
+      setText('rep-critical', rep.critical);
+      setText('rep-warning', rep.warning);
+      if (rep.updated) setText('rep-updated', 'עודכן ' + rep.updated);
+    }
+  }
+
+  async function loadCalendar() {
+    const [sched, special] = await Promise.all([apiGet(`/api/schedule?month=${activeMonth}`), apiGet('/api/special_days')]);
+    renderCalendar(sched, special);
+  }
+
+  async function loadStaff() {
+    const staff = await apiGet('/api/staff');
+    if (staff && staff.length) {
+      document.getElementById('staffBody').innerHTML = staff.map(s => {
+        const q  = s.monthly_quota || s.monthly_quota === 0 ? s.monthly_quota : '—';
+        const wq = s.weekend_quota || s.weekend_quota === 0 ? s.weekend_quota : '—';
+        return `<tr>`
+          + `<td>${s.name}</td><td><span class="role-pill">${s.type || ''}</span></td><td>${s.dept || ''}</td>`
+          + `<td class="num-col"><span class="quota">${q}</span></td><td class="num-col"><span class="quota">${wq}</span></td>`
+          + `<td dir="ltr">${s.email || ''}</td><td><span class="tag tag-green">פעיל</span></td>`
+          + `<td><button class="row-action" data-name="${s.name}">עריכה</button></td></tr>`;
+      }).join('');
+      setText('staffCount', staff.length);
+    }
+  }
+
+  async function loadGantt() {
+    const [rot, wsd] = await Promise.all([apiGet(`/api/dept_rotation?month=${activeMonth}`), apiGet(`/api/work_schedule?month=${activeMonth}`)]);
+    renderGantt(rot, wsd);
+  }
+
+  async function loadWsd() {
+    const rows = await apiGet(`/api/work_schedule?month=${dailyMonth}&dept=${encodeURIComponent(SEG_DEPT_HE[wsdDept])}`);
+    renderWsd(wsdDept, rows);
+  }
+
+  async function loadRequests() {
+    const all = await apiGet('/api/absence_requests');
+    if (!all || !all.length) return;
+    const tagOf = t => t === '202' ? 'tag-amber' : 'tag-blue';
+    const pending = all.filter(r => r.status === 'pending');
+    const todayStr = `${YEAR}-${pad2(6)}-${pad2(TODAY)}`;
+    const approved = all.filter(r => r.status === 'approved' && String(r.end_date) >= todayStr);
+    if (pending.length || all.some(r => r.status === 'pending')) {
+      document.getElementById('reqQueue').innerHTML = pending.length ? pending.map(r => {
+        const range = r.start_date === r.end_date ? r.start_date : `${r.start_date} → ${r.end_date}`;
+        return `<div class="req" data-id="${r.id}"><div class="req-main"><span class="req-emp">${r.employee}</span>`
+          + `<div class="req-meta"><span class="tag ${tagOf(r.type)}">${r.type}</span>`
+          + `<span class="req-date">${range}</span><span>${r.dept_at_request || ''}</span></div></div>`
+          + `<div class="req-actions"><button class="btn btn-green">אשר</button><button class="btn btn-red">דחה</button></div></div>`;
+      }).join('') : `<div class="stub">אין בקשות ממתינות</div>`;
+      setText('reqPendingCount', pending.length);
+    }
+    document.getElementById('approvedBody').innerHTML = approved.length ? approved.map(r => {
+      const range = r.start_date === r.end_date ? r.start_date : `${r.start_date} → ${r.end_date}`;
+      return `<tr><td>${r.employee}</td><td>${r.dept_at_request || ''}</td><td><span class="tag ${tagOf(r.type)}">${r.type}</span></td>`
+        + `<td><span class="num">${range}</span></td><td>${r.approved_by || ''}</td></tr>`;
+    }).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--text-dim);">אין היעדרויות מאושרות</td></tr>`;
+    setText('reqApprovedCount', approved.length);
+  }
+
+  async function loadSettings() {
+    const [s, health, special] = await Promise.all([apiGet('/api/settings'), apiGet('/api/health'), apiGet('/api/special_days')]);
+    const opts = (sel) => MONTHS_HE.map((n, i) => `<option value="${i+1}"${i+1===sel?' selected':''}>${n}</option>`).join('');
+    if (s) {
+      activeMonth = s.active_month; dailyMonth = s.daily_active_month;
+      const am = document.getElementById('set-active-month'); if (am) am.innerHTML = opts(s.active_month);
+      const dm = document.getElementById('set-daily-month');  if (dm) dm.innerHTML = opts(s.daily_active_month);
+      const gate = document.getElementById('gate-state');
+      if (gate) { gate.className = 'tag ' + (s.daily_requests_open ? 'tag-green' : 'tag-red'); gate.textContent = s.daily_requests_open ? 'פתוח' : 'סגור'; }
+    }
+    setText('set-conn', health && health.connected ? 'מחובר ל-Google Sheets' : 'מצב עיצוב — ללא חיבור');
+    if (special && special.length) {
+      document.getElementById('specialBody').innerHTML = special.map(d =>
+        `<tr><td><span class="num">${d.date}</span></td><td>${d.description || ''}</td><td>${d.day_type || ''}</td></tr>`).join('');
+    }
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     EVENT WIRING
+  ════════════════════════════════════════════════════════════════════ */
+  function segPick(seg, btn) { seg.querySelectorAll('button').forEach(b => b.classList.remove('on')); btn.classList.add('on'); }
+
+  // dept selector (סידור עבודה)
+  document.getElementById('wsdDeptSeg')?.addEventListener('click', e => {
+    const b = e.target.closest('button[data-dept]'); if (!b) return;
+    segPick(e.currentTarget, b); wsdDept = b.dataset.dept; loadWsd();
+  });
+
+  // month selectors (shifts + gantt share activeMonth)
+  function wireMonthSeg(id, reloaders) {
+    document.getElementById(id)?.addEventListener('click', e => {
+      const b = e.target.closest('button[data-month]'); if (!b) return;
+      segPick(e.currentTarget, b); activeMonth = parseInt(b.dataset.month, 10);
+      // keep the sibling seg in sync
+      document.querySelectorAll(`#shiftMonthSeg button, #ganttMonthSeg button`).forEach(x =>
+        x.classList.toggle('on', parseInt(x.dataset.month,10) === activeMonth));
+      reloaders.forEach(fn => fn());
+    });
+  }
+  wireMonthSeg('shiftMonthSeg', [loadCalendar, loadGantt, loadReports]);
+  wireMonthSeg('ganttMonthSeg', [loadGantt, loadCalendar, loadReports]);
+
+  // wsd cell click → cycle status + persist
+  document.getElementById('wsdTable')?.addEventListener('click', async e => {
+    const cell = e.target.closest('td.scell'); if (!cell) return;
+    const cur = cell.dataset.st || 'work';
+    const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(cur) + 1) % STATUS_CYCLE.length];
+    const [cls, code] = STATUS[next];
+    cell.dataset.st = next;
+    cell.innerHTML = `<span class="s-code ${cls}">${code}</span>`;
+    const res = await apiPost('/api/work_schedule/cell', {
+      date: cell.dataset.date, employee: cell.dataset.emp,
+      daily_dept: cell.dataset.dept, status: STATUS_TO_HE[next],
+    });
+    if (res && res.design_mode) toast('מצב עיצוב — לא נשמר ל-Sheets', true);
+  });
+
+  // approval queue (event-delegated)
+  document.getElementById('reqQueue')?.addEventListener('click', async e => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    const card = btn.closest('.req'); const id = card?.dataset.id;
+    const approve = btn.classList.contains('btn-green');
+    if (id) {
+      const res = await apiPost(approve ? '/api/absence/approve' : '/api/absence/reject', { id, responder:'מנהל על' });
+      if (res && res.design_mode) toast('מצב עיצוב — לא נשמר ל-Sheets', true);
+    }
+    card.style.opacity = '0';
+    setTimeout(() => { card.remove(); loadRequests(); }, 150);
+    toast(approve ? 'הבקשה אושרה' : 'הבקשה נדחתה');
+  });
+
+  // pre-approve form
+  document.getElementById('btn-preapprove')?.addEventListener('click', async () => {
+    const res = await apiPost('/api/absence/add', {
+      employee: document.getElementById('pa-emp').value,
+      type:     document.getElementById('pa-type').value,
+      start_date: document.getElementById('pa-from').value,
+      end_date:   document.getElementById('pa-to').value,
+      responder: 'מנהל על',
+    });
+    toast(res && res.ok ? 'נוספה היעדרות מאושרת' : 'מצב עיצוב — לא נשמר', !(res && res.ok));
+    loadRequests();
+  });
+
+  // settings: active month
+  document.getElementById('btn-set-active')?.addEventListener('click', async () => {
+    const v = parseInt(document.getElementById('set-active-month').value, 10);
+    const res = await apiPost('/api/settings', { key:'active_month', value:v });
+    activeMonth = v;
+    document.querySelectorAll('#shiftMonthSeg button, #ganttMonthSeg button').forEach(x =>
+      x.classList.toggle('on', parseInt(x.dataset.month,10) === v));
+    loadReports(); loadCalendar(); loadGantt();
+    toast(res && res.ok ? `חודש תורנויות פעיל: ${MONTHS_HE[v-1]}` : 'מצב עיצוב — לא נשמר', !(res && res.ok));
+  });
+
+  // settings: daily active month
+  async function setDailyMonth(v) {
+    const res = await apiPost('/api/settings', { key:'daily_active_month', value:v });
+    dailyMonth = v; loadWsd();
+    toast(res && res.ok ? `חודש סידור עבודה פעיל: ${MONTHS_HE[v-1]}` : 'מצב עיצוב — לא נשמר', !(res && res.ok));
+  }
+  document.getElementById('btn-set-daily')?.addEventListener('click', () =>
+    setDailyMonth(parseInt(document.getElementById('set-daily-month').value, 10)));
+  document.getElementById('btn-gantt-active')?.addEventListener('click', () => setDailyMonth(activeMonth));
+
+  // settings: requests gate toggle
+  document.getElementById('btn-toggle-gate')?.addEventListener('click', async () => {
+    const gate = document.getElementById('gate-state');
+    const open = gate.textContent.trim() !== 'פתוח';
+    const res = await apiPost('/api/settings', { key:'daily_requests_open', value: open ? 'True' : 'False' });
+    gate.className = 'tag ' + (open ? 'tag-green' : 'tag-red'); gate.textContent = open ? 'פתוח' : 'סגור';
+    toast(res && res.ok ? (open ? 'שער ההגשה נפתח' : 'שער ההגשה נסגר') : 'מצב עיצוב — לא נשמר', !(res && res.ok));
+  });
+
+  // settings: add special day
+  document.getElementById('btn-add-special')?.addEventListener('click', async () => {
+    const res = await apiPost('/api/special_days', {
+      date: document.getElementById('sd-date').value,
+      description: document.getElementById('sd-desc').value,
+      day_type: document.getElementById('sd-type').value,
+    });
+    toast(res && res.ok ? 'יום מיוחד נוסף' : 'מצב עיצוב — לא נשמר', !(res && res.ok));
+    loadSettings(); loadCalendar();
+  });
+
+  // generate work schedule
+  document.getElementById('btn-generate-wsd')?.addEventListener('click', async () => {
+    toast('מייצר סידור…');
+    const res = await apiPost('/api/generate_work_schedule', { month: dailyMonth });
+    if (res && res.ok) { toast(`נוצר סידור — ${res.generated} שיבוצים (${res.preserved_manual} ידניים נשמרו)`); loadWsd(); }
+    else toast(res && res.error ? res.error : 'מצב עיצוב — לא נשמר', true);
+  });
+
+  // staff: add / edit / save / cancel / csv
+  const staffForm = document.getElementById('staffForm');
+  function openStaffForm(row) {
+    staffForm.style.display = 'flex';
+    document.getElementById('sf-name').value  = row?.name || '';
+    document.getElementById('sf-type').value  = row?.type || 'מתמחה';
+    document.getElementById('sf-dept').value  = row?.dept || '';
+    document.getElementById('sf-quota').value = row?.monthly_quota || '';
+    document.getElementById('sf-wquota').value= row?.weekend_quota || '';
+    document.getElementById('sf-email').value = row?.email || '';
+    document.getElementById('sf-name').focus();
+  }
+  document.getElementById('btn-staff-add')?.addEventListener('click', () => openStaffForm(null));
+  document.getElementById('btn-staff-cancel')?.addEventListener('click', () => { staffForm.style.display = 'none'; });
+  document.getElementById('staffBody')?.addEventListener('click', async e => {
+    const b = e.target.closest('.row-action'); if (!b) return;
+    const staff = await apiGet('/api/staff');
+    openStaffForm((staff || []).find(s => s.name === b.dataset.name) || { name:b.dataset.name });
+  });
+  document.getElementById('btn-staff-save')?.addEventListener('click', async () => {
+    const res = await apiPost('/api/staff', {
+      name:  document.getElementById('sf-name').value,
+      type:  document.getElementById('sf-type').value,
+      dept:  document.getElementById('sf-dept').value,
+      monthly_quota: document.getElementById('sf-quota').value,
+      weekend_quota: document.getElementById('sf-wquota').value,
+      email: document.getElementById('sf-email').value,
+    });
+    toast(res && res.ok ? 'נשמר' : 'מצב עיצוב — לא נשמר', !(res && res.ok));
+    staffForm.style.display = 'none'; loadStaff();
+  });
+  document.getElementById('btn-staff-csv')?.addEventListener('click', () => {
+    const rows = [...document.querySelectorAll('#staffBody tr')].map(tr =>
+      [...tr.querySelectorAll('td')].slice(0, 7).map(td => `"${td.textContent.trim().replace(/"/g,'""')}"`).join(','));
+    const header = 'שם,תפקיד,מחלקה,מכסה חודשית,מכסת סופ"ש,אימייל,סטטוס';
+    const blob = new Blob(['﻿' + header + '\n' + rows.join('\n')], { type:'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'staff.csv'; a.click();
+  });
+
+  // run-analysis = refresh report; export/smart buttons (no API yet)
+  document.getElementById('btn-run-analysis')?.addEventListener('click', () => { loadReports(); toast('הדוח רוענן'); });
+  document.getElementById('btn-smart-schedule')?.addEventListener('click', () =>
+    toast('שיבוץ חכם מורץ ממודול התורנויות (אלגוריתם השיבוץ)', true));
+  ['btn-export-shifts','btn-export-gantt','btn-export-wsd'].forEach(id =>
+    document.getElementById(id)?.addEventListener('click', () => toast('ייצוא ל-Sheets בקרוב', true)));
+
+  /* ════════════════════════════════════════════════════════════════════
+     INIT — render fallback immediately, then hydrate from the API
+  ════════════════════════════════════════════════════════════════════ */
+  renderCalendar(null, null);
+  renderGantt(null, null);
+  renderWsd(wsdDept, null);
+  loadSettings().then(() => { loadReports(); loadCalendar(); loadStaff(); loadGantt(); loadWsd(); loadRequests(); });
 </script>
 </body>
 </html>

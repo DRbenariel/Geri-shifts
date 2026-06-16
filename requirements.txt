@@ -8,3 +8,6 @@ streamlit-extras
 streamlit-shadcn-ui
 streamlit-javascript
 gspread
+google-auth
+flask
+flask-cors

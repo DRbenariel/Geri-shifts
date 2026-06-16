@@ -18,6 +18,11 @@ All reads/writes go through `get_db_data()` / `save_to_db()` — never access Sh
 - `reset_passwords.py` — standalone admin utility, not part of the app
 - `daily_report.py` — standalone scheduled agent: scans upcoming month requests and writes problems to `daily_report` sheet. Also importable inline from `appy.py` via `importlib`.
 - `.github/workflows/daily_report.yml` — GitHub Actions cron (daily 10:00 IL time) that runs `daily_report.py`
+- `frontend/` — **new standalone admin UI** (separate from the Streamlit app), built with the `/design-taste-frontend` + `ui-ux-pro-max` skills. OLED-dark "instrument panel" Hebrew/RTL design.
+  - `frontend/admin/index.html` — single-page superadmin UI (7 tabs). Data-heavy grids (calendar/gantt/work-status) render from JS; falls back to sample fixtures when the API is unreachable ("design mode").
+  - `frontend/server.py` — **Flask backend** bridging the HTML to the same Google Sheets DB. Auth mirrors `daily_report.py:get_client()` (env `GSHEETS_CREDENTIALS` or local JSON). JSON API under `/api/*`; serves `frontend/` as web root. Run: `python frontend/server.py` → http://127.0.0.1:5000. Boots in DESIGN MODE (reads→[], writes→`{ok:false,design_mode:true}`) when no creds.
+  - `frontend/design-system/` — `tokens.css` (single source of truth) + `MASTER.md` design rules. Hard constraints: no rounded corners, status never colour-only (dot/code+label), Fira Code numerals `dir=ltr`, scanline ≤12%.
+  - `frontend/font-samples.html` — side-by-side font-pairing comparison page.
 - `.claude/skills/monthly-report-scheduler.md` — invoke with `/monthly-report-scheduler` when opening a new month; sets up daily Claude-agent Hebrew summaries through the 10th
 - `.gitignore` — excludes `secrets.toml`, `gerishifts-7ccae6b773f7.json`, `*.db`, `__pycache__`
 - `.streamlit/config.toml` — Streamlit theme (indigo primary, slate background)
