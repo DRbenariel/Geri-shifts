@@ -626,6 +626,319 @@
     }
 
     /* ═══════════════════════════════════════════════════════════════════
+       TOOLBAR — shared filter/action row above tab content
+       (each tab tunes its own density; the toolbar is the constant)
+    ═══════════════════════════════════════════════════════════════════ */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-3);
+      margin-bottom: var(--space-5);
+      flex-wrap: wrap;
+    }
+    .toolbar-group { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+
+    .search {
+      background: var(--bg-card);
+      border: 1px solid var(--border-hi);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: var(--type-body);
+      padding: var(--space-2) var(--space-3);
+      min-width: 220px;
+      transition: border-color var(--transition-fast);
+    }
+    .search::placeholder { color: var(--text-faint); }
+    .search:focus { outline: none; border-color: var(--border-glow); }
+
+    /* Segmented control — dept / view switching inside a tab */
+    .seg { display: inline-flex; border: 1px solid var(--border-hi); }
+    .seg button {
+      background: none;
+      border: none;
+      border-inline-start: 1px solid var(--border-hi);
+      color: var(--text-dim);
+      font-family: var(--font);
+      font-size: var(--type-label);
+      font-weight: 500;
+      letter-spacing: .04em;
+      padding: var(--space-2) var(--space-4);
+      min-height: 36px;
+      cursor: pointer;
+      transition: color var(--transition-fast), background var(--transition-fast);
+    }
+    .seg button:first-child { border-inline-start: none; }
+    .seg button:hover { color: var(--text); }
+    .seg button.on { background: var(--amber-soft); color: var(--amber-hi); font-weight: 700; }
+
+    /* Legend strip — explains a grid's colour code (status never colour-only) */
+    .legend {
+      display: flex;
+      align-items: center;
+      gap: var(--space-5);
+      flex-wrap: wrap;
+      margin-top: var(--space-4);
+      padding: var(--space-3) var(--space-4);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      font-size: var(--type-caption);
+      color: var(--text-dim);
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-swatch { width: 11px; height: 11px; border-inline-start: 3px solid var(--border-hi); background: var(--bg); flex-shrink: 0; }
+
+    .btn-green { background: var(--green-soft); color: var(--green-hi); border: 1px solid var(--green); }
+    .btn-green:hover { background: var(--green); color: var(--bg); }
+    .btn-red   { background: var(--red-soft);   color: var(--red-hi);   border: 1px solid var(--red); }
+    .btn-red:hover   { background: var(--red);   color: #fff; }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       TAB: סידור תורנויות — NIGHT-SHIFT CALENDAR
+       Identity: 7-col month matrix. Density HIGH, motion LOW (staggered
+       cell reveal only). Each cell = a clinical slot card.
+    ═══════════════════════════════════════════════════════════════════ */
+    .cal {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+    }
+    .cal-dow {
+      background: var(--bg);
+      padding: var(--space-2) 0;
+      text-align: center;
+      font-size: var(--type-label);
+      font-weight: 700;
+      color: var(--text-dim);
+      letter-spacing: .08em;
+    }
+    .cal-cell {
+      background: var(--bg-card);
+      min-height: 116px;
+      padding: var(--space-2);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      cursor: pointer;
+      transition: background var(--transition-fast);
+      animation: fadeUp .3s ease both;
+    }
+    .cal-cell:hover { background: var(--bg-row); }
+    .cal-cell.pad { background: transparent; cursor: default; }
+    .cal-cell.weekend { background: #08161E; }
+    .cal-cell.weekend:hover { background: #0B1A22; }
+    .cal-daynum {
+      font-family: var(--font-data);
+      font-size: var(--type-body);
+      font-weight: 700;
+      color: var(--text-dim);
+      direction: ltr;
+      align-self: flex-end;
+    }
+    .cal-cell.weekend .cal-daynum { color: var(--amber-hi); }
+    .cal-cell.special .cal-daynum::after {
+      content: '●';
+      color: var(--red-hi);
+      font-size: 7px;
+      vertical-align: super;
+      margin-inline-end: 3px;
+    }
+
+    /* Shift chip inside a day cell — dept colour as border + dot */
+    .chip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 6px;
+      font-size: 10px;
+      font-weight: 500;
+      background: var(--bg);
+      border-inline-start: 2px solid var(--border-hi);
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .chip .cd { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+    .chip-dept { font-size: 9px; color: var(--text-dim); margin-inline-start: auto; letter-spacing: .02em; }
+    .chip.pen { border-inline-start-color: var(--blue-hi); }
+    .chip.pen .cd { background: var(--blue-hi); }
+    .chip.reh { border-inline-start-color: var(--amber-hi); }
+    .chip.reh .cd { background: var(--amber-hi); }
+    .chip.fri { border-inline-start-color: var(--green-hi); }
+    .chip.fri .cd { background: var(--green-hi); }
+    .chip.gap {
+      border-inline-start-color: var(--red-hi);
+      background: var(--red-soft);
+      color: var(--red-hi);
+      font-weight: 700;
+    }
+    .chip.gap .cd { background: var(--red-hi); box-shadow: 0 0 4px var(--red-hi); }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       TAB: צוות — STAFF MANAGEMENT
+       Identity: widest, densest data table. Motion VERY LOW (rows are
+       reference data, not a feed). Sticky name column.
+    ═══════════════════════════════════════════════════════════════════ */
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); background: var(--bg-card); }
+    .table-wrap .data-table { min-width: 760px; }
+    .data-table td .quota {
+      font-family: var(--font-data);
+      font-weight: 700;
+      color: var(--text);
+      direction: ltr;
+      display: inline-block;
+    }
+    .role-pill {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: .04em;
+      padding: 2px 7px;
+      color: var(--text-dim);
+      border: 1px solid var(--border-hi);
+      background: var(--bg);
+    }
+    .row-action {
+      background: none;
+      border: 1px solid var(--border-hi);
+      color: var(--text-dim);
+      font-family: var(--font);
+      font-size: var(--type-label);
+      padding: 3px 9px;
+      cursor: pointer;
+      transition: color var(--transition-fast), border-color var(--transition-fast);
+    }
+    .row-action:hover { color: var(--amber-hi); border-color: var(--amber); }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       TAB: גאנט חודשי / סידור עבודה — DAY-GRID MATRIX
+       Shared grid skeleton; each tab paints cells differently.
+       גאנט = continuous dept bands. סידור עבודה = per-cell status codes.
+       Density HIGH, horizontal scroll, sticky employee column.
+    ═══════════════════════════════════════════════════════════════════ */
+    .grid-wrap { overflow-x: auto; border: 1px solid var(--border); background: var(--bg-card); }
+    table.daygrid { border-collapse: collapse; width: 100%; min-width: 940px; }
+    table.daygrid th, table.daygrid td { border: 1px solid var(--border); }
+    table.daygrid thead th {
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      font-family: var(--font-data);
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-dim);
+      padding: 6px 0;
+      text-align: center;
+      direction: ltr;
+      z-index: 1;
+    }
+    table.daygrid thead th.wend { color: var(--amber-hi); background: #08161E; }
+    table.daygrid th.emp-col, table.daygrid td.emp-col {
+      position: sticky;
+      inset-inline-end: 0;
+      background: var(--bg-card);
+      text-align: right;
+      padding: var(--space-2) var(--space-3);
+      min-width: 132px;
+      font-size: var(--type-body);
+      font-weight: 500;
+      color: var(--text);
+      z-index: 2;
+    }
+    table.daygrid thead th.emp-col { background: var(--bg); z-index: 3; }
+    table.daygrid td.emp-col .emp-role { display: block; font-size: 10px; font-weight: 400; color: var(--text-dim); }
+    table.daygrid td.cell { padding: 0; height: 32px; text-align: center; }
+    table.daygrid td.cell.wend { background: #08121A; }
+
+    /* Gantt dept bands */
+    .g-fill { display: block; height: 100%; line-height: 32px; font-family: var(--font-data); font-size: 9px; font-weight: 700; }
+    .g-pen { background: var(--blue-soft);  color: var(--blue-hi);  box-shadow: inset 2px 0 0 var(--blue-hi); }
+    .g-reha { background: var(--amber-soft); color: var(--amber-hi); box-shadow: inset 2px 0 0 var(--amber-hi); }
+    .g-rehb { background: var(--green-soft); color: var(--green-hi); box-shadow: inset 2px 0 0 var(--green-hi); }
+    .g-brk  { background: repeating-linear-gradient(45deg, transparent, transparent 3px, var(--border-hi) 3px, var(--border-hi) 4px); }
+
+    /* סידור עבודה status codes (clickable cell — cycles status in real app) */
+    table.daygrid td.scell { cursor: pointer; transition: filter var(--transition-fast); }
+    table.daygrid td.scell:hover { filter: brightness(1.4); }
+    .s-code { display: block; height: 100%; line-height: 32px; font-family: var(--font-data); font-size: 11px; font-weight: 700; }
+    .s-work { color: var(--green-hi); }
+    .s-vac  { background: var(--blue-soft);  color: var(--blue-hi); }
+    .s-202  { background: var(--amber-soft); color: var(--amber-hi); }
+    .s-after{ background: var(--bg-row);     color: var(--text-dim); }
+    .s-other{ color: var(--text-faint); }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       TAB: ניהול בקשות — APPROVAL QUEUE
+       Identity: NOT a table — a queue of action cards. Density MEDIUM,
+       motion HIGHEST (this is the live, interactive feed). Each card a row.
+    ═══════════════════════════════════════════════════════════════════ */
+    .queue { display: flex; flex-direction: column; gap: var(--space-2); }
+    .req {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-inline-start: 3px solid var(--amber-hi);
+      padding: var(--space-3) var(--space-4);
+      transition: background var(--transition-fast), border-color var(--transition-fast);
+      animation: slideIn .3s ease both;
+    }
+    .req:hover { background: var(--bg-row); }
+    .req-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .req-emp { font-size: var(--type-title); font-weight: 700; color: var(--text); }
+    .req-meta { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; font-size: var(--type-caption); color: var(--text-dim); }
+    .req-date { font-family: var(--font-data); direction: ltr; color: var(--text); letter-spacing: .02em; }
+    .req-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
+
+    .subsection-title {
+      font-size: var(--type-title);
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: .02em;
+      margin: var(--space-8) 0 var(--space-4);
+      padding-bottom: var(--space-2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+    .count-badge {
+      font-family: var(--font-data);
+      font-size: var(--type-label);
+      font-weight: 700;
+      color: var(--amber-hi);
+      background: var(--amber-soft);
+      border: 1px solid var(--amber);
+      padding: 1px 8px;
+      direction: ltr;
+    }
+
+    /* Pre-approve form (section 3) — inline field row */
+    .form-row { display: flex; align-items: flex-end; gap: var(--space-3); flex-wrap: wrap; background: var(--bg-card); border: 1px solid var(--border); padding: var(--space-4); }
+    .form-field { display: flex; flex-direction: column; gap: 5px; }
+    .form-field label { font-size: var(--type-label); font-weight: 500; color: var(--text-dim); letter-spacing: .06em; }
+    .form-field select, .form-field input {
+      background: var(--bg);
+      border: 1px solid var(--border-hi);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: var(--type-body);
+      padding: var(--space-2) var(--space-3);
+      min-height: 36px;
+    }
+    .form-field input { font-family: var(--font-data); direction: ltr; }
+    .form-field select:focus, .form-field input:focus { outline: none; border-color: var(--border-glow); }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(12px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
        RESPONSIVE — tested at 375 / 768 / 1024 / 1440 (skill spec)
     ═══════════════════════════════════════════════════════════════════ */
     @media (max-width: 1024px) {
@@ -635,6 +948,11 @@
     @media (max-width: 768px) {
       .kpi-grid { grid-template-columns: 1fr 1fr; }
       main { padding: var(--space-5) 14px 60px; }
+      .cal { font-size: 9px; }
+      .cal-cell { min-height: 88px; }
+      .chip-dept { display: none; }
+      .req { flex-direction: column; align-items: stretch; }
+      .req-actions { justify-content: flex-end; }
     }
     @media (max-width: 600px) {
       header { padding: 0 var(--space-4); }
@@ -685,8 +1003,9 @@
     <button class="nav-btn" onclick="switchTab(this,'shifts')"   role="tab" aria-selected="false" aria-controls="panel-shifts">סידור תורנויות</button>
     <button class="nav-btn" onclick="switchTab(this,'staff')"    role="tab" aria-selected="false" aria-controls="panel-staff">צוות</button>
     <button class="nav-btn active" onclick="switchTab(this,'reports')" role="tab" aria-selected="true" aria-controls="panel-reports">דוחות וניהול</button>
-    <button class="nav-btn" onclick="switchTab(this,'monthly')"  role="tab" aria-selected="false" aria-controls="panel-monthly">סידור חודשי</button>
-    <button class="nav-btn" onclick="switchTab(this,'daily')"    role="tab" aria-selected="false" aria-controls="panel-daily">סידור יומי</button>
+    <button class="nav-btn" onclick="switchTab(this,'monthly')"  role="tab" aria-selected="false" aria-controls="panel-monthly">גאנט חודשי</button>
+    <button class="nav-btn" onclick="switchTab(this,'daily')"    role="tab" aria-selected="false" aria-controls="panel-daily">סידור עבודה</button>
+    <button class="nav-btn" onclick="switchTab(this,'requests')" role="tab" aria-selected="false" aria-controls="panel-requests">ניהול בקשות</button>
   </nav>
 </div>
 
@@ -869,30 +1188,346 @@
     </div><!-- /cols-2 -->
   </div><!-- /panel-reports -->
 
-  <!-- ── STUBS ─────────────────────────────────────────────────────── -->
+  <!-- ── הגדרות (settings — not in this build pass) ─────────────────── -->
   <div class="tab-panel" id="panel-settings" role="tabpanel">
     <div class="section-header"><span class="section-title">הגדרות</span></div>
     <div class="stub">בקרוב</div>
   </div>
 
+  <!-- ════════════════════════════════════════════════════════════════
+       סידור תורנויות — NIGHT-SHIFT CALENDAR
+       Identity: month matrix. Each day = a slot card with dept chips.
+  ════════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-shifts" role="tabpanel">
-    <div class="section-header"><span class="section-title">סידור תורנויות</span></div>
-    <div class="stub">בקרוב</div>
+    <div class="section-header">
+      <span class="section-title">סידור תורנויות</span>
+      <span class="section-meta">יוני 2026 / JUNE 2026</span>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <div class="seg" role="group" aria-label="בחירת חודש">
+          <button>מאי</button>
+          <button class="on">יוני</button>
+          <button>יולי</button>
+        </div>
+        <span class="sys-stat"><span class="led led-red" aria-hidden="true"></span>
+          <span dir="ltr">3</span>&nbsp;ימים ללא שיבוץ מלא</span>
+      </div>
+      <div class="toolbar-group">
+        <button class="btn btn-ghost">ייצוא לוח</button>
+        <button class="btn btn-amber">שיבוץ חכם</button>
+      </div>
+    </div>
+
+    <div class="cal" id="calGrid" role="grid" aria-label="לוח תורנויות חודשי"></div>
+
+    <div class="legend" aria-hidden="true">
+      <span class="legend-item"><span class="legend-swatch" style="border-inline-start-color:var(--blue-hi)"></span>פנימית גריאטרית</span>
+      <span class="legend-item"><span class="legend-swatch" style="border-inline-start-color:var(--amber-hi)"></span>שיקום</span>
+      <span class="legend-item"><span class="legend-swatch" style="border-inline-start-color:var(--green-hi)"></span>שישי בוקר</span>
+      <span class="legend-item"><span class="legend-swatch" style="border-inline-start-color:var(--red-hi);background:var(--red-soft)"></span>חסר שיבוץ</span>
+    </div>
   </div>
 
+  <!-- ════════════════════════════════════════════════════════════════
+       צוות — STAFF MANAGEMENT TABLE (densest reference table)
+  ════════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-staff" role="tabpanel">
-    <div class="section-header"><span class="section-title">צוות</span></div>
-    <div class="stub">בקרוב</div>
+    <div class="section-header">
+      <span class="section-title">צוות</span>
+      <span class="section-meta"><span dir="ltr">10</span> אנשי צוות פעילים</span>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <input class="search" type="search" placeholder="חיפוש לפי שם או מחלקה…" aria-label="חיפוש צוות" />
+      </div>
+      <div class="toolbar-group">
+        <button class="btn btn-ghost">ייצוא CSV</button>
+        <button class="btn btn-amber">הוסף איש צוות</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table" aria-label="טבלת ניהול צוות">
+        <thead>
+          <tr>
+            <th scope="col">שם</th>
+            <th scope="col">תפקיד</th>
+            <th scope="col">מחלקה</th>
+            <th scope="col" class="num-col">מכסה חודשית</th>
+            <th scope="col" class="num-col">מכסת סופ״ש</th>
+            <th scope="col">אימייל</th>
+            <th scope="col">סטטוס</th>
+            <th scope="col"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>ד״ר כהן</td><td><span class="role-pill">מתמחה</span></td><td>פנימית גריאטרית</td>
+            <td class="num-col"><span class="quota">6</span></td><td class="num-col"><span class="quota">1</span></td>
+            <td dir="ltr">cohen@geri.health</td><td><span class="tag tag-green">פעיל</span></td>
+            <td><button class="row-action">עריכה</button></td>
+          </tr>
+          <tr>
+            <td>ד״ר לוי</td><td><span class="role-pill">מתמחה</span></td><td>שיקום גריאטרי א׳</td>
+            <td class="num-col"><span class="quota">5</span></td><td class="num-col"><span class="quota">1</span></td>
+            <td dir="ltr">levi@geri.health</td><td><span class="tag tag-green">פעיל</span></td>
+            <td><button class="row-action">עריכה</button></td>
+          </tr>
+          <tr>
+            <td>ד״ר ברק</td><td><span class="role-pill">מתמחה</span></td><td>שיקום גריאטרי ב׳</td>
+            <td class="num-col"><span class="quota">6</span></td><td class="num-col"><span class="quota">2</span></td>
+            <td dir="ltr">barak@geri.health</td><td><span class="tag tag-green">פעיל</span></td>
+            <td><button class="row-action">עריכה</button></td>
+          </tr>
+          <tr>
+            <td>ד״ר מזרחי</td><td><span class="role-pill">תורן חוץ</span></td><td>שיקום</td>
+            <td class="num-col"><span class="quota">4</span></td><td class="num-col"><span class="quota">2</span></td>
+            <td dir="ltr">mizrahi@geri.health</td><td><span class="tag tag-amber">לא הגיש</span></td>
+            <td><button class="row-action">עריכה</button></td>
+          </tr>
+          <tr>
+            <td>סלאמה קאסם</td><td><span class="role-pill">מתמחה</span></td><td>פנימית גריאטרית</td>
+            <td class="num-col"><span class="quota">7</span></td><td class="num-col"><span class="quota">2</span></td>
+            <td dir="ltr">qassem@geri.health</td><td><span class="tag tag-green">פעיל</span></td>
+            <td><button class="row-action">עריכה</button></td>
+          </tr>
+          <tr>
+            <td>ד״ר פרץ</td><td><span class="role-pill">רופא בכיר</span></td><td>שיקום גריאטרי א׳</td>
+            <td class="num-col"><span class="quota">—</span></td><td class="num-col"><span class="quota">—</span></td>
+            <td dir="ltr">peretz@geri.health</td><td><span class="tag tag-green">פעיל</span></td>
+            <td><button class="row-action">עריכה</button></td>
+          </tr>
+          <tr>
+            <td>ד״ר אבו-רמי</td><td><span class="role-pill">מתמחה</span></td><td>פנימית גריאטרית</td>
+            <td class="num-col"><span class="quota">6</span></td><td class="num-col"><span class="quota">1</span></td>
+            <td dir="ltr">aburami@geri.health</td><td><span class="tag tag-green">פעיל</span></td>
+            <td><button class="row-action">עריכה</button></td>
+          </tr>
+          <tr>
+            <td>ד״ר שמש</td><td><span class="role-pill">מנהל מחלקה</span></td><td>שיקום גריאטרי ב׳</td>
+            <td class="num-col"><span class="quota">3</span></td><td class="num-col"><span class="quota">1</span></td>
+            <td dir="ltr">shemesh@geri.health</td><td><span class="tag tag-green">פעיל</span></td>
+            <td><button class="row-action">עריכה</button></td>
+          </tr>
+          <tr>
+            <td>ד״ר נחום</td><td><span class="role-pill">מתמחה</span></td><td>שיקום</td>
+            <td class="num-col"><span class="quota">5</span></td><td class="num-col"><span class="quota">2</span></td>
+            <td dir="ltr">nachum@geri.health</td><td><span class="tag tag-red">טרם הוגש</span></td>
+            <td><button class="row-action">עריכה</button></td>
+          </tr>
+          <tr>
+            <td>לין חיר אל דין</td><td><span class="role-pill">מתמחה</span></td><td>פנימית גריאטרית</td>
+            <td class="num-col"><span class="quota">6</span></td><td class="num-col"><span class="quota">1</span></td>
+            <td dir="ltr">lynn@geri.health</td><td><span class="tag tag-green">פעיל</span></td>
+            <td><button class="row-action">עריכה</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
+  <!-- ════════════════════════════════════════════════════════════════
+       גאנט חודשי — MONTHLY DEPT-ROTATION GANTT
+       Identity: horizontal timeline. Each employee = a continuous dept band.
+  ════════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-monthly" role="tabpanel">
-    <div class="section-header"><span class="section-title">סידור חודשי</span></div>
-    <div class="stub">בקרוב</div>
+    <div class="section-header">
+      <span class="section-title">גאנט חודשי</span>
+      <span class="section-meta">שיבוץ מחלקות · יוני 2026</span>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <div class="seg" role="group" aria-label="בחירת חודש">
+          <button>מאי</button>
+          <button class="on">יוני</button>
+          <button>יולי</button>
+        </div>
+      </div>
+      <div class="toolbar-group">
+        <button class="btn btn-ghost">ייצוא</button>
+        <button class="btn btn-amber">הפוך לחודש פעיל</button>
+      </div>
+    </div>
+
+    <div class="grid-wrap">
+      <table class="daygrid" id="ganttTable" aria-label="גאנט שיבוץ מחלקות חודשי"></table>
+    </div>
+
+    <div class="legend" aria-hidden="true">
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--blue-soft);border-inline-start-color:var(--blue-hi)"></span>פנימית גריאטרית</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--amber-soft);border-inline-start-color:var(--amber-hi)"></span>שיקום גריאטרי א׳</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--green-soft);border-inline-start-color:var(--green-hi)"></span>שיקום גריאטרי ב׳</span>
+      <span class="legend-item"><span class="legend-swatch" style="border-inline-start-color:var(--border-hi)"></span>חופש / היעדרות</span>
+    </div>
   </div>
 
+  <!-- ════════════════════════════════════════════════════════════════
+       סידור עבודה — DAILY WORK STATUS GRID (per dept, status codes)
+       Identity: same skeleton as gantt, but per-cell status codes (editable).
+  ════════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-daily" role="tabpanel">
-    <div class="section-header"><span class="section-title">סידור יומי</span></div>
-    <div class="stub">בקרוב</div>
+    <div class="section-header">
+      <span class="section-title">סידור עבודה</span>
+      <span class="section-meta">לוח עבודה יומי · יוני 2026</span>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <div class="seg" id="wsdDeptSeg" role="group" aria-label="בחירת מחלקה">
+          <button class="on" data-dept="reha">שיקום גריאטרי א׳</button>
+          <button data-dept="rehb">שיקום גריאטרי ב׳</button>
+          <button data-dept="pen">פנימית גריאטרית</button>
+        </div>
+      </div>
+      <div class="toolbar-group">
+        <button class="btn btn-ghost">ייצוא מחלקה</button>
+        <button class="btn btn-amber">צור סידור</button>
+      </div>
+    </div>
+
+    <div class="grid-wrap">
+      <table class="daygrid" id="wsdTable" aria-label="סידור עבודה יומי לפי מחלקה"></table>
+    </div>
+
+    <div class="legend" aria-hidden="true">
+      <span class="legend-item"><span class="legend-swatch" style="border-inline-start-color:var(--green-hi)"></span>ע — עובד</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--blue-soft);border-inline-start-color:var(--blue-hi)"></span>ח — חופש</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--amber-soft);border-inline-start-color:var(--amber-hi)"></span>202</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--bg-row);border-inline-start-color:var(--text-dim)"></span>א״ת — אחרי תורנות</span>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       ניהול בקשות — ABSENCE-REQUEST APPROVAL QUEUE
+       Identity: action-card feed, not a table. Highest motion.
+  ════════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="panel-requests" role="tabpanel">
+    <div class="section-header">
+      <span class="section-title">ניהול בקשות</span>
+      <span class="section-meta">בקשות היעדרות</span>
+    </div>
+
+    <!-- Section 1: pending queue -->
+    <div class="subsection-title">
+      בקשות ממתינות לאישור
+      <span class="count-badge">3</span>
+    </div>
+
+    <div class="queue">
+      <div class="req">
+        <div class="req-main">
+          <span class="req-emp">ד״ר לוי</span>
+          <div class="req-meta">
+            <span class="tag tag-blue">חופש</span>
+            <span class="req-date">2026-06-22 → 2026-06-24</span>
+            <span>שיקום גריאטרי א׳</span>
+            <span>הוגש 14:31 · אתמול</span>
+          </div>
+        </div>
+        <div class="req-actions">
+          <button class="btn btn-green">אשר</button>
+          <button class="btn btn-red">דחה</button>
+        </div>
+      </div>
+      <div class="req">
+        <div class="req-main">
+          <span class="req-emp">סלאמה קאסם</span>
+          <div class="req-meta">
+            <span class="tag tag-amber">202</span>
+            <span class="req-date">2026-06-30</span>
+            <span>פנימית גריאטרית</span>
+            <span>הוגש 09:05 · היום</span>
+          </div>
+        </div>
+        <div class="req-actions">
+          <button class="btn btn-green">אשר</button>
+          <button class="btn btn-red">דחה</button>
+        </div>
+      </div>
+      <div class="req">
+        <div class="req-main">
+          <span class="req-emp">ד״ר ברק</span>
+          <div class="req-meta">
+            <span class="tag tag-blue">חופש</span>
+            <span class="req-date">2026-06-18 → 2026-06-18</span>
+            <span>שיקום גריאטרי ב׳</span>
+            <span>הוגש 16:44 · לפני יומיים</span>
+          </div>
+        </div>
+        <div class="req-actions">
+          <button class="btn btn-green">אשר</button>
+          <button class="btn btn-red">דחה</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 2: approved future requests -->
+    <div class="subsection-title">
+      היעדרויות מאושרות עתידיות
+      <span class="count-badge">4</span>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" aria-label="היעדרויות מאושרות עתידיות">
+        <thead>
+          <tr>
+            <th scope="col">עובד</th>
+            <th scope="col">מחלקה</th>
+            <th scope="col">סוג</th>
+            <th scope="col">טווח תאריכים</th>
+            <th scope="col">אושר ע״י</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>ד״ר כהן</td><td>פנימית גריאטרית</td><td><span class="tag tag-blue">חופש</span></td>
+            <td><span class="num">2026-06-25 → 2026-06-27</span></td><td>ד״ר שמש</td>
+          </tr>
+          <tr>
+            <td>ד״ר אבו-רמי</td><td>פנימית גריאטרית</td><td><span class="tag tag-amber">202</span></td>
+            <td><span class="num">2026-06-19</span></td><td>ד״ר גל ברנאריאל</td>
+          </tr>
+          <tr>
+            <td>ד״ר נחום</td><td>שיקום</td><td><span class="tag tag-blue">חופש</span></td>
+            <td><span class="num">2026-07-02 → 2026-07-09</span></td><td>ד״ר גל ברנאריאל</td>
+          </tr>
+          <tr>
+            <td>ד״ר פרץ</td><td>שיקום גריאטרי א׳</td><td><span class="tag tag-blue">חופש עתידי</span></td>
+            <td><span class="num">2026-08-10 → 2026-08-14</span></td><td>ד״ר שמש</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Section 3: add a pre-approved absence -->
+    <div class="subsection-title">הוספת היעדרות מאושרת מראש</div>
+    <div class="form-row">
+      <div class="form-field">
+        <label for="pa-emp">עובד</label>
+        <select id="pa-emp">
+          <option>ד״ר כהן</option><option>ד״ר לוי</option><option>ד״ר ברק</option>
+          <option>סלאמה קאסם</option><option>ד״ר אבו-רמי</option><option>ד״ר נחום</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label for="pa-type">סוג</label>
+        <select id="pa-type">
+          <option>חופש</option><option>202</option><option>חופש עתידי</option><option>היעדרות אחרת</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label for="pa-from">מתאריך</label>
+        <input id="pa-from" type="date" value="2026-06-16" />
+      </div>
+      <div class="form-field">
+        <label for="pa-to">עד תאריך</label>
+        <input id="pa-to" type="date" value="2026-06-16" />
+      </div>
+      <button class="btn btn-amber" style="min-height:36px;">הוסף ואשר</button>
+    </div>
   </div>
 
 </main>
@@ -925,6 +1560,138 @@
       next.click();
     }
   });
+
+  /* ════════════════════════════════════════════════════════════════════
+     SAMPLE DATA — June 2026 (1st = Monday). Static prototype fixtures.
+     Real app pulls these from get_db_data() / work_schedule_daily etc.
+  ════════════════════════════════════════════════════════════════════ */
+  const HE_DOW   = ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
+  const DAYS     = 30;
+  const TODAY    = 16;
+  const LEAD_PAD = 1;                 // day 1 is Monday → 1 leading (Sunday) blank
+  const FRIDAYS  = [5, 12, 19, 26];
+  const isWeekend = d => { const dow = d % 7; return dow === 5 || dow === 6; };  // Fri/Sat
+
+  /* ── סידור תורנויות calendar ───────────────────────────────────────── */
+  const PEN = ['ד״ר כהן','ד״ר אבו-רמי','סלאמה קאסם','לין חיר אל דין','ד״ר נחום'];
+  const REH = ['ד״ר לוי','ד״ר פרץ','ד״ר שמש','ד״ר מזרחי','ד״ר ברק'];
+  const SHIFT_GAPS = [18, 25, 26];   // unfilled slots → critical (matches alert banner)
+  const SPECIAL    = [19];           // special day marker (e.g. holiday eve)
+
+  function buildCalendar() {
+    const grid = document.getElementById('calGrid');
+    if (!grid || grid.childElementCount) return;
+    let html = HE_DOW.map(n => `<div class="cal-dow" role="columnheader">${n}</div>`).join('');
+    for (let i = 0; i < LEAD_PAD; i++) html += `<div class="cal-cell pad" aria-hidden="true"></div>`;
+    for (let d = 1; d <= DAYS; d++) {
+      const wend = isWeekend(d), fri = FRIDAYS.includes(d), gap = SHIFT_GAPS.includes(d), spec = SPECIAL.includes(d);
+      const cls = ['cal-cell', wend && 'weekend', spec && 'special'].filter(Boolean).join(' ');
+      const today = d === TODAY ? ' style="box-shadow:inset 0 0 0 1px var(--amber-hi);"' : '';
+      const penName = PEN[d % PEN.length], rehName = REH[d % REH.length];
+      let chips = gap
+        ? `<div class="chip gap"><span class="cd"></span>חסר שיבוץ<span class="chip-dept">פנ׳</span></div>`
+        : `<div class="chip pen"><span class="cd"></span>${penName}<span class="chip-dept">פנ׳</span></div>`;
+      chips += `<div class="chip reh"><span class="cd"></span>${rehName}<span class="chip-dept">שיק׳</span></div>`;
+      if (fri) chips += `<div class="chip fri"><span class="cd"></span>שישי בוקר<span class="chip-dept">×4</span></div>`;
+      html += `<div class="${cls}" role="gridcell" tabindex="0"${today}><span class="cal-daynum">${d}</span>${chips}</div>`;
+    }
+    const trail = (7 - ((LEAD_PAD + DAYS) % 7)) % 7;
+    for (let i = 0; i < trail; i++) html += `<div class="cal-cell pad" aria-hidden="true"></div>`;
+    grid.innerHTML = html;
+  }
+
+  /* ── shared day-grid header (1..30 with weekend tint) ─────────────── */
+  function dayHeader(firstLabel) {
+    let h = `<thead><tr><th class="emp-col" scope="col">${firstLabel}</th>`;
+    for (let d = 1; d <= DAYS; d++) h += `<th scope="col" class="${isWeekend(d) ? 'wend' : ''}">${d}</th>`;
+    return h + '</tr></thead>';
+  }
+
+  /* ── גאנט חודשי — continuous dept bands ────────────────────────────── */
+  const DEPT_BAND = { pen: ['g-pen','פג'], reha: ['g-reha','שא'], rehb: ['g-rehb','שב'] };
+  const ROTATION = [
+    { name:'ד״ר כהן',       role:'מתמחה',     dept:'pen',  breaks:[25,26,27] },
+    { name:'סלאמה קאסם',    role:'מתמחה',     dept:'pen',  breaks:[30] },
+    { name:'לין חיר אל דין', role:'מתמחה',     dept:'pen',  breaks:[7,8] },
+    { name:'ד״ר לוי',       role:'מתמחה',     dept:'reha', breaks:[22,23,24] },
+    { name:'ד״ר פרץ',       role:'רופא בכיר', dept:'reha', breaks:[] },
+    { name:'ד״ר ברק',       role:'מתמחה',     dept:'rehb', breaks:[18] },
+    { name:'ד״ר שמש',       role:'מנהל מחלקה', dept:'rehb', breaks:[13,14] },
+  ];
+  function buildGantt() {
+    const t = document.getElementById('ganttTable');
+    if (!t || t.childElementCount) return;
+    let html = dayHeader('עובד') + '<tbody>';
+    ROTATION.forEach(emp => {
+      const [bandCls, abbr] = DEPT_BAND[emp.dept];
+      html += `<tr><td class="emp-col">${emp.name}<span class="emp-role">${emp.role}</span></td>`;
+      for (let d = 1; d <= DAYS; d++) {
+        const wend = isWeekend(d) ? ' wend' : '';
+        if (emp.breaks.includes(d)) html += `<td class="cell${wend}"><span class="g-fill g-brk"></span></td>`;
+        else html += `<td class="cell${wend}"><span class="g-fill ${bandCls}">${abbr}</span></td>`;
+      }
+      html += '</tr>';
+    });
+    t.innerHTML = html + '</tbody>';
+  }
+
+  /* ── סידור עבודה — per-cell status codes, per dept ─────────────────── */
+  const STATUS = {
+    work:  ['s-work','ע'], vac:['s-vac','ח'], h202:['s-202','202'],
+    after: ['s-after','א״ת'], other:['s-other','·']
+  };
+  const WSD = {
+    reha: { label:'שיקום גריאטרי א׳', emps:[
+      { name:'ד״ר לוי',  role:'מתמחה',     ov:{6:'after',22:'vac',23:'vac',24:'vac'} },
+      { name:'ד״ר פרץ',  role:'רופא בכיר', ov:{12:'202'} },
+      { name:'ד״ר נחום', role:'מתמחה',     ov:{2:'vac',3:'vac',13:'after'} },
+    ]},
+    rehb: { label:'שיקום גריאטרי ב׳', emps:[
+      { name:'ד״ר ברק',  role:'מתמחה',      ov:{18:'vac',19:'202'} },
+      { name:'ד״ר שמש',  role:'מנהל מחלקה',  ov:{13:'vac',14:'vac'} },
+      { name:'ד״ר מזרחי', role:'תורן חוץ',   ov:{9:'after',10:'after'} },
+    ]},
+    pen: { label:'פנימית גריאטרית', emps:[
+      { name:'ד״ר כהן',        role:'מתמחה', ov:{25:'vac',26:'vac',27:'vac'} },
+      { name:'סלאמה קאסם',     role:'מתמחה', ov:{30:'202',7:'after'} },
+      { name:'ד״ר אבו-רמי',    role:'מתמחה', ov:{19:'202'} },
+      { name:'לין חיר אל דין', role:'מתמחה', ov:{7:'vac',8:'vac'} },
+    ]},
+  };
+  function buildWsd(deptKey) {
+    const t = document.getElementById('wsdTable');
+    if (!t) return;
+    const dept = WSD[deptKey];
+    let html = dayHeader(dept.label) + '<tbody>';
+    dept.emps.forEach(emp => {
+      html += `<tr><td class="emp-col">${emp.name}<span class="emp-role">${emp.role}</span></td>`;
+      for (let d = 1; d <= DAYS; d++) {
+        const wend = isWeekend(d) ? ' wend' : '';
+        const st = emp.ov[d] || (isWeekend(d) ? 'other' : 'work');
+        const [cls, code] = STATUS[st];
+        html += `<td class="cell scell${wend}" tabindex="0"><span class="s-code ${cls}">${code}</span></td>`;
+      }
+      html += '</tr>';
+    });
+    t.innerHTML = html + '</tbody>';
+  }
+
+  // Dept segmented control for סידור עבודה
+  const wsdSeg = document.getElementById('wsdDeptSeg');
+  if (wsdSeg) {
+    wsdSeg.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-dept]');
+      if (!btn) return;
+      wsdSeg.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      buildWsd(btn.dataset.dept);
+    });
+  }
+
+  // Render all grids on load (cheap; panels are display:none until selected)
+  buildCalendar();
+  buildGantt();
+  buildWsd('reha');
 </script>
 </body>
 </html>
