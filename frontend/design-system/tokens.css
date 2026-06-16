@@ -52,10 +52,10 @@
   --blue-soft:   rgba(26,74,128,.10);
 
   /* ── Typography ───────────────────────────────────────────────────── */
-  /* Heebo: Hebrew text (RTL UI labels, nav, body copy)                 */
-  /* Fira Code: numeric/data values (KPI numbers, counts, timestamps)   */
-  --font:        'Heebo', sans-serif;
-  --font-data:   'Fira Code', 'Heebo', monospace;
+  /* IBM Plex Sans Hebrew: RTL UI labels, nav, body copy                */
+  /* IBM Plex Mono: numeric/data values (KPI numbers, counts, timestamps)*/
+  --font:        'IBM Plex Sans Hebrew', sans-serif;
+  --font-data:   'IBM Plex Mono', 'IBM Plex Sans Hebrew', monospace;
 
   --type-label:   11px;   /* column headers, meta — all-caps */
   --type-body:    13px;   /* table cells, descriptions */
