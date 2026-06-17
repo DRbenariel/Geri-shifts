@@ -11,3 +11,4 @@ gspread
 google-auth
 flask
 flask-cors
+gunicorn

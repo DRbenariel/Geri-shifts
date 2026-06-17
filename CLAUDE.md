@@ -19,8 +19,15 @@ All reads/writes go through `get_db_data()` / `save_to_db()` — never access Sh
 - `daily_report.py` — standalone scheduled agent: scans upcoming month requests and writes problems to `daily_report` sheet. Also importable inline from `appy.py` via `importlib`.
 - `.github/workflows/daily_report.yml` — GitHub Actions cron (daily 10:00 IL time) that runs `daily_report.py`
 - `frontend/` — **new standalone admin UI** (separate from the Streamlit app), built with the `/design-taste-frontend` + `ui-ux-pro-max` skills. OLED-dark "instrument panel" Hebrew/RTL design.
-  - `frontend/admin/index.html` — single-page superadmin UI (7 tabs). Data-heavy grids (calendar/gantt/work-status) render from JS; falls back to sample fixtures when the API is unreachable ("design mode").
-  - `frontend/server.py` — **Flask backend** bridging the HTML to the same Google Sheets DB. Auth mirrors `daily_report.py:get_client()` (env `GSHEETS_CREDENTIALS` or local JSON). JSON API under `/api/*`; serves `frontend/` as web root. Run: `python frontend/server.py` → http://127.0.0.1:5000. Boots in DESIGN MODE (reads→[], writes→`{ok:false,design_mode:true}`) when no creds.
+  - **Migration in progress → this Flask app is replacing the Streamlit `appy.py`.** Built locally to parity, then deployed to **Render** (see `frontend/DEPLOY.md`), then Streamlit retired. Login replicates the SHA256-password model from the `staff` sheet.
+  - `frontend/admin/index.html` — single-page UI for **all 6 roles** (nav rendered from `/api/me`). Data-heavy grids (calendar/gantt/work-status) render from JS; sample-data fallback in design mode. Dark/light theme toggle, IBM Plex font.
+  - `frontend/` is a **Flask package** (refactored from the old single `server.py`):
+    - `config.py` constants; `db.py` Sheets layer (auth, 15s cache, 429-retry, `read_df`); `app.py` `create_app()` factory; `server.py` dev entrypoint.
+    - `auth.py` — SHA256 sessions, `ROLE_TABS` (mirrors `ui_components.render_navbar`), `install_guards` gating all `/api/*` (login + per-endpoint `ROLE_RULES`).
+    - `routes/` — blueprints: auth, system, staff, nights (+smart_schedule), work_schedule, absences, submissions, swaps, exports.
+    - `email_util.py` (SMTP via env), `analytics.py` (log_event), `exports.py` (Schedule_Export + WSD_*), `pages/login.html`.
+    - Run dev: `python frontend/server.py`. Prod: `gunicorn 'frontend.app:create_app()'`. Boots DESIGN MODE (reads→[], writes→`{ok:false,design_mode:true}`) without creds.
+  - `scheduling_core/` — **Streamlit-free** ports of the algorithms (`check_assignment_validity`, `find_swap_candidates`, `run_smart_scheduling`, `is_functional_weekend`), shared by Flask. `tests/test_scheduling_core.py` covers them.
   - `frontend/design-system/` — `tokens.css` (single source of truth) + `MASTER.md` design rules. Hard constraints: no rounded corners, status never colour-only (dot/code+label), Fira Code numerals `dir=ltr`, scanline ≤12%.
   - `frontend/font-samples.html` — side-by-side font-pairing comparison page.
 - `.claude/skills/monthly-report-scheduler.md` — invoke with `/monthly-report-scheduler` when opening a new month; sets up daily Claude-agent Hebrew summaries through the 10th

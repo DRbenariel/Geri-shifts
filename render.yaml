@@ -1,0 +1,29 @@
+# Render infrastructure-as-code for the Flask app.
+# Create the service: Render dashboard → New → Blueprint → point at this repo.
+# Then set the secret env-var VALUES in the dashboard (marked sync:false below).
+services:
+  - type: web
+    name: geri-shifts
+    runtime: python
+    plan: starter            # persistent web service (keeps the in-process cache warm)
+    branch: main             # deploy branch — change if cutting over from another
+    buildCommand: pip install -r requirements-web.txt
+    startCommand: gunicorn 'frontend.app:create_app()' --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    autoDeploy: true
+    envVars:
+      - key: GSHEETS_CREDENTIALS   # full service-account JSON (same value the GitHub Action uses)
+        sync: false
+      - key: FLASK_SECRET_KEY      # random 32+ byte hex (e.g. `python -c "import secrets;print(secrets.token_hex(32))"`)
+        sync: false
+      - key: SESSION_COOKIE_SECURE # "1" — Render serves HTTPS
+        value: "1"
+      - key: SMTP_SERVER
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SENDER           # gmail sender address
+        sync: false
+      - key: SMTP_PASSWORD         # gmail app password
+        sync: false
+      - key: SPREADSHEET_KEY       # optional override (defaults baked into config.py)
+        sync: false

@@ -1,0 +1,8 @@
+# Lean dependency set for the Flask web app on Render (no Streamlit).
+flask
+flask-cors
+gunicorn
+gspread
+google-auth
+pandas
+openpyxl
