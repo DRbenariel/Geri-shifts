@@ -973,6 +973,35 @@
     }
     .toast.err { border-color: var(--red); border-inline-start-color: var(--red-hi); }
 
+    /* In-app feedback capture (iteration tooling) */
+    .fab {
+      position: fixed; bottom: 20px; inset-inline-start: 20px; z-index: 10000;
+      background: var(--amber-soft); color: var(--amber-hi); border: 1px solid var(--amber);
+      font-family: var(--font); font-size: var(--type-label); font-weight: 700;
+      letter-spacing: .04em; padding: 10px 16px; cursor: pointer; min-height: 44px;
+      box-shadow: var(--shadow-lg); transition: all var(--transition-normal);
+    }
+    .fab:hover { background: var(--amber); color: var(--bg); }
+    .fb-overlay {
+      position: fixed; inset: 0; z-index: 10001; display: none;
+      align-items: center; justify-content: center; background: rgba(0,0,0,.45);
+    }
+    .fb-overlay.show { display: flex; }
+    .fb-box {
+      width: 92%; max-width: 460px; background: var(--bg-card);
+      border: 1px solid var(--border-hi); border-top: 2px solid var(--amber-hi);
+      padding: var(--space-5);
+    }
+    .fb-box h3 { font-size: var(--type-title); font-weight: 700; color: var(--text); margin-bottom: 4px; }
+    .fb-ctx { font-size: var(--type-caption); color: var(--text-dim); margin-bottom: var(--space-4); }
+    .fb-box textarea {
+      width: 100%; min-height: 120px; resize: vertical; background: var(--bg);
+      border: 1px solid var(--border-hi); color: var(--text); font-family: var(--font);
+      font-size: var(--type-body); padding: var(--space-3); margin-bottom: var(--space-4);
+    }
+    .fb-box textarea:focus { outline: none; border-color: var(--border-glow); }
+    .fb-actions { display: flex; justify-content: flex-start; gap: var(--space-2); }
+
     @keyframes slideIn {
       from { opacity: 0; transform: translateX(12px); }
       to   { opacity: 1; transform: translateX(0); }
@@ -1706,6 +1735,20 @@
 
 </main>
 
+<!-- In-app feedback capture (iteration tooling) -->
+<button class="fab" id="fb-fab" aria-label="הוסף הערה">💬 הערה</button>
+<div class="fb-overlay" id="fb-overlay" role="dialog" aria-modal="true" aria-labelledby="fb-title">
+  <div class="fb-box">
+    <h3 id="fb-title">הערה על המסך הנוכחי</h3>
+    <div class="fb-ctx" id="fb-ctx">—</div>
+    <textarea id="fb-text" placeholder="מה צריך לתקן / לשנות כאן?"></textarea>
+    <div class="fb-actions">
+      <button class="btn btn-amber" id="fb-send">שליחה</button>
+      <button class="btn btn-ghost" id="fb-cancel">ביטול</button>
+    </div>
+  </div>
+</div>
+
 <script>
   function switchTab(btn, key) {
     document.querySelectorAll('.tab-panel').forEach(p => {
@@ -2345,6 +2388,31 @@
   });
 
   function loadSubmitPanel() { loadConstraints(); loadSwapShifts(); }
+
+  /* ════════════════════════════════════════════════════════════════════
+     IN-APP FEEDBACK (iteration tooling) — drops comments into feedback.md
+  ════════════════════════════════════════════════════════════════════ */
+  function activeTabLabel() {
+    const b = document.querySelector('.nav-btn.active');
+    return b ? b.textContent.trim() : '';
+  }
+  const fbOverlay = document.getElementById('fb-overlay');
+  document.getElementById('fb-fab')?.addEventListener('click', () => {
+    document.getElementById('fb-ctx').textContent = `מסך: ${activeTabLabel()}`;
+    document.getElementById('fb-text').value = '';
+    fbOverlay.classList.add('show');
+    document.getElementById('fb-text').focus();
+  });
+  function closeFb() { fbOverlay.classList.remove('show'); }
+  document.getElementById('fb-cancel')?.addEventListener('click', closeFb);
+  fbOverlay?.addEventListener('click', e => { if (e.target === fbOverlay) closeFb(); });
+  document.getElementById('fb-send')?.addEventListener('click', async () => {
+    const text = document.getElementById('fb-text').value.trim();
+    if (!text) { toast('הערה ריקה', true); return; }
+    const res = await apiPost('/api/feedback', { tab: activeTabLabel(), text });
+    toast(res && res.ok ? 'ההערה נשמרה ל-feedback.md' : 'שמירת ההערה נכשלה', !(res && res.ok));
+    closeFb();
+  });
 
   /* ════════════════════════════════════════════════════════════════════
      AUTH + ROLE-DRIVEN NAV

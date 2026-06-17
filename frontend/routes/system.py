@@ -1,9 +1,33 @@
-"""System + settings + analytics endpoints."""
+"""System + settings + analytics + feedback endpoints."""
+import os
+from datetime import datetime
+
 from flask import Blueprint, jsonify, request, session
 
 from .. import db, analytics
+from ..config import ROOT
 
 bp = Blueprint('system', __name__)
+
+
+@bp.route('/api/feedback', methods=['POST'])
+def api_feedback():
+    """Append an in-app comment to repo-root feedback.md (iteration tooling)."""
+    data = request.get_json(force=True) or {}
+    text = str(data.get('text', '')).strip()
+    if not text:
+        return jsonify({'ok': False, 'error': 'empty'}), 400
+    tab = str(data.get('tab', ''))
+    user = session.get('user', '')
+    role = session.get('role', '')
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M')
+    entry = f"- **[{tab}]** ({user} · {role} · {ts}) {text}\n"
+    try:
+        with open(os.path.join(ROOT, 'feedback.md'), 'a', encoding='utf-8') as f:
+            f.write(entry)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 
 @bp.route('/api/log_event', methods=['POST'])
