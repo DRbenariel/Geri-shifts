@@ -87,16 +87,19 @@ def read_sheet(name, fresh=False):
     return rows
 
 
-def read_df(name, fresh=False):
+def read_df(name, fresh=False, strip_names=True):
     """Return a sheet as a normalised pandas DataFrame (for scheduling code).
 
     Applies the project's two known data-quality fixes:
-      - strip trailing/invisible spaces from the 'name' column,
+      - strip trailing/invisible spaces from the 'name' column (skippable),
       - parse only_home_dept string-bool with _is_true (never .astype(bool)).
+
+    strip_names=False reproduces appy.py:run_smart_scheduling exactly (which uses
+    raw staff names) — important for schedule parity tests.
     """
     df = pd.DataFrame(read_sheet(name, fresh=fresh))
     if not df.empty:
-        if 'name' in df.columns:
+        if strip_names and 'name' in df.columns:
             df['name'] = df['name'].astype(str).str.strip()
         if 'only_home_dept' in df.columns:
             df['only_home_dept'] = df['only_home_dept'].apply(_is_true)
@@ -133,6 +136,18 @@ def append_row(name, header, row_dict):
         existing = [header]
     cols = existing[0]
     _retry(lambda: ws.append_row([str(row_dict.get(c, '')) for c in cols]))
+    _invalidate(name)
+    return True
+
+
+def overwrite_sheet(name, header, rows):
+    """Replace a whole sheet with header + rows (list of dicts). False in design mode."""
+    ws = get_ws(name)
+    if ws is None:
+        return False
+    out = [header] + [[str(r.get(c, '')) for c in header] for r in rows]
+    _retry(ws.clear)
+    _retry(lambda: ws.update('A1', out))
     _invalidate(name)
     return True
 

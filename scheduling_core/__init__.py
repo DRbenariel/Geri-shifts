@@ -10,8 +10,10 @@ Contents:
 run_smart_scheduling (the production assigner) is added in a later milestone
 alongside its Flask endpoint + Streamlit parity test.
 """
-from .calendars import is_functional_weekend
+from .calendars import is_functional_weekend, get_functional_day_type
 from .validity import check_assignment_validity
 from .swaps import find_swap_candidates
+from .smart import run_smart_scheduling
 
-__all__ = ['is_functional_weekend', 'check_assignment_validity', 'find_swap_candidates']
+__all__ = ['is_functional_weekend', 'get_functional_day_type',
+           'check_assignment_validity', 'find_swap_candidates', 'run_smart_scheduling']

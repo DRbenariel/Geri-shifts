@@ -2157,8 +2157,13 @@
 
   // run-analysis = refresh report; export/smart buttons (no API yet)
   document.getElementById('btn-run-analysis')?.addEventListener('click', () => { loadReports(); toast('הדוח רוענן'); });
-  document.getElementById('btn-smart-schedule')?.addEventListener('click', () =>
-    toast('שיבוץ חכם מורץ ממודול התורנויות (אלגוריתם השיבוץ)', true));
+  document.getElementById('btn-smart-schedule')?.addEventListener('click', async () => {
+    if (!confirm('להריץ שיבוץ חכם לחודש זה? פעולה זו תכתוב מחדש את השיבוץ האוטומטי.')) return;
+    toast('מריץ שיבוץ חכם…');
+    const res = await apiPost('/api/smart_schedule', { month: activeMonth });
+    if (res && res.ok) { toast(`שיבוץ הושלם — ${res.filled} משובצים, ${res.empty} ריקים`); loadCalendar(); loadReports(); }
+    else toast(res && res.error ? res.error : 'מצב עיצוב — לא נשמר', true);
+  });
   ['btn-export-shifts','btn-export-gantt','btn-export-wsd'].forEach(id =>
     document.getElementById(id)?.addEventListener('click', () => toast('ייצוא ל-Sheets בקרוב', true)));
 

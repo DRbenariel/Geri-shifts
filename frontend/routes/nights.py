@@ -2,9 +2,12 @@
 from flask import Blueprint, jsonify, request
 
 from .. import db
-from ..config import FRIDAY_DEPTS
+from ..config import YEAR, FRIDAY_DEPTS
+from scheduling_core import run_smart_scheduling
 
 bp = Blueprint('nights', __name__)
+
+SCHEDULE_HEADER = ['date', 'dept', 'employee', 'is_manual', 'empty_reason']
 
 
 @bp.route('/api/requests')
@@ -21,6 +24,48 @@ def api_schedule():
     rows = [r for r in db.read_sheet('schedule')
             if str(r.get('date', '')).startswith(prefix)]
     return jsonify(rows)
+
+
+@bp.route('/api/smart_schedule', methods=['POST'])
+def api_smart_schedule():
+    """Run the greedy night-shift scheduler and write the result to `schedule`.
+
+    Mirrors appy.py:run_smart_scheduling — staff names are NOT stripped
+    (strip_names=False) so output matches the Streamlit app for parity tests.
+    """
+    data = request.get_json(force=True) or {}
+    month = int(data.get('month') or db.get_active_month('active_month', 6))
+    only_weekends = bool(data.get('only_weekends', False))
+
+    if db.get_spreadsheet() is None:
+        return jsonify({'ok': False, 'design_mode': True})
+
+    staff_df = db.read_df('staff', fresh=True, strip_names=False)
+    schedule_df = db.read_df('schedule', fresh=True, strip_names=False)
+    requests_df = db.read_df('requests', fresh=True, strip_names=False)
+    special_df = db.read_df('special_days', fresh=True, strip_names=False)
+    if staff_df.empty:
+        return jsonify({'ok': False, 'error': 'אין נתוני צוות'}), 400
+    # guarantee expected columns even when a sheet is empty
+    for col in SCHEDULE_HEADER:
+        if col not in schedule_df.columns:
+            schedule_df[col] = ''
+    for col in ('employee', 'date', 'status'):
+        if col not in requests_df.columns:
+            requests_df[col] = ''
+    for col in ('date', 'description', 'day_type'):
+        if col not in special_df.columns:
+            special_df[col] = ''
+
+    rows, balancing_msg = run_smart_scheduling(
+        YEAR, month, staff_df, schedule_df, requests_df, special_df, only_weekends=only_weekends)
+
+    ok = db.overwrite_sheet('schedule', SCHEDULE_HEADER, rows)
+    prefix = f"{YEAR}-{month:02d}"
+    filled = sum(1 for r in rows if str(r.get('date', '')).startswith(prefix)
+                 and r.get('dept') in ('פנימית גריאטרית', 'שיקום') and r.get('employee') not in ('', '---'))
+    empties = sum(1 for r in rows if str(r.get('date', '')).startswith(prefix) and r.get('employee') == '---')
+    return jsonify({'ok': ok, 'filled': filled, 'empty': empties, 'message': balancing_msg})
 
 
 @bp.route('/api/special_days')
