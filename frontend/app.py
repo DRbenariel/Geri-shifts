@@ -45,6 +45,15 @@ def create_app():
     def static_proxy(path):
         return send_from_directory(HERE, path)
 
+    # HTML pages must never be cached, so a `git pull` always shows the latest UI.
+    # Static assets (css/js/fonts) stay cacheable.
+    @app.after_request
+    def _no_cache_html(resp):
+        ct = resp.headers.get('Content-Type', '')
+        if ct.startswith('text/html'):
+            resp.headers['Cache-Control'] = 'no-store, max-age=0'
+        return resp
+
     install_guards(app)
     register_blueprints(app)
     return app
