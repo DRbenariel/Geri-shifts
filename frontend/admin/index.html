@@ -75,6 +75,15 @@
       outline-offset: 2px;
     }
 
+    /* Constraint calendar (employee submission) — clickable day states */
+    .cal-cell.clickable { cursor: pointer; }
+    .cal-cell.c-block { background: var(--red-soft); box-shadow: inset 3px 0 0 var(--red-hi); }
+    .cal-cell.c-wish  { background: var(--green-soft); box-shadow: inset 3px 0 0 var(--green-hi); }
+    .c-state { font-size: 10px; font-weight: 700; margin-top: auto; }
+    .cal-cell.c-block .c-state { color: var(--red-hi); }
+    .cal-cell.c-wish  .c-state { color: var(--green-hi); }
+    .swap-tier-title { font-size: var(--type-label); font-weight: 700; color: var(--text-dim); letter-spacing: .06em; margin: var(--space-4) 0 var(--space-2); }
+
     /* Light-theme overrides for surfaces that use hand-tuned dark tints */
     :root[data-theme="light"] .cal-cell.weekend            { background: #E7EEF7; }
     :root[data-theme="light"] .cal-cell.weekend:hover      { background: #DDE8F3; }
@@ -1344,8 +1353,41 @@
        Built in M5. Placeholder panel so the tab exists for role routing.
   ════════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-submit" role="tabpanel">
-    <div class="section-header"><span class="section-title">הגשת בקשות</span></div>
-    <div class="stub">בקרוב</div>
+    <div class="section-header">
+      <span class="section-title">הגשת בקשות</span>
+      <span class="section-meta" id="submit-month">יוני 2026</span>
+    </div>
+
+    <!-- 🌙 night constraints/wishes -->
+    <div class="subsection-title" id="submit-night-title">🌙 אילוצים ובקשות לתורנויות לילה</div>
+    <div class="toolbar">
+      <div class="toolbar-group" style="font-size:var(--type-caption);color:var(--text-dim);">
+        לחיצה על יום: פנוי → 🔒 אילוץ → ⭐ בקשה → פנוי
+      </div>
+      <button class="btn btn-amber" id="btn-save-constraints">שמירת אילוצים</button>
+    </div>
+    <div class="cal" id="constraintCal" aria-label="לוח אילוצים"></div>
+
+    <!-- ☀️ day absence -->
+    <div class="subsection-title" id="submit-absence-title">☀️ בקשת חופש / 202</div>
+    <div class="form-row">
+      <div class="form-field"><label for="abs-type">סוג</label>
+        <select id="abs-type"><option>חופש</option><option>202</option><option>חופש עתידי</option></select>
+      </div>
+      <div class="form-field"><label for="abs-from">מתאריך</label><input id="abs-from" type="date" value="2026-06-16" /></div>
+      <div class="form-field"><label for="abs-to">עד תאריך</label><input id="abs-to" type="date" value="2026-06-16" /></div>
+      <button class="btn btn-amber" id="btn-submit-absence" style="min-height:36px;">שליחת בקשה</button>
+    </div>
+
+    <!-- 🔄 swap search -->
+    <div class="subsection-title">🔄 חיפוש החלפות</div>
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <select id="swap-shift" class="search" aria-label="בחר משמרת להחלפה"></select>
+        <button class="btn btn-ghost" id="btn-swap-search">חפש מועמדים</button>
+      </div>
+    </div>
+    <div id="swapResults"></div>
   </div>
 
   <!-- ════════════════════════════════════════════════════════════════
@@ -2197,6 +2239,114 @@
   });
 
   /* ════════════════════════════════════════════════════════════════════
+     EMPLOYEE SUBMISSIONS — night constraints, day absence, swap search
+  ════════════════════════════════════════════════════════════════════ */
+  let constraintState = {};   // day(int) -> 'block' | 'wish'
+
+  function renderConstraintCal() {
+    const grid = document.getElementById('constraintCal'); if (!grid) return;
+    const m = activeMonth, days = monthDays(m), lead = leadPad(m);
+    setText('submit-month', `${MONTHS_HE[m - 1]} ${YEAR}`);
+    let html = HE_DOW.map(n => `<div class="cal-dow" role="columnheader">${n}</div>`).join('');
+    for (let i = 0; i < lead; i++) html += `<div class="cal-cell pad" aria-hidden="true"></div>`;
+    for (let d = 1; d <= days; d++) {
+      const wend = isWend(m, d) ? ' weekend' : '';
+      const st = constraintState[d];
+      const cls = st === 'block' ? ' c-block' : st === 'wish' ? ' c-wish' : '';
+      const lbl = st === 'block' ? '🔒 אילוץ' : st === 'wish' ? '⭐ בקשה' : '';
+      html += `<div class="cal-cell clickable${wend}${cls}" data-day="${d}" tabindex="0"><span class="cal-daynum">${d}</span><span class="c-state">${lbl}</span></div>`;
+    }
+    const trail = (7 - ((lead + days) % 7)) % 7;
+    for (let i = 0; i < trail; i++) html += `<div class="cal-cell pad" aria-hidden="true"></div>`;
+    grid.innerHTML = html;
+  }
+
+  document.getElementById('constraintCal')?.addEventListener('click', e => {
+    const cell = e.target.closest('.cal-cell.clickable'); if (!cell) return;
+    const d = parseInt(cell.dataset.day, 10);
+    constraintState[d] = constraintState[d] === 'block' ? 'wish'
+                       : constraintState[d] === 'wish' ? undefined : 'block';
+    if (!constraintState[d]) delete constraintState[d];
+    renderConstraintCal();
+  });
+
+  async function loadConstraints() {
+    constraintState = {};
+    const reqs = await apiGet(`/api/requests?month=${activeMonth}`);
+    (reqs || []).forEach(r => {
+      if (String(r.employee).trim() !== CURRENT_USER) return;
+      const day = parseInt(String(r.date).slice(8, 10), 10);
+      if (r.status === 'אילוץ') constraintState[day] = 'block';
+      else if (r.status === 'בקשה') constraintState[day] = 'wish';
+    });
+    renderConstraintCal();
+  }
+
+  document.getElementById('btn-save-constraints')?.addEventListener('click', async () => {
+    const blocks = [], wishes = [];
+    Object.entries(constraintState).forEach(([d, st]) => {
+      const ds = `${YEAR}-${pad2(activeMonth)}-${pad2(+d)}`;
+      (st === 'block' ? blocks : wishes).push(ds);
+    });
+    const res = await apiPost('/api/requests/submit', { month: activeMonth, blocks, wishes });
+    toast(res && res.ok ? `נשמרו ${blocks.length} אילוצים, ${wishes.length} בקשות` : 'מצב עיצוב — לא נשמר', !(res && res.ok));
+  });
+
+  document.getElementById('btn-submit-absence')?.addEventListener('click', async () => {
+    const res = await apiPost('/api/absence/submit', {
+      type: document.getElementById('abs-type').value,
+      start_date: document.getElementById('abs-from').value,
+      end_date: document.getElementById('abs-to').value,
+    });
+    toast(res && res.ok ? 'הבקשה נשלחה לאישור' : 'מצב עיצוב — לא נשמר', !(res && res.ok));
+  });
+
+  async function loadSwapShifts() {
+    const sel = document.getElementById('swap-shift'); if (!sel) return;
+    const sched = await apiGet(`/api/schedule?month=${activeMonth}`);
+    const today = `${YEAR}-${pad2(6)}-${pad2(TODAY)}`;
+    const mine = (sched || []).filter(r => String(r.employee).trim() === CURRENT_USER && String(r.date) >= today);
+    sel.innerHTML = mine.length
+      ? mine.map(r => `<option value="${r.date}|${r.dept}">${r.date} · ${r.dept}</option>`).join('')
+      : '<option value="">אין משמרות עתידיות</option>';
+  }
+
+  document.getElementById('btn-swap-search')?.addEventListener('click', async () => {
+    const val = document.getElementById('swap-shift').value;
+    if (!val) { toast('אין משמרת נבחרת', true); return; }
+    const [date, dept] = val.split('|');
+    const res = await apiGet(`/api/swaps/search?date=${encodeURIComponent(date)}&dept=${encodeURIComponent(dept)}`);
+    const box = document.getElementById('swapResults');
+    if (!res) { box.innerHTML = '<div class="stub">שגיאה</div>'; return; }
+    const star = w => w ? ' ⭐' : '';
+    const card = (c, kind) => {
+      const meta = kind === 'full' ? `מציע בתמורה: ${c.their_shift.date} · ${c.their_shift.dept}`
+                 : kind === 'chain' ? `${c.facilitator_name}${star(c.facilitator_wished)} → פנימית · ${c.external_name}${star(c.external_wished)} → שיקום`
+                 : 'כיסוי חד-צדדי';
+      const name = kind === 'chain' ? `שרשור: ${c.facilitator_name} + ${c.external_name}` : `${c.name}${star(c.wished)} · ${c.type}`;
+      const payload = kind === 'chain'
+        ? { requester_date: date, requester_dept: dept, candidate: c.facilitator_name, candidate_date: date, candidate_dept: 'שיקום', swap_type: 'chain', chain_ext: c.external_name, chain_ext_dept: 'שיקום' }
+        : { requester_date: date, requester_dept: dept, candidate: c.name, candidate_date: (c.their_shift ? c.their_shift.date : ''), candidate_dept: (c.their_shift ? c.their_shift.dept : ''), swap_type: kind };
+      return `<div class="req"><div class="req-main"><span class="req-emp">${name}</span><div class="req-meta">${meta}</div></div>`
+           + `<div class="req-actions"><button class="btn btn-amber" data-swap='${JSON.stringify(payload)}'>בקש החלפה</button></div></div>`;
+    };
+    let html = '';
+    if (res.full.length) html += '<div class="swap-tier-title">✅ החלפה מלאה</div><div class="queue">' + res.full.map(c => card(c, 'full')).join('') + '</div>';
+    if (res.partial.length) html += '<div class="swap-tier-title">⚠️ כיסוי חד-צדדי</div><div class="queue">' + res.partial.map(c => card(c, 'partial')).join('') + '</div>';
+    if (res.chain.length) html += '<div class="swap-tier-title">🔗 החלפה משולשת</div><div class="queue">' + res.chain.map(c => card(c, 'chain')).join('') + '</div>';
+    box.innerHTML = html || '<div class="stub">לא נמצאו מועמדים</div>';
+  });
+
+  document.getElementById('swapResults')?.addEventListener('click', async e => {
+    const b = e.target.closest('button[data-swap]'); if (!b) return;
+    const res = await apiPost('/api/swaps/request', JSON.parse(b.dataset.swap));
+    toast(res && res.ok ? 'בקשת ההחלפה נשלחה לאישור' : 'מצב עיצוב — לא נשמר', !(res && res.ok));
+    b.disabled = true;
+  });
+
+  function loadSubmitPanel() { loadConstraints(); loadSwapShifts(); }
+
+  /* ════════════════════════════════════════════════════════════════════
      AUTH + ROLE-DRIVEN NAV
   ════════════════════════════════════════════════════════════════════ */
   let CURRENT_USER = '';
@@ -2232,7 +2382,9 @@
   renderWsd(wsdDept, null);
   applyRole().then((me) => {
     if (!me) return;
-    loadSettings().then(() => { loadReports(); loadCalendar(); loadStaff(); loadGantt(); loadWsd(); loadRequests(); });
+    loadSettings().then(() => {
+      loadReports(); loadCalendar(); loadStaff(); loadGantt(); loadWsd(); loadRequests(); loadSubmitPanel();
+    });
   });
 </script>
 </body>

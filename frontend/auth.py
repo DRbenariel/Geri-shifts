@@ -57,6 +57,8 @@ ROLE_RULES = {
     ('POST', '/api/absence/reject'): {ADMIN, MANAGER, DEPT},
     ('POST', '/api/absence/add'): {ADMIN, MANAGER, DEPT},
     ('POST', '/api/smart_schedule'): {ADMIN},
+    ('POST', '/api/swaps/approve'): {ADMIN, MANAGER},
+    ('POST', '/api/swaps/reject'): {ADMIN, MANAGER},
     ('POST', '/api/export/schedule'): {ADMIN},
     ('POST', '/api/export/wsd'): {ADMIN, MANAGER},
     ('POST', '/api/daily_report/run'): {ADMIN},
