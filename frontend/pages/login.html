@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>כניסה — מערכת סידור המערך הגריאטרי</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Hebrew:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../design-system/tokens.css" />
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('geri-theme')
+             || ((window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+    })();
+  </script>
+  <style>
+    *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+    body {
+      font-family: var(--font); background: var(--bg); color: var(--text);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+      background-size: 28px 28px; padding: var(--space-5);
+    }
+    .card {
+      width: 100%; max-width: 380px; background: var(--bg-card);
+      border: 1px solid var(--border-hi); padding: var(--space-8) var(--space-6) var(--space-6);
+      position: relative;
+    }
+    .card::before {
+      content:''; position:absolute; top:0; left:0; right:0; height:2px;
+      background: linear-gradient(90deg, transparent, var(--amber), transparent); opacity:.6;
+    }
+    .title { font-size: var(--type-heading); font-weight:700; color: var(--amber-hi); margin-bottom:4px; }
+    .sub { font-size: var(--type-caption); color: var(--text-dim); letter-spacing:.1em; text-transform:uppercase; margin-bottom: var(--space-6); }
+    label { display:block; font-size: var(--type-label); font-weight:500; color: var(--text-dim); letter-spacing:.06em; margin-bottom:6px; }
+    input {
+      width:100%; background: var(--bg); border:1px solid var(--border-hi); color: var(--text);
+      font-family: var(--font); font-size: var(--type-body); padding: var(--space-3); margin-bottom: var(--space-4);
+      transition: border-color var(--transition-fast);
+    }
+    input:focus { outline:none; border-color: var(--border-glow); }
+    button {
+      width:100%; font-family: var(--font); font-size: var(--type-label); font-weight:700; letter-spacing:.06em;
+      padding: var(--space-3); cursor:pointer; border:1px solid var(--amber);
+      background: var(--amber-soft); color: var(--amber-hi); transition: all var(--transition-normal);
+      min-height:44px;
+    }
+    button:hover { background: var(--amber); color: var(--bg); }
+    button:disabled { opacity:.5; cursor:default; }
+    .err {
+      display:none; font-size: var(--type-caption); color: var(--red-hi);
+      background: var(--red-soft); border:1px solid var(--red); border-inline-start:3px solid var(--red-hi);
+      padding: var(--space-2) var(--space-3); margin-bottom: var(--space-4);
+    }
+    .err.show { display:block; }
+  </style>
+</head>
+<body>
+  <form class="card" id="loginForm" autocomplete="on">
+    <div class="title">מערכת סידור</div>
+    <div class="sub">המערך הגריאטרי · Geriatric Department</div>
+
+    <div class="err" id="err"></div>
+
+    <label for="username">שם משתמש</label>
+    <input id="username" name="username" type="text" required autofocus />
+
+    <label for="password">סיסמה</label>
+    <input id="password" name="password" type="password" required />
+
+    <button type="submit" id="submitBtn">כניסה</button>
+  </form>
+
+  <script>
+    const form = document.getElementById('loginForm');
+    const err = document.getElementById('err');
+    const btn = document.getElementById('submitBtn');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.classList.remove('show');
+      btn.disabled = true; btn.textContent = 'מתחבר…';
+      try {
+        const r = await fetch('/api/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value,
+          }),
+        });
+        const data = await r.json();
+        if (r.ok && data.ok) { window.location.href = '/'; return; }
+        err.textContent = data.error || 'כניסה נכשלה';
+        err.classList.add('show');
+      } catch (ex) {
+        err.textContent = 'שגיאת רשת — נסה שוב';
+        err.classList.add('show');
+      }
+      btn.disabled = false; btn.textContent = 'כניסה';
+    });
+  </script>
+</body>
+</html>

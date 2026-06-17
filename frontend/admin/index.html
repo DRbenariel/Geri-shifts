@@ -1022,7 +1022,7 @@
       <span class="role">מנהל/ת מערכת</span>
     </div>
     <button class="logout-btn theme-btn" id="theme-btn" aria-label="החלף ערכת צבעים">בהיר</button>
-    <button class="logout-btn" aria-label="יציאה מהמערכת">יציאה</button>
+    <button class="logout-btn" id="logout-btn" aria-label="יציאה מהמערכת">יציאה</button>
   </div>
 </header>
 
@@ -1033,6 +1033,7 @@
   <nav role="tablist" aria-label="ניווט ראשי">
     <button class="nav-btn" onclick="switchTab(this,'settings')" role="tab" aria-selected="false" aria-controls="panel-settings">הגדרות</button>
     <button class="nav-btn" onclick="switchTab(this,'shifts')"   role="tab" aria-selected="false" aria-controls="panel-shifts">סידור תורנויות</button>
+    <button class="nav-btn" onclick="switchTab(this,'submit')"   role="tab" aria-selected="false" aria-controls="panel-submit">הגשת בקשות</button>
     <button class="nav-btn" onclick="switchTab(this,'staff')"    role="tab" aria-selected="false" aria-controls="panel-staff">צוות</button>
     <button class="nav-btn active" onclick="switchTab(this,'reports')" role="tab" aria-selected="true" aria-controls="panel-reports">דוחות וניהול</button>
     <button class="nav-btn" onclick="switchTab(this,'monthly')"  role="tab" aria-selected="false" aria-controls="panel-monthly">גאנט חודשי</button>
@@ -1336,6 +1337,15 @@
       <span class="legend-item"><span class="legend-swatch" style="border-inline-start-color:var(--green-hi)"></span>שישי בוקר</span>
       <span class="legend-item"><span class="legend-swatch" style="border-inline-start-color:var(--red-hi);background:var(--red-soft)"></span>חסר שיבוץ</span>
     </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       הגשת בקשות — EMPLOYEE SUBMISSIONS (night constraints + day absences)
+       Built in M5. Placeholder panel so the tab exists for role routing.
+  ════════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="panel-submit" role="tabpanel">
+    <div class="section-header"><span class="section-title">הגשת בקשות</span></div>
+    <div class="stub">בקרוב</div>
   </div>
 
   <!-- ════════════════════════════════════════════════════════════════
@@ -2036,7 +2046,7 @@
     const card = btn.closest('.req'); const id = card?.dataset.id;
     const approve = btn.classList.contains('btn-green');
     if (id) {
-      const res = await apiPost(approve ? '/api/absence/approve' : '/api/absence/reject', { id, responder:'מנהל על' });
+      const res = await apiPost(approve ? '/api/absence/approve' : '/api/absence/reject', { id, responder: CURRENT_USER || 'admin' });
       if (res && res.design_mode) toast('מצב עיצוב — לא נשמר ל-Sheets', true);
     }
     card.style.opacity = '0';
@@ -2051,7 +2061,7 @@
       type:     document.getElementById('pa-type').value,
       start_date: document.getElementById('pa-from').value,
       end_date:   document.getElementById('pa-to').value,
-      responder: 'מנהל על',
+      responder: CURRENT_USER || 'admin',
     });
     toast(res && res.ok ? 'נוספה היעדרות מאושרת' : 'מצב עיצוב — לא נשמר', !(res && res.ok));
     loadRequests();
@@ -2166,12 +2176,43 @@
   });
 
   /* ════════════════════════════════════════════════════════════════════
-     INIT — render fallback immediately, then hydrate from the API
+     AUTH + ROLE-DRIVEN NAV
+  ════════════════════════════════════════════════════════════════════ */
+  let CURRENT_USER = '';
+  async function applyRole() {
+    const me = await apiGet('/api/me');
+    if (!me || !me.role) { window.location.href = '/login'; return null; }
+    CURRENT_USER = me.name || '';
+    const allowed = new Set((me.tabs || []).map(t => t.key));
+    document.querySelectorAll('.nav-btn').forEach(b => {
+      const key = (b.getAttribute('aria-controls') || '').replace('panel-', '');
+      b.style.display = allowed.has(key) ? '' : 'none';
+    });
+    const nm = document.querySelector('.user-block .name');
+    const rl = document.querySelector('.user-block .role');
+    if (nm) nm.textContent = me.name || '';
+    if (rl) rl.textContent = me.role || '';
+    const defBtn = [...document.querySelectorAll('.nav-btn')]
+      .find(b => b.getAttribute('aria-controls') === 'panel-' + me.default_tab && b.style.display !== 'none');
+    if (defBtn) switchTab(defBtn, me.default_tab);
+    return me;
+  }
+
+  document.getElementById('logout-btn')?.addEventListener('click', async () => {
+    await apiPost('/api/logout', {});
+    window.location.href = '/login';
+  });
+
+  /* ════════════════════════════════════════════════════════════════════
+     INIT — render fallback grids, then auth-gate + hydrate from the API
   ════════════════════════════════════════════════════════════════════ */
   renderCalendar(null, null);
   renderGantt(null, null);
   renderWsd(wsdDept, null);
-  loadSettings().then(() => { loadReports(); loadCalendar(); loadStaff(); loadGantt(); loadWsd(); loadRequests(); });
+  applyRole().then((me) => {
+    if (!me) return;
+    loadSettings().then(() => { loadReports(); loadCalendar(); loadStaff(); loadGantt(); loadWsd(); loadRequests(); });
+  });
 </script>
 </body>
 </html>
