@@ -96,6 +96,20 @@ def api_report():
     return jsonify({'rows': rows, 'critical': critical, 'warning': warning, 'updated': updated})
 
 
+@bp.route('/api/daily_report/run', methods=['POST'])
+def api_daily_report_run():
+    """Re-run the daily_report analysis (writes the daily_report sheet)."""
+    if db.get_spreadsheet() is None:
+        return jsonify({'ok': False, 'design_mode': True})
+    try:
+        import daily_report as dr
+        dr.main()
+        db._invalidate('daily_report')
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 @bp.route('/api/reports/summary')
 def api_reports_summary():
     """KPI cards + submission table + shift-count bars for the active month."""

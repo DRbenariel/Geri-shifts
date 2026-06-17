@@ -2155,8 +2155,26 @@
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'staff.csv'; a.click();
   });
 
-  // run-analysis = refresh report; export/smart buttons (no API yet)
-  document.getElementById('btn-run-analysis')?.addEventListener('click', () => { loadReports(); toast('הדוח רוענן'); });
+  // run analysis = re-run daily_report, then refresh
+  document.getElementById('btn-run-analysis')?.addEventListener('click', async () => {
+    toast('מריץ ניתוח…');
+    const res = await apiPost('/api/daily_report/run', {});
+    if (res && res.ok) toast('הדוח עודכן'); else toast(res && res.design_mode ? 'מצב עיצוב' : 'שגיאה בניתוח', true);
+    loadReports();
+  });
+  // exports
+  document.getElementById('btn-export-shifts')?.addEventListener('click', async () => {
+    const res = await apiPost('/api/export/schedule', { month: activeMonth });
+    toast(res && res.ok ? 'יוצא ל-Schedule_Export' : 'מצב עיצוב — לא נשמר', !(res && res.ok));
+  });
+  document.getElementById('btn-export-gantt')?.addEventListener('click', async () => {
+    const res = await apiPost('/api/export/schedule', { month: activeMonth });
+    toast(res && res.ok ? 'יוצא ל-Schedule_Export' : 'מצב עיצוב — לא נשמר', !(res && res.ok));
+  });
+  document.getElementById('btn-export-wsd')?.addEventListener('click', async () => {
+    const res = await apiPost('/api/export/wsd', { dept: SEG_DEPT_HE[wsdDept], month: dailyMonth });
+    toast(res && res.ok ? 'יוצאה מחלקה ל-WSD' : (res && res.error ? res.error : 'מצב עיצוב'), !(res && res.ok));
+  });
   document.getElementById('btn-smart-schedule')?.addEventListener('click', async () => {
     if (!confirm('להריץ שיבוץ חכם לחודש זה? פעולה זו תכתוב מחדש את השיבוץ האוטומטי.')) return;
     toast('מריץ שיבוץ חכם…');
@@ -2164,8 +2182,6 @@
     if (res && res.ok) { toast(`שיבוץ הושלם — ${res.filled} משובצים, ${res.empty} ריקים`); loadCalendar(); loadReports(); }
     else toast(res && res.error ? res.error : 'מצב עיצוב — לא נשמר', true);
   });
-  ['btn-export-shifts','btn-export-gantt','btn-export-wsd'].forEach(id =>
-    document.getElementById(id)?.addEventListener('click', () => toast('ייצוא ל-Sheets בקרוב', true)));
 
   /* ── theme toggle (state set pre-paint in <head>) ─────────────────── */
   function syncThemeLabel() {

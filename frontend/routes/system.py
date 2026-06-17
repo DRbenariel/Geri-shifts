@@ -1,9 +1,21 @@
-"""System + settings endpoints."""
-from flask import Blueprint, jsonify, request
+"""System + settings + analytics endpoints."""
+from flask import Blueprint, jsonify, request, session
 
-from .. import db
+from .. import db, analytics
 
 bp = Blueprint('system', __name__)
+
+
+@bp.route('/api/log_event', methods=['POST'])
+def api_log_event():
+    data = request.get_json(force=True) or {}
+    analytics.log_event(
+        session.get('user', ''), session.get('role', ''),
+        data.get('event_type', ''), data.get('detail_1', ''), data.get('detail_2', ''),
+        session_id=data.get('session_id', ''), device=data.get('device', 'unknown'),
+        ua=data.get('ua', ''), viewport=data.get('viewport', ''),
+        active_month=db.get_active_month('active_month', 6))
+    return jsonify({'ok': True})
 
 
 @bp.route('/api/health')
