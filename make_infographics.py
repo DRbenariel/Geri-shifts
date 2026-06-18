@@ -355,7 +355,7 @@ STATIC_INTERN_FUTURE_ABSENCE = """
   </div>
   <div class="static-note">
     ✅ חופש עתידי מאושר מופיע אוטומטית בלוח העבודה בחודש הרלוונטי.
-    הבקשה מועברת למנהל/ת המחלקה לאישור ומייל יישלח עם התשובה.
+    הבקשה מועברת למנהל/ת המחלקה לאישור.
   </div>
 </div>
 """
@@ -381,7 +381,7 @@ STATIC_SENIOR_FUTURE_ABSENCE = """
     <div class="wf-arr">←</div>
     <div class="wf-box">
       <div class="wf-circle">4</div>
-      <div class="wf-label">מנהל/ת מחלקה מאשר/ת — <strong>מייל</strong> יישלח</div>
+      <div class="wf-label">מנהל/ת מחלקה מאשר/ת</div>
     </div>
   </div>
 </div>
@@ -532,8 +532,6 @@ def shots_intern(page):
              "caption": ""},
             {"tab": "סידור עבודה", "icon": "📅", "img": "sidur",
              "caption": "לוח עבודה אישי לקריאה בלבד — צבע לכל סטטוס יומי"},
-            {"tab": "סידור תורנויות", "icon": "🌙", "img": f"{role}_04_night",
-             "caption": "צפייה בשיבוצי תורנות לילה לחודש"},
             {"tab": "הגדרות", "icon": "⚙️", "img": f"{role}_05_settings",
              "caption": "שינוי סיסמה אישית"},
         ]
