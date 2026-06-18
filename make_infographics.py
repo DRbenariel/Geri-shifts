@@ -520,16 +520,17 @@ def shots_intern(page):
             {"tab": "מועדי הגשה חשובים", "icon": "⏰",
              "static_html": STATIC_INTERN_DEADLINES,
              "caption": ""},
-            {"tab": "הגשת בקשות 🌙 — אילוצים ובקשות", "icon": "🌙",
-             "img": f"{role}_01_night_requests",
+            {"tab": "הגשת אילוצים לתורנויות", "icon": "🌙",
+             "img": "toranuyot",
              "caption": "בחירת ימי חסימה (אילוץ) ובקשה לתורנות — יש לשלוח לפני ה-7 לחודש"},
             {"tab": "הגשת בקשות ☀️ — חופש / 202", "icon": "☀️",
-             "img": f"{role}_02_day_requests",
+             "img": "daily",
              "caption": "הגשת בקשת חופש/202 לטווח תאריכים — יש לשלוח לפני ה-20 לחודש"},
             {"tab": "הגשת חופש עתידי", "icon": "🗓️",
              "static_html": STATIC_INTERN_FUTURE_ABSENCE,
+             "img": "future_absence",
              "caption": ""},
-            {"tab": "סידור עבודה", "icon": "📅", "img": f"{role}_03_work_cal",
+            {"tab": "סידור עבודה", "icon": "📅", "img": "sidur",
              "caption": "לוח עבודה אישי לקריאה בלבד — צבע לכל סטטוס יומי"},
             {"tab": "סידור תורנויות", "icon": "🌙", "img": f"{role}_04_night",
              "caption": "צפייה בשיבוצי תורנות לילה לחודש"},
@@ -549,12 +550,13 @@ def shots_senior_doc(page):
         "icon": "👨‍⚕️",
         "subtitle": "הגשת בקשות היעדרות ועיון בסידור עבודה יומי",
         "steps": [
-            {"tab": "הגשת בקשות ☀️", "icon": "☀️", "img": f"{role}_01_absences",
+            {"tab": "הגשת בקשות ☀️", "icon": "☀️", "img": "daily",
              "caption": "הגשת בקשות חופש/202 לפי טווח תאריכים"},
             {"tab": "הגשת חופש עתידי", "icon": "🗓️",
              "static_html": STATIC_SENIOR_FUTURE_ABSENCE,
+             "img": "future_absence",
              "caption": ""},
-            {"tab": "סידור עבודה", "icon": "📅", "img": f"{role}_02_work_cal",
+            {"tab": "סידור עבודה", "icon": "📅", "img": "sidur",
              "caption": "לוח עבודה אישי לקריאה בלבד — סטטוס כל יום בצבע"},
             {"tab": "הגדרות", "icon": "⚙️", "img": f"{role}_03_settings",
              "caption": "שינוי סיסמה אישית"},
@@ -631,9 +633,15 @@ def build_html(info):
     cards_html = ""
     for i, step in enumerate(steps, 1):
         if step.get("static_html"):
-            # Static workflow / info card — no screenshot
+            # Static workflow / info card — may optionally also show a screenshot
             caption_html = (f'<p class="step-caption">{step["caption"]}</p>'
                             if step.get("caption") else "")
+            img_html = ""
+            if step.get("img"):
+                _img_data = img_to_b64(step["img"])
+                img_html = (f'<img src="{_img_data}" alt="{step["tab"]}" class="step-img">'
+                            if _img_data else
+                            '<div class="step-img no-img">🖼️ אין תמונה</div>')
             cards_html += f"""
     <div class="step-card static-card">
       <div class="step-num" style="background:{color}">{i}</div>
@@ -642,6 +650,7 @@ def build_html(info):
         <span class="step-tab">{step['tab']}</span>
       </div>
       <div class="step-static-body">{step['static_html']}</div>
+      {img_html}
       {caption_html}
     </div>"""
         else:
