@@ -924,15 +924,30 @@ class _NullPage:
     def press(self, *a, **kw): pass
 
 
-def regen_html_only():
-    """Rebuild all HTML files from existing screenshots + static content (no browser)."""
+# Short CLI aliases → role keys (for selective html-only regeneration)
+ROLE_ALIASES = {
+    "super_admin": "מנהל על",   "admin": "מנהל על",
+    "manager": "מנהל/ת",
+    "dept_head": "מנהל מחלקה",
+    "intern": "מתמחה",
+    "senior_doctor": "רופא בכיר", "senior": "רופא בכיר",
+    "extern": "תורן חוץ",
+}
+
+
+def regen_html_only(only=None):
+    """Rebuild HTML files from existing screenshots + static content (no browser).
+
+    only : optional list of role_keys to limit regeneration to (default: all roles).
+    """
     print("\n📄 Re-generating HTML from existing screenshots (html-only mode)...")
     _null = _NullPage()
     login_step = {
         "tab": "כניסה למערכת", "icon": "🔐", "img": "login_screen",
         "caption": "הזן/י שם משתמש וסיסמה. בכניסה ראשונה — שנה/י סיסמה בהגדרות."
     }
-    for role_key in ROLE_ORDER:
+    targets = only if only else ROLE_ORDER
+    for role_key in targets:
         shot_fn = SHOT_FNS[role_key]
         try:
             info = shot_fn(_null)
@@ -958,6 +973,18 @@ if __name__ == "__main__":
             else:
                 print(f"  (missing) {name}.png — will show placeholder")
             return str(path)
-        regen_html_only()
+        # Any extra args after --html-only select specific roles, e.g.
+        #   python make_infographics.py --html-only intern senior_doctor
+        sel = [a for a in sys.argv[1:] if a != "--html-only"]
+        only = None
+        if sel:
+            only = []
+            for a in sel:
+                key = ROLE_ALIASES.get(a, a)
+                if key in SHOT_FNS:
+                    only.append(key)
+                else:
+                    print(f"  ⚠️  Unknown role '{a}' — valid: {', '.join(ROLE_ALIASES)}")
+        regen_html_only(only)
     else:
         main()
