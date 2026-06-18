@@ -871,6 +871,11 @@ def _build_batched_day_data(dept_name, year_month, view_month, year=None):
             (dr['daily_dept'].astype(str) == dept_name))
     employees = dr[mask]['employee'].astype(str).str.strip().tolist()
 
+    # מנהל מחלקה: managers of this dept are auto-planted even without a
+    # dept_rotation row (their dept comes from manage_depts). Merge them in so
+    # exports match the on-screen grid.
+    employees = employees + [m for m in _get_dept_managers(dept_name) if m not in employees]
+
     # Side map (פנימית) + day-specific incoming transfers
     side_map = {}
     if is_pnim and 'side' in dr.columns:
@@ -1651,7 +1656,9 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         wd_idx = (date_obj.weekday() + 1) % 7  # Sun=0 … Sat=6
 
-        # 0c. מנהל מחלקה rows default to empty unless explicitly planted via is_manual
+        # 0c. מנהל מחלקה: auto-planted as a regular worker in the dept(s) they manage,
+        #     blank in any dept they do NOT manage. An is_manual override still wins,
+        #     so they can toggle themselves off for a specific day via the grid.
         try:
             sf = st.session_state.staff
             _erow = sf[sf['name'].astype(str).str.strip() == emp]
@@ -1660,7 +1667,11 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
                 _ent = _idx.get((date_str, emp), {})
                 if _ent.get('is_manual'):
                     return _ent.get('status', '')
-                return ""   # empty by default
+                _managed = _parse_manage_depts(_erow.iloc[0].get('manage_depts', ''))
+                if daily_dept and str(daily_dept).strip() not in _managed:
+                    return ""   # not their dept → blank
+                # else: fall through to normal auto logic → planted as עובד
+                #       (Saturday→חופש, Friday→שישי בוקר check, absences, etc.)
         except Exception:
             pass
 
