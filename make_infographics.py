@@ -244,6 +244,64 @@ STATIC_FUTURE_ABSENCE_ADD = """
 </div>
 """
 
+STATIC_ABSENCE_CONFLICT = """
+<div class="static-section">
+  <p class="static-intro">המערכת מתריעה כעת אוטומטית כש<strong>שני עובדים מאותה מחלקה</strong> נעדרים באותם ימים — בעת אישור בקשה או הוספת היעדרות:</p>
+  <div class="wf-row">
+    <div class="wf-box">
+      <div class="wf-circle">1</div>
+      <div class="wf-label">לחיצה על <strong>✅ אשר</strong> / <strong>שמור</strong> עם חפיפה במחלקה</div>
+    </div>
+    <div class="wf-arr">←</div>
+    <div class="wf-box">
+      <div class="wf-circle">2</div>
+      <div class="wf-label">מופיעה <strong>אזהרת חפיפה</strong> עם שמות העובדים והתאריכים</div>
+    </div>
+    <div class="wf-arr">←</div>
+    <div class="wf-box">
+      <div class="wf-circle">3</div>
+      <div class="wf-label">החלטה: <strong>✅ אשר למרות החפיפה</strong> או ביטול</div>
+    </div>
+  </div>
+  <div class="static-note">
+    🗑️ <strong>מחיקת בקשה מאושרת:</strong> פתח/י את החלק "מחיקת בקשה מאושרת", בחר/י את הבקשה ולחץ/י <strong>🗑️ מחק בקשה</strong> — ההיעדרות תוסר מלוח העבודה.
+  </div>
+</div>
+"""
+
+STATIC_PNIM_SIDES = """
+<div class="static-section">
+  <p class="static-intro">בלוח העבודה של <strong>פנימית גריאטרית</strong> העובדים מחולקים לשני צדדים, מסומנים בצבע לכל שבוע:</p>
+  <div class="deadline-grid">
+    <div class="dl-card" style="background:#fce7f315;border:1px solid #f9a8d4;">
+      <div class="dl-head"><span class="dl-emoji">🌸</span><span class="dl-title">צד ורוד</span></div>
+      <ul class="dl-list"><li>קבוצת עובדים אחת של פנימית</li></ul>
+    </div>
+    <div class="dl-card" style="background:#dbeafe15;border:1px solid #93c5fd;">
+      <div class="dl-head"><span class="dl-emoji">🔵</span><span class="dl-title">צד כחול</span></div>
+      <ul class="dl-list"><li>קבוצת העובדים השנייה</li></ul>
+    </div>
+  </div>
+  <p class="static-intro" style="margin-top:10px;"><strong>➕ העברה זמנית</strong> — הוספת עובד/ת ממחלקה אחרת ליום מסוים:</p>
+  <div class="wf-row">
+    <div class="wf-box">
+      <div class="wf-circle">1</div>
+      <div class="wf-label">פתח/י <strong>"➕ העברה זמנית"</strong> מתחת ללוח</div>
+    </div>
+    <div class="wf-arr">←</div>
+    <div class="wf-box">
+      <div class="wf-circle">2</div>
+      <div class="wf-label">בחר/י <strong>תאריך</strong>, <strong>עובד/ת</strong> (ובפנימית — צד 🌸/🔵)</div>
+    </div>
+    <div class="wf-arr">←</div>
+    <div class="wf-box">
+      <div class="wf-circle">3</div>
+      <div class="wf-label">לביטול — <strong>✕ הסר</strong>; העובד/ת חוזר/ת למחלקת הבית</div>
+    </div>
+  </div>
+</div>
+"""
+
 STATIC_INTERN_DEADLINES = """
 <div class="static-section">
   <p class="static-intro">בלשונית <strong>הגשת בקשות</strong> יש שני סוגי הגשות, עם מועדי הגשה שונים:</p>
@@ -353,15 +411,21 @@ def shots_manager_al(page):
             {"tab": "סידור תורנויות", "icon": "🌙", "img": f"{role}_03_night_sched",
              "caption": "לוח תורנויות לילה עם כל האילוצים והבקשות שהוגשו"},
             {"tab": "סידור עבודה", "icon": "📅", "img": f"{role}_04_work_sched",
-             "caption": "בחירת מחלקה, עריכת לוח עבודה יומי, הוספת עובד זמני"},
+             "caption": "בחירת מחלקה, עריכת לוח עבודה יומי, חלוקת פנימית לצד ורוד/כחול והעברה זמנית"},
+            {"tab": "פנימית — צדדים והעברה זמנית", "icon": "🌸",
+             "static_html": STATIC_PNIM_SIDES,
+             "caption": ""},
             {"tab": "ניהול בקשות — אישור היעדרות עתידית", "icon": "🗂️",
              "img": f"{role}_05_requests",
-             "caption": "אישור/דחיית בקשות היעדרות, צפייה בחופשות עתידיות מאושרות"},
+             "caption": "אישור/דחיית בקשות היעדרות, צפייה בתצוגת גאנט של חופשות מאושרות עם בורר 12 חודשים קדימה"},
             {"tab": "תהליך אישור חופש עתידי", "icon": "✅",
              "static_html": STATIC_FUTURE_ABSENCE_APPROVAL,
              "caption": ""},
             {"tab": "הוספת היעדרות מאושרת ישירות", "icon": "➕",
              "static_html": STATIC_FUTURE_ABSENCE_ADD,
+             "caption": ""},
+            {"tab": "אזהרת חפיפה ומחיקת בקשה", "icon": "⚠️",
+             "static_html": STATIC_ABSENCE_CONFLICT,
              "caption": ""},
             {"tab": "צוות", "icon": "👥", "img": f"{role}_06_team",
              "caption": "הוספה, עריכה והסרה של עובדים — שם, תפקיד, מחלקה, מכסה"},
@@ -385,15 +449,21 @@ def shots_manageret(page):
             {"tab": "גאנט חודשי", "icon": "🗓️", "img": f"{role}_01_gantt",
              "caption": "שיוך עובדים למחלקות יומיות לפי חודש, הגדרת חודש פעיל, ייצוא סידור"},
             {"tab": "סידור עבודה", "icon": "📅", "img": f"{role}_02_work_sched",
-             "caption": "צפייה ועריכה בלוח העבודה היומי לפי מחלקה, ייצוא לגיליון"},
+             "caption": "צפייה ועריכה בלוח העבודה היומי לפי מחלקה, חלוקת פנימית לצד ורוד/כחול, העברה זמנית וייצוא לגיליון"},
+            {"tab": "פנימית — צדדים והעברה זמנית", "icon": "🌸",
+             "static_html": STATIC_PNIM_SIDES,
+             "caption": ""},
             {"tab": "ניהול בקשות — אישור היעדרות עתידית", "icon": "🗂️",
              "img": f"{role}_03_requests",
-             "caption": "אישור/דחיית בקשות היעדרות, צפייה בחופשות עתידיות מאושרות"},
+             "caption": "אישור/דחיית בקשות היעדרות, צפייה בתצוגת גאנט של חופשות מאושרות עם בורר 12 חודשים קדימה"},
             {"tab": "תהליך אישור חופש עתידי", "icon": "✅",
              "static_html": STATIC_FUTURE_ABSENCE_APPROVAL,
              "caption": ""},
             {"tab": "הוספת היעדרות מאושרת ישירות", "icon": "➕",
              "static_html": STATIC_FUTURE_ABSENCE_ADD,
+             "caption": ""},
+            {"tab": "אזהרת חפיפה ומחיקת בקשה", "icon": "⚠️",
+             "static_html": STATIC_ABSENCE_CONFLICT,
              "caption": ""},
             {"tab": "הגדרות", "icon": "⚙️", "img": f"{role}_04_settings",
              "caption": "שינוי סיסמה אישית"},
@@ -412,7 +482,10 @@ def shots_dept_head(page):
         "subtitle": "ניהול לוח עבודה ובקשות עובדי המחלקה",
         "steps": [
             {"tab": "סידור עבודה", "icon": "📅", "img": f"{role}_01_work_sched",
-             "caption": "עריכת לוח עבודה יומי לעובדי המחלקה, ייצוא סידור, הוספת עובד זמני"},
+             "caption": "עריכת לוח עבודה יומי לעובדי המחלקה, חלוקת פנימית לצד ורוד/כחול, העברה זמנית וייצוא סידור"},
+            {"tab": "פנימית — צדדים והעברה זמנית", "icon": "🌸",
+             "static_html": STATIC_PNIM_SIDES,
+             "caption": ""},
             {"tab": "ניהול בקשות — אישור היעדרות עתידית", "icon": "🗂️",
              "img": f"{role}_02_requests",
              "caption": "אישור/דחיית בקשות חופש של עובדי המחלקה, הוספת היעדרות מאושרת"},
@@ -421,6 +494,9 @@ def shots_dept_head(page):
              "caption": ""},
             {"tab": "הוספת היעדרות מאושרת ישירות", "icon": "➕",
              "static_html": STATIC_FUTURE_ABSENCE_ADD,
+             "caption": ""},
+            {"tab": "אזהרת חפיפה ומחיקת בקשה", "icon": "⚠️",
+             "static_html": STATIC_ABSENCE_CONFLICT,
              "caption": ""},
             {"tab": "הגדרות", "icon": "⚙️", "img": f"{role}_03_settings",
              "caption": "שינוי סיסמה אישית"},
