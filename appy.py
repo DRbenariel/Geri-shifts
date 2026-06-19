@@ -6734,8 +6734,20 @@ elif role in ("מנהל/ת", "מנהל על"):
         if st.session_state.get('show_active_month_success'):
             st.success(f"✅ סידור לחודש {st.session_state.pop('show_active_month_success')} נוצר. הגשות נפתחו.")
 
-        # 12 distinct months in calendar order starting from the active month (no duplicates)
-        view_opts = [((daily_active_month_int - 1 + i) % 12) + 1 for i in range(12)]
+        # 12 consecutive months starting from the active month, each carrying its
+        # correct year so the window rolls into the next year past December
+        # (e.g. active=December → ... דצמבר 2026 / ינואר 2027 / ... נובמבר 2027).
+        # base_year follows the real clock: if the active month already passed
+        # this calendar year, it refers to next year's occurrence.
+        _now = datetime.now()
+        base_year = _now.year if daily_active_month_int >= _now.month else _now.year + 1
+        view_pairs = [
+            (base_year + (daily_active_month_int - 1 + i) // 12,
+             ((daily_active_month_int - 1 + i) % 12) + 1)
+            for i in range(12)
+        ]
+        view_opts = [m for (_y, m) in view_pairs]          # months in window order
+        _month_to_year = {m: y for (y, m) in view_pairs}   # month → its window year
 
         # Single session-state key — the selectbox IS the state; no double-assignment
         if 'daily_view_month' not in st.session_state or \
@@ -6747,11 +6759,12 @@ elif role in ("מנהל/ת", "מנהל על"):
             st.selectbox(
                 "🗓️ חודש לתכנון/עריכה:",
                 view_opts,
-                format_func=lambda m: f"{hebrew_months[m-1]} ({m})",
+                format_func=lambda m: f"{hebrew_months[m-1]} {_month_to_year[m]}",
                 key="daily_view_month",   # session state IS the widget state
             )
         view_month = st.session_state.daily_view_month
-        view_year_month = f"2026-{view_month:02d}"
+        view_year  = _month_to_year[view_month]
+        view_year_month = f"{view_year}-{view_month:02d}"
 
         with col_top2:
             is_active = (view_month == daily_active_month_int)
@@ -6793,7 +6806,7 @@ elif role in ("מנהל/ת", "מנהל על"):
         st.divider()
 
         # ── שיבוץ חודשי — flat layout, no sub-tabs ───────────────────
-        st.markdown(f"#### שיוך עובדים למחלקות — {hebrew_months[view_month-1]} 2026")
+        st.markdown(f"#### שיוך עובדים למחלקות — {hebrew_months[view_month-1]} {view_year}")
         st.caption("בחר לכל עובד את המחלקה היומית שלו לחודש זה. תורן חוץ ומנהלים אינם בטבלה.")
 
         DAILY_DEPTS = list(DAILY_DEPTS_ALL) + ["— לא שובץ —"]
