@@ -86,7 +86,6 @@ Score = `empty_slots * 100 + fallback_slots * 10`. Lowest score wins.
 4. Wish priority = +1000 score bonus instead of pool restriction (non-wishers still fill slot if wisher blocked).
 
 ## Scheduling simulation — standalone helpers in `daily_report.py`
-- `load_all_data(sh)` — loads all 5 sheets into a dict.
 - `is_functional_weekend_standalone(date_obj, special_days_df)` — pure-Python replica of `is_functional_weekend()`.
 - `count_eligible_for_slot(date_str, dept, staff_df, requests_df, schedule_df)` — counts candidates by type+block+assigned (no quota/rest-gap). Treats any dept containing `'פנימית'` as off-limits to תורן חוץ.
 - `build_ordering(year, month, data, strategy)` — returns `[(date_obj, dept), ...]` for a given strategy. Only ordering for the 2 main depts (`פנימית גריאטרית`, `שיקום`); Friday morning shifts are not in the ordering.
