@@ -191,7 +191,7 @@ Gate: `daily_requests_open` setting. Admin opens/closes via 🔓/🔒 button in 
 ### Department-grid editing (לוח מחלקה / לוח עבודה כללי)
 - One row per employee × one column per day. Cell shows status (עובד/חופש/202/אחרי/אחר), clicking cycles through statuses.
 - Any manual edit writes `is_manual=True` to `work_schedule_daily` — these rows are **never overwritten** by the schedule generator.
-- מנהל מחלקה appears as a row in the grid even without a `dept_rotation` row (their dept is read from `manage_depts`). They can "plant" themselves directly without going through the absence-request workflow.
+- מנהל מחלקה appears as a row in the grid even without a `dept_rotation` row (their dept is read from `manage_depts`). They are **auto-planted as `עובד` every day** in each dept they manage (Sat→חופש, Fri→שישי בוקר check, approved absences still apply); `_derive_auto_status` falls through to the normal worker logic for managed depts and returns blank only for depts they don't manage. The grid toggle (empty↔עובד, writes `is_manual=True`) lets them remove themselves for a specific day. Exports include managers via `_build_batched_day_data` (merges `_get_dept_managers(dept)`).
 
 ### Schedule generation (`_generate_work_schedule`)
 - Triggered by admin via "צור סידור" button.

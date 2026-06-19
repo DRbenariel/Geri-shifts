@@ -384,66 +384,68 @@ def _generate_work_schedule(year_month, view_month):
         post_shifts = 0
         num_days = calendar.monthrange(year, view_month)[1]
 
-        for _, rot in month_rotation.iterrows():
-            emp_n = rot['employee']
-            dept_n = rot['daily_dept']
-            if dept_n == "— לא שובץ —" or not dept_n:
-                continue
+        emitted_keys = set()   # (date_str, employee) already written this month
+
+        def _compute_day(emp_n, dept_n, date_obj, date_str, wd_idx_gen):
+            """Return (status, note, is_absence, is_post) for one (emp, dept, day)."""
+            status, note = "עובד", ""
+
+            # Priority 0a: Saturday — department closed
+            if wd_idx_gen == 6:
+                status, note = "חופש", "שבת"
+
+            # Priority 0b: Friday — working employees from שישי בוקר schedule
+            elif wd_idx_gen == 5:
+                fri_shifts = _DAILY_DEPT_TO_FRIDAY_SHIFTS.get(str(dept_n), [])
+                if fri_shifts:
+                    fri_assigned = {
+                        str(r['employee']).strip()
+                        for _, r in sched.iterrows()
+                        if str(r['date']) == date_str and str(r['dept']) in fri_shifts
+                    }
+                    if emp_n not in fri_assigned:
+                        status, note = "חופש", "שישי — לא משובץ"
+
+            # Priority 1: approved absence covers this day?
+            if status == "עובד":
+                for sd, ed, atype in approved_map.get(emp_n, []):
+                    if sd <= date_obj <= ed:
+                        status = atype if atype else "חופש"
+                        break
+
+            # Priority 2: recurring weekly absence? (weekdays only — Fri/Sat handled above)
+            if status == "עובד" and wd_idx_gen in recurring_map.get(emp_n, set()):
+                status, note = "חופש", "היעדרות קבועה"
+
+            # Priority 3: night shift the day before?
+            is_post = False
+            if status == "עובד":
+                prev_str = (date_obj - timedelta(days=1)).strftime('%Y-%m-%d')
+                if (emp_n, prev_str) in night_map:
+                    status, is_post = "אחרי תורנות", True
+
+            is_absence = status not in ("עובד", "אחרי תורנות")
+            return status, note, is_absence, is_post
+
+        def _emit_for(emp_n, dept_n):
+            """Build auto rows for one (employee, dept) across the whole month."""
+            nonlocal absences_applied, post_shifts
             for d in range(1, num_days + 1):
                 date_obj = date(year, view_month, d)
                 date_str = date_obj.strftime('%Y-%m-%d')
-
-                # Skip: manual override exists for this (date, employee) → keep manual_rows version
+                # Skip: manual override exists → keep manual_rows version
                 if (date_str, emp_n) in manual_keys:
                     continue
-
-                status = "עובד"  # default
-                note   = ""
-
+                # Skip: already auto-emitted (e.g. manager managing multiple depts)
+                if (date_str, emp_n) in emitted_keys:
+                    continue
                 wd_idx_gen = (date_obj.weekday() + 1) % 7  # Sun=0, Fri=5, Sat=6
-
-                # Priority 0a: Saturday — department closed
-                if wd_idx_gen == 6:
-                    status = "חופש"
-                    note   = "שבת"
-
-                # Priority 0b: Friday — working employees from שישי בוקר schedule
-                elif wd_idx_gen == 5:
-                    fri_shifts = _DAILY_DEPT_TO_FRIDAY_SHIFTS.get(str(dept_n), [])
-                    if fri_shifts:
-                        # Check if this employee is assigned to the mapped שישי בוקר shift
-                        fri_assigned = {
-                            str(r['employee']).strip()
-                            for _, r in sched.iterrows()
-                            if str(r['date']) == date_str and str(r['dept']) in fri_shifts
-                        }
-                        if emp_n not in fri_assigned:
-                            status = "חופש"
-                            note   = "שישי — לא משובץ"
-
-                # Priority 1: approved absence covers this day?
-                if status == "עובד":
-                    for sd, ed, atype in approved_map.get(emp_n, []):
-                        if sd <= date_obj <= ed:
-                            status = atype if atype else "חופש"
-                            break
-
-                # Priority 2: recurring weekly absence? (weekdays only — Fri/Sat handled above)
-                if status == "עובד":
-                    wd_heb_idx = wd_idx_gen
-                    if wd_heb_idx in recurring_map.get(emp_n, set()):
-                        status = "חופש"
-                        note = "היעדרות קבועה"
-
-                # Priority 3: night shift the day before?
-                if status == "עובד":
-                    prev_str = (date_obj - timedelta(days=1)).strftime('%Y-%m-%d')
-                    if (emp_n, prev_str) in night_map:
-                        status = "אחרי תורנות"
-                        post_shifts += 1
-                else:
+                status, note, is_absence, is_post = _compute_day(
+                    emp_n, dept_n, date_obj, date_str, wd_idx_gen)
+                if is_post:
+                    post_shifts += 1
+                elif is_absence:
                     absences_applied += 1
-
                 new_rows.append({
                     'date': date_str,
                     'employee': emp_n,
@@ -452,6 +454,30 @@ def _generate_work_schedule(year_month, view_month):
                     'note': note,
                     'is_manual': False,
                 })
+                emitted_keys.add((date_str, emp_n))
+
+        # 1) Regular employees from dept_rotation
+        rotation_pairs = set()
+        for _, rot in month_rotation.iterrows():
+            emp_n = rot['employee']
+            dept_n = rot['daily_dept']
+            if dept_n == "— לא שובץ —" or not dept_n:
+                continue
+            rotation_pairs.add((emp_n, dept_n))
+            _emit_for(emp_n, dept_n)
+
+        # 2) מנהל מחלקה — auto-planted into each dept they manage, even without a
+        #    dept_rotation row (their dept comes from manage_depts). Skip a
+        #    (manager, dept) pair already covered by rotation above.
+        sf_mgr = st.session_state.staff
+        if not sf_mgr.empty and 'type' in sf_mgr.columns:
+            _mgr_rows = sf_mgr[sf_mgr['type'].astype(str).str.strip() == 'מנהל מחלקה']
+            for _, sr in _mgr_rows.iterrows():
+                mgr_name = str(sr['name']).strip()
+                for mdept in _parse_manage_depts(sr.get('manage_depts', '')):
+                    if (mgr_name, mdept) in rotation_pairs:
+                        continue
+                    _emit_for(mgr_name, mdept)
 
         # Merge: other_rows + manual_rows (this month) + new_rows (auto for this month)
         new_df = pd.concat(
@@ -870,6 +896,11 @@ def _build_batched_day_data(dept_name, year_month, view_month, year=None):
     mask = ((dr['year_month'].astype(str) == year_month) &
             (dr['daily_dept'].astype(str) == dept_name))
     employees = dr[mask]['employee'].astype(str).str.strip().tolist()
+
+    # מנהל מחלקה: managers of this dept are auto-planted even without a
+    # dept_rotation row (their dept comes from manage_depts). Merge them in so
+    # exports match the on-screen grid.
+    employees = employees + [m for m in _get_dept_managers(dept_name) if m not in employees]
 
     # Side map (פנימית) + day-specific incoming transfers
     side_map = {}
@@ -1651,7 +1682,9 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         wd_idx = (date_obj.weekday() + 1) % 7  # Sun=0 … Sat=6
 
-        # 0c. מנהל מחלקה rows default to empty unless explicitly planted via is_manual
+        # 0c. מנהל מחלקה: auto-planted as a regular worker in the dept(s) they manage,
+        #     blank in any dept they do NOT manage. An is_manual override still wins,
+        #     so they can toggle themselves off for a specific day via the grid.
         try:
             sf = st.session_state.staff
             _erow = sf[sf['name'].astype(str).str.strip() == emp]
@@ -1660,7 +1693,11 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
                 _ent = _idx.get((date_str, emp), {})
                 if _ent.get('is_manual'):
                     return _ent.get('status', '')
-                return ""   # empty by default
+                _managed = _parse_manage_depts(_erow.iloc[0].get('manage_depts', ''))
+                if daily_dept and str(daily_dept).strip() not in _managed:
+                    return ""   # not their dept → blank
+                # else: fall through to normal auto logic → planted as עובד
+                #       (Saturday→חופש, Friday→שישי בוקר check, absences, etc.)
         except Exception:
             pass
 
