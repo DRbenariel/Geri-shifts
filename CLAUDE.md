@@ -183,14 +183,14 @@ Calendar shows ONLY absence-related states — **no night shifts, no אחרי ת
 - 🔘 בקשה ממתינה
 - ⬜ פנוי (clickable for new request)
 - ▶ / ✓ — current range being selected
-Submission dropdown has only **two types**: "חופש" / "202". Range select via 1st-click=start, 2nd-click=end.
+Click-cycle per day: רופא בכיר → `פנוי → חופש → היעדרות אחרת → פנוי`; מתמחה → `פנוי → חופש → 202 → היעדרות אחרת → פנוי`. The **היעדרות אחרת** state writes `type='היעדרות אחרת'` with an optional free-text reason (stored in `notes`). On approval, `_derive_auto_status` normalizes `היעדרות אחרת` → the canonical `אחר` day-grid status. Range select via 1st-click=start, 2nd-click=end.
 Submission writes to `absence_requests` (status=pending) + emails the matching מנהל מחלקה via `send_notification_email()`.
 Gate: `daily_requests_open` setting. Admin opens/closes via 🔓/🔒 button in שיבוץ חודשי sub-tab.
 
 ### Department-grid editing (לוח מחלקה / לוח עבודה כללי)
 - One row per employee × one column per day. Cell shows status (עובד/חופש/202/אחרי/אחר), clicking cycles through statuses.
 - Any manual edit writes `is_manual=True` to `work_schedule_daily` — these rows are **never overwritten** by the schedule generator.
-- מנהל מחלקה appears as a row in the grid even without a `dept_rotation` row (their dept is read from `manage_depts`). They are **auto-planted as `עובד` every day** in each dept they manage (Sat→חופש, Fri→שישי בוקר check, approved absences still apply); `_derive_auto_status` falls through to the normal worker logic for managed depts and returns blank only for depts they don't manage. The grid toggle (empty↔עובד, writes `is_manual=True`) lets them remove themselves for a specific day. Exports include managers via `_build_batched_day_data` (merges `_get_dept_managers(dept)`).
+- מנהל מחלקה appears as a row in the grid even without a `dept_rotation` row (their dept is read from `manage_depts`). They are **auto-planted as `עובד` every day** in each dept they manage (Sat→חופש, Fri→שישי בוקר check, approved absences still apply); `_derive_auto_status` falls through to the normal worker logic for managed depts and returns blank only for depts they don't manage. The grid toggle (empty↔עובד, writes `is_manual=True`) lets them remove themselves for a specific day. Exports include managers via `_build_batched_day_data` (merges `_get_dept_managers(dept)`). **Exception:** managers in `_NO_AUTOPLANT_MANAGERS` (currently `רתם תלם`, `רון צליק`) are **not** auto-planted — `_derive_auto_status` returns blank for them unless they plant themselves via the grid toggle (`is_manual=True`). They still appear as a grid row so they can opt in per day.
 
 ### Schedule generation
 - No batch generator: day-schedule status is derived live per cell by `_derive_auto_status()`

@@ -1349,6 +1349,10 @@ _DAILY_DEPT_TO_NIGHT_DEPT = {
     "שיקום גריאטרי ב'":   "שיקום",
 }
 
+# מנהלי מחלקה שאין לשבץ אוטומטית בסידור העבודה — הם מופיעים בלוח אך נשארים
+# ריקים עד שהם משבצים את עצמם ידנית (is_manual). לבקשת ההנהלה.
+_NO_AUTOPLANT_MANAGERS = {'רתם תלם', 'רון צליק'}
+
 def _derive_auto_status(date_str, employee, daily_dept=None):
     """
     SINGLE SOURCE OF TRUTH for day-schedule status.
@@ -1378,6 +1382,9 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
                 _ent = _idx.get((date_str, emp), {})
                 if _ent.get('is_manual'):
                     return _ent.get('status', '')
+                if emp in _NO_AUTOPLANT_MANAGERS:
+                    # לא משובצים אוטומטית — מופיעים בלוח ריקים עד שיסמנו את עצמם
+                    return ""
                 _managed = _parse_manage_depts(_erow.iloc[0].get('manage_depts', ''))
                 if daily_dept and str(daily_dept).strip() not in _managed:
                     return ""   # not their dept → blank
@@ -1426,6 +1433,8 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
             approved_map = st.session_state.get('_approved_map', {})
             for sd, ed, atype in approved_map.get(emp, []):
                 if sd <= date_obj <= ed:
+                    if atype == 'היעדרות אחרת':
+                        return "אחר"   # canonical day-grid "other absence" status
                     return atype if atype else "חופש"
         except Exception:
             pass
@@ -4646,11 +4655,24 @@ st.markdown("""
         background: white !important; border-color: #e2e8f0 !important;
         color: #334155 !important; transform: none !important;
     }
+    /* light slate — pending היעדרות אחרת request */
+    div[class*="st-key-dayabs_other_"] > div[data-testid="stButton"] > button {
+        background: #e2e8f0 !important; color: #475569 !important;
+        border: 1px solid #cbd5e1 !important;
+        font-size: 0.78rem !important; min-height: 34px !important; font-weight: 600 !important;
+    }
+    div[class*="st-key-dayabs_other_"] > div[data-testid="stButton"] > button:hover {
+        background: white !important; border-color: #e2e8f0 !important;
+        color: #334155 !important; transform: none !important;
+    }
     /* non-clickable fixed states */
     .dayabs-vac   { background:#16a34a; color:white; border-radius:8px; padding:5px 2px;
                     text-align:center; font-size:0.78rem; min-height:34px;
                     display:flex; align-items:center; justify-content:center; }
     .dayabs-202   { background:#eab308; color:white; border-radius:8px; padding:5px 2px;
+                    text-align:center; font-size:0.78rem; min-height:34px;
+                    display:flex; align-items:center; justify-content:center; }
+    .dayabs-other { background:#64748b; color:white; border-radius:8px; padding:5px 2px;
                     text-align:center; font-size:0.78rem; min-height:34px;
                     display:flex; align-items:center; justify-content:center; }
     .dayabs-night { background:#1e3a5f; color:white; border-radius:8px; padding:5px 2px;
@@ -6894,6 +6916,7 @@ else:
         # Pre-color sets from absence_requests for this user × this month
         ar_df = st.session_state.absence_requests.copy()
         approved_vac_days, approved_202_days, approved_future_days, pending_days = set(), set(), set(), set()
+        approved_other_days = set()
         if not ar_df.empty and 'employee' in ar_df.columns:
             ar_df['employee'] = ar_df['employee'].astype(str).str.strip()
             user_n = str(user_name).strip()
@@ -6915,7 +6938,9 @@ else:
                                 approved_202_days.add(d_iter.day)
                             elif atype == 'חופש עתידי':
                                 approved_future_days.add(d_iter.day)
-                            else:  # חופש / היעדרות אחרת → 🔵
+                            elif atype == 'היעדרות אחרת':
+                                approved_other_days.add(d_iter.day)
+                            else:  # חופש → 🔵
                                 approved_vac_days.add(d_iter.day)
                         elif status == 'pending':
                             pending_days.add(d_iter.day)
@@ -6964,7 +6989,12 @@ else:
                     except Exception:
                         continue
                     _atype = str(_r.get('type', '')).strip()
-                    _val   = 2 if _atype == '202' else 1
+                    if _atype == '202':
+                        _val = 2
+                    elif _atype == 'היעדרות אחרת':
+                        _val = 3
+                    else:
+                        _val = 1
                     _di    = _sd
                     while _di <= _ed:
                         if _di.month == daily_active_month_int and _di.year == 2026:
@@ -7006,21 +7036,34 @@ else:
                         elif day in approved_202_days:
                             st.markdown(f"<div class='dayabs-202'>{day}</div>",
                                         unsafe_allow_html=True)
-                        # ── Clickable: 3-state cycle ─────────────────
+                        elif day in approved_other_days:
+                            st.markdown(f"<div class='dayabs-other'>{day}</div>",
+                                        unsafe_allow_html=True)
+                        # ── Clickable cycle ──────────────────────────
+                        # רופא בכיר:  פנוי → חופש → היעדרות אחרת → פנוי
+                        # מתמחה:      פנוי → חופש → 202 → היעדרות אחרת → פנוי
                         else:
                             _state = _cycle.get(day, 0)
                             if _state == 1:
-                                # Light green — בקשה לחופש; click → 202 (or → free for רופא בכיר)
+                                # Light green — בקשה לחופש; click → next state
                                 if st.button(str(day),
                                              key=f"dayabs_vac_{daily_active_month_int}_{day}",
                                              use_container_width=True):
-                                    _cycle[day] = 0 if role == 'רופא בכיר' else 2
+                                    _cycle[day] = 3 if role == 'רופא בכיר' else 2
                                     st.session_state[_cycle_ns] = _cycle
                                     st.rerun()
                             elif _state == 2:
-                                # Light yellow — בקשה ל-202; click → free
+                                # Light yellow — בקשה ל-202; click → היעדרות אחרת
                                 if st.button(str(day),
                                              key=f"dayabs_202_{daily_active_month_int}_{day}",
+                                             use_container_width=True):
+                                    _cycle[day] = 3
+                                    st.session_state[_cycle_ns] = _cycle
+                                    st.rerun()
+                            elif _state == 3:
+                                # Light slate — בקשה להיעדרות אחרת; click → free
+                                if st.button(str(day),
+                                             key=f"dayabs_other_{daily_active_month_int}_{day}",
                                              use_container_width=True):
                                     _cycle[day] = 0
                                     st.session_state[_cycle_ns] = _cycle
@@ -7056,6 +7099,10 @@ else:
                     "padding:1px 10px'>&nbsp;</span> 202 מאושר &nbsp;|&nbsp; "
                 )
             _legend_html += (
+                "<span style='background:#e2e8f0;border-radius:4px;"
+                "padding:1px 10px;border:1px solid #cbd5e1'>&nbsp;</span> בקשה להיעדרות אחרת &nbsp;|&nbsp; "
+                "<span style='background:#64748b;color:#64748b;border-radius:4px;"
+                "padding:1px 10px'>&nbsp;</span> היעדרות אחרת מאושרת &nbsp;|&nbsp; "
                 "<span style='border:1px solid #e2e8f0;padding:1px 10px;border-radius:4px;"
                 "background:white'>&nbsp;</span> פנוי"
                 "</div>"
@@ -7065,20 +7112,29 @@ else:
         # ── Summary message + שמור button ──────────────────────────────
         _vac_sel = sorted(d for d, s in _cycle.items() if s == 1)
         _202_sel = sorted(d for d, s in _cycle.items() if s == 2)
+        _other_sel = sorted(d for d, s in _cycle.items() if s == 3)
 
-        if _vac_sel or _202_sel:
+        if _vac_sel or _202_sel or _other_sel:
             st.divider()
             # ── Conflict warning (Feature 2) — show same-dept overlap with already-approved
             # absences BEFORE the user clicks "שמור". Soft warning, doesn't block submission.
-            _ea_first_day = (_vac_sel + _202_sel)[0]
+            _all_sel_days = sorted(_vac_sel + _202_sel + _other_sel)
+            _ea_first_day = _all_sel_days[0]
             _ea_first_date = date(2026, daily_active_month_int, _ea_first_day)
-            _ea_last_day = (_vac_sel + _202_sel)[-1]
+            _ea_last_day = _all_sel_days[-1]
             _ea_last_date = date(2026, daily_active_month_int, _ea_last_day)
             _ea_dept_preview = _emp_dept_for_date(user_name, _ea_first_date)
             _ea_conflicts = _absence_conflicts(
                 user_name, _ea_dept_preview, _ea_first_date, _ea_last_date)
             if _ea_conflicts:
                 st.warning(_format_absence_conflict_warning(_ea_conflicts))
+            # Optional reason for "היעדרות אחרת" requests — written to the notes column.
+            _other_note = ""
+            if _other_sel:
+                _other_note = st.text_input(
+                    "סיבת ההיעדרות האחרת (רשות):",
+                    key=f"dayabs_other_note_{daily_active_month_int}",
+                    placeholder="לדוגמה: מילואים, יום עיון, אבל…")
             _btn_col, _msg_col = st.columns([1, 4])
             with _msg_col:
                 _lines = []
@@ -7092,6 +7148,11 @@ else:
                         f"<span style='background:#fef9c3;color:#854d0e;border-radius:4px;"
                         f"padding:1px 7px;margin:2px;display:inline-block'>"
                         f"בקשה ל-202 — {_d:02d}/{daily_active_month_int:02d}</span>")
+                for _d in _other_sel:
+                    _lines.append(
+                        f"<span style='background:#e2e8f0;color:#475569;border-radius:4px;"
+                        f"padding:1px 7px;margin:2px;display:inline-block'>"
+                        f"בקשה להיעדרות אחרת — {_d:02d}/{daily_active_month_int:02d}</span>")
                 st.markdown(
                     "<div style='direction:rtl;line-height:2;font-size:0.85rem'>"
                     + " ".join(_lines) + "</div>",
@@ -7105,7 +7166,7 @@ else:
                     # _emp_dept_for_date returns dept_rotation.daily_dept for the request's
                     # year-month, with a staff.dept fallback if the user hasn't yet been
                     # placed on the Gantt for that month.
-                    _ea_first_d = (_vac_sel + _202_sel)[0]
+                    _ea_first_d = _all_sel_days[0]
                     _dept_at_req = _emp_dept_for_date(
                         user_name, date(2026, daily_active_month_int, _ea_first_d))
                     _mgr_email   = ""
@@ -7154,6 +7215,16 @@ else:
                             'manager_email': _mgr_email, 'approved_by': _appr,
                             'notes': '', 'created_at': _now, 'responded_at': _resp,
                         })
+                    for _d in _other_sel:
+                        _ds = f"2026-{daily_active_month_int:02d}-{_d:02d}"
+                        _new_rows.append({
+                            'id': str(uuid.uuid4()), 'employee': str(user_name).strip(),
+                            'start_date': _ds, 'end_date': _ds, 'type': 'היעדרות אחרת',
+                            'status': _req_st, 'dept_at_request': _dept_at_req,
+                            'manager_email': _mgr_email, 'approved_by': _appr,
+                            'notes': _other_note.strip(), 'created_at': _now,
+                            'responded_at': _resp,
+                        })
 
                     _ar_final = pd.concat(
                         [_ar_base, pd.DataFrame(_new_rows)], ignore_index=True)
@@ -7178,13 +7249,18 @@ else:
                                 _wsd_upsert(f"2026-{daily_active_month_int:02d}-{_d:02d}",
                                             str(user_name).strip(), _mgr_dept2,
                                             '202', is_manual=True, note='')
+                            for _d in _other_sel:
+                                _wsd_upsert(f"2026-{daily_active_month_int:02d}-{_d:02d}",
+                                            str(user_name).strip(), _mgr_dept2,
+                                            'אחר', is_manual=True, note=_other_note.strip())
                         _build_approved_map()
                     else:
                         # Email manager
                         if _mgr_email:
                             _all_dates = (
                                 [f"חופש — {_d:02d}/{daily_active_month_int:02d}" for _d in _vac_sel] +
-                                [f"202 — {_d:02d}/{daily_active_month_int:02d}" for _d in _202_sel]
+                                [f"202 — {_d:02d}/{daily_active_month_int:02d}" for _d in _202_sel] +
+                                [f"היעדרות אחרת{(' (' + _other_note.strip() + ')') if _other_note.strip() else ''} — {_d:02d}/{daily_active_month_int:02d}" for _d in _other_sel]
                             )
                             send_notification_email(
                                 _mgr_email,
@@ -7202,8 +7278,8 @@ else:
 
         if st.session_state.pop('show_dayabs_saved', False):
             st.success("✅ הבקשות נשמרו!")
-        elif not (_vac_sel or _202_sel):
-            st.caption("לחץ על יום כדי לבקש חופש או 202")
+        elif not (_vac_sel or _202_sel or _other_sel):
+            st.caption("לחץ על יום כדי לבקש חופש, 202 או היעדרות אחרת")
 
         # ── History table ──
         st.divider()
