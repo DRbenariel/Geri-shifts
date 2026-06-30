@@ -6846,6 +6846,12 @@ elif role in ("מנהל/ת", "מנהל על"):
                 existing = {}
                 existing_sides = {}
 
+            _gantt_saved = st.session_state.pop('show_gantt_save_success', None)
+            if _gantt_saved is not None:
+                st.success(f"✅ נשמרו {_gantt_saved} שיבוצים לחודש {hebrew_months[view_month-1]}")
+            if _mig := st.session_state.pop('show_gantt_migrate_info', 0):
+                st.info(f"↪️ הועברו {_mig} בקשות היעדרות למחלקה החדשה.")
+
             with st.form(f"rotation_form_{view_month}"):
                 new_assignments = {}
                 new_sides = {}
