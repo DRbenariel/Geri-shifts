@@ -277,6 +277,67 @@ def _delete_absence_request(req_id):
     except Exception:
         return False
 
+
+def _migrate_requests_on_dept_change(emp_name: str, old_dept: str, new_dept: str, year_month: str) -> int:
+    """
+    Called when the Gantt moves emp_name from old_dept → new_dept for year_month (YYYY-MM).
+    Updates:
+      • absence_requests  — dept_at_request + manager_email  (pending & approved rows only)
+      • work_schedule_daily — daily_dept on manual חופש/202 rows in old_dept for this month
+    Returns the number of absence_request rows migrated.
+    """
+    emp_n = str(emp_name).strip()
+    ym    = str(year_month)   # e.g. "2026-07"
+
+    # Resolve new manager email (first מנהל מחלקה whose manage_depts includes new_dept)
+    new_mgr_email = ""
+    try:
+        sf = st.session_state.staff
+        for _, sr in sf[sf['type'].astype(str).str.strip() == 'מנהל מחלקה'].iterrows():
+            if new_dept in _parse_manage_depts(sr.get('manage_depts', '')):
+                new_mgr_email = str(sr.get('email', '')).strip()
+                break
+    except Exception:
+        pass
+
+    migrated = 0
+
+    # ── 1. absence_requests ──────────────────────────────────────────────────
+    ar = st.session_state.absence_requests.copy()
+    if not ar.empty and 'id' in ar.columns:
+        mask = (
+            (ar['employee'].astype(str).str.strip() == emp_n) &
+            (ar['start_date'].astype(str).str.startswith(ym)) &
+            (ar['dept_at_request'].astype(str).str.strip() == old_dept) &
+            (ar['status'].astype(str).isin(['pending', 'approved']))
+        )
+        migrated = int(mask.sum())
+        if migrated:
+            ar.loc[mask, 'dept_at_request'] = new_dept
+            ar.loc[mask, 'manager_email']   = new_mgr_email
+            st.session_state.absence_requests = ar
+            save_to_db("absence_requests", ar)
+            _build_approved_map()
+
+    # ── 2. work_schedule_daily — manual absence rows in old dept ─────────────
+    wsd = st.session_state.work_schedule_daily.copy()
+    if not wsd.empty and 'date' in wsd.columns:
+        wsd_mask = (
+            (wsd['employee'].astype(str).str.strip() == emp_n) &
+            (wsd['date'].astype(str).str.startswith(ym)) &
+            (wsd['daily_dept'].astype(str).str.strip() == old_dept) &
+            (wsd['is_manual'].astype(str).str.lower() == 'true') &
+            (wsd['status'].astype(str).isin(['חופש', '202']))
+        )
+        if wsd_mask.any():
+            wsd.loc[wsd_mask, 'daily_dept'] = new_dept
+            st.session_state.work_schedule_daily = wsd
+            _rebuild_wsd_index()
+            _save_async("work_schedule_daily", wsd.copy())
+
+    return migrated
+
+
 def _generate_work_schedule(year_month, view_month):
     """
     Generate work_schedule_daily for one month.
