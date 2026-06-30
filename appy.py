@@ -983,6 +983,10 @@ def _build_batched_day_data(dept_name, year_month, view_month, year=None):
                     _note = _wsd_get_note(date_str, emp)
                     if status == "אחר" and _note:
                         absent.append(f"{emp} - אחר ({_note})")
+                    elif status == "אחרי תורנות":
+                        prev_str = (date_obj - timedelta(days=1)).strftime("%Y-%m-%d")
+                        _ns_lbl = _night_shift_dept_label(prev_str, emp)
+                        absent.append(f"{emp} - אחרי תורנות ({_ns_lbl})" if _ns_lbl else f"{emp} - אחרי תורנות")
                     else:
                         absent.append(f"{emp} - {status}")
                 else:
@@ -1819,6 +1823,30 @@ def _get_night_duty(date_str, daily_dept):
         return emp if emp and emp != '---' else None
     except Exception:
         return None
+
+def _night_shift_dept_label(prev_date_str: str, emp: str) -> str:
+    """Return 'פנג"ר', 'שיקום', or '' — the dept of the employee's night shift on prev_date_str."""
+    try:
+        sch = st.session_state.schedule
+        if sch.empty or 'date' not in sch.columns:
+            return ''
+        night_sch = sch[~sch['dept'].astype(str).isin(_FRIDAY_SHIFT_DEPTS)]
+        mask = (
+            (night_sch['date'].astype(str) == prev_date_str) &
+            (night_sch['employee'].astype(str).str.strip() == emp)
+        )
+        rows = night_sch[mask]
+        if rows.empty:
+            return ''
+        dept = str(rows.iloc[0].get('dept', '')).strip()
+        if 'פנימית' in dept:
+            return 'פנג"ר'
+        if 'שיקום' in dept:
+            return 'שיקום'
+        return dept
+    except Exception:
+        return ''
+
 
 _MANUAL_STATUSES = ["עובד", "חופש", "202", "אחרי תורנות", "אחר"]
 # ── Inclusive display labels for role types (stored values unchanged) ─────────
