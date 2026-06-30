@@ -6150,7 +6150,7 @@ elif role in ("מנהל/ת", "מנהל על"):
                     "manual_schedule_only": st.column_config.CheckboxColumn(
                         "✋ שיבוץ ידני בלבד",
                         help="אם מסומן — העובד לא ישובץ אוטומטית לסידור העבודה. יופיע רק אם הוספת ידנית.",
-                        width="small"),
+                        width="medium"),
                 }
             )
             submit_changes = st.form_submit_button("💾 שמור שינויים בצוות", use_container_width=False)
