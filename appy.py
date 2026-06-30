@@ -445,11 +445,21 @@ def _generate_work_schedule(year_month, view_month):
         post_shifts = 0
         num_days = calendar.monthrange(year, view_month)[1]
 
+        _staff_mso = {
+            str(r['name']).strip(): (r['manual_schedule_only']
+                                     if isinstance(r['manual_schedule_only'], bool)
+                                     else str(r.get('manual_schedule_only', '')).strip().lower() == 'true')
+            for _, r in st.session_state.staff.iterrows()
+            if 'manual_schedule_only' in r.index
+        }
+
         for _, rot in month_rotation.iterrows():
             emp_n = rot['employee']
             dept_n = rot['daily_dept']
             if dept_n == "— לא שובץ —" or not dept_n:
                 continue
+            if _staff_mso.get(emp_n, False):
+                continue  # only appear when manually planted
             for d in range(1, num_days + 1):
                 date_obj = date(year, view_month, d)
                 date_str = date_obj.strftime('%Y-%m-%d')
@@ -772,7 +782,7 @@ def _export_dept_grid_excel(dept_name, year_month, view_month):
                 col_num = i + 2
                 cell = ws_xl.cell(row_num, col_num)
                 lbl = _GRID_STATUS_LABEL_SHORT.get(status, status)
-                cell.value = lbl + (f"\n{note}" if note else "")
+                cell.value = lbl
                 cell.alignment = Alignment(horizontal='center', vertical='center',
                                            wrap_text=True, shrink_to_fit=False)
                 fill_hex = _XL_STATUS_FILL.get(status, "F8FAFC")
@@ -980,10 +990,7 @@ def _build_batched_day_data(dept_name, year_month, view_month, year=None):
                     # מנהל מחלקה not planted (or transferred out) this day → skip
                     continue
                 if status in _BATCHED_ABSENT_STATUSES:
-                    _note = _wsd_get_note(date_str, emp)
-                    if status == "אחר" and _note:
-                        absent.append(f"{emp} - אחר ({_note})")
-                    elif status == "אחרי תורנות":
+                    if status == "אחרי תורנות":
                         prev_str = (date_obj - timedelta(days=1)).strftime("%Y-%m-%d")
                         _ns_lbl = _night_shift_dept_label(prev_str, emp)
                         absent.append(f"{emp} - אחרי תורנות ({_ns_lbl})" if _ns_lbl else f"{emp} - אחרי תורנות")
@@ -1716,16 +1723,21 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         wd_idx = (date_obj.weekday() + 1) % 7  # Sun=0 … Sat=6
 
-        # 0c. מנהל מחלקה rows default to empty unless explicitly planted via is_manual
+        # 0c. מנהל מחלקה or manual_schedule_only employees: never auto-planted
         try:
             sf = st.session_state.staff
             _erow = sf[sf['name'].astype(str).str.strip() == emp]
-            if not _erow.empty and str(_erow.iloc[0].get('type', '')).strip() == 'מנהל מחלקה':
-                _idx = st.session_state.get('wsd_index', {})
-                _ent = _idx.get((date_str, emp), {})
-                if _ent.get('is_manual'):
-                    return _ent.get('status', '')
-                return ""   # empty by default
+            if not _erow.empty:
+                _er = _erow.iloc[0]
+                _is_mgr = str(_er.get('type', '')).strip() == 'מנהל מחלקה'
+                _mso_raw = _er.get('manual_schedule_only', '')
+                _manual_only = _mso_raw if isinstance(_mso_raw, bool) else str(_mso_raw).strip().lower() == 'true'
+                if _is_mgr or _manual_only:
+                    _idx = st.session_state.get('wsd_index', {})
+                    _ent = _idx.get((date_str, emp), {})
+                    if _ent.get('is_manual'):
+                        return _ent.get('status', '')
+                    return ""   # empty by default
         except Exception:
             pass
 
@@ -3576,6 +3588,12 @@ if 'staff' not in st.session_state:
         st.session_state.staff['manage_depts'] = ''
     if 'recurring_absent_days' not in st.session_state.staff.columns:
         st.session_state.staff['recurring_absent_days'] = ''
+    if 'manual_schedule_only' not in st.session_state.staff.columns:
+        st.session_state.staff['manual_schedule_only'] = False
+    else:
+        st.session_state.staff['manual_schedule_only'] = st.session_state.staff['manual_schedule_only'].apply(
+            lambda v: v if isinstance(v, bool) else str(v).strip().lower() == 'true'
+        )
 
 if 'schedule' not in st.session_state:
     st.session_state.schedule = get_db_data("schedule")
@@ -6084,7 +6102,8 @@ elif role in ("מנהל/ת", "מנהל על"):
             # Build editor view: exclude password & only_home_dept from the editable table
             # (only_home_dept handled via the multiselect above)
             preferred_order = ['name', 'type', 'dept', 'monthly_quota', 'weekend_quota',
-                               'email', 'manage_depts', 'recurring_absent_days']
+                               'email', 'manage_depts', 'recurring_absent_days',
+                               'manual_schedule_only']
             available = [c for c in preferred_order if c in st.session_state.staff.columns]
             # tack on any unexpected extra cols (except hidden)
             extras = [c for c in st.session_state.staff.columns
@@ -6128,6 +6147,10 @@ elif role in ("מנהל/ת", "מנהל על"):
                         "🔁 ימי היעדרות קבועים",
                         help="ימי שבוע שבהם העובד נעדר באופן קבוע (יומי). אותיות עברית מופרדות בפסיקים: א,ב,ג,ד,ה,ו,ש. דוגמה: 'ד,ה' = רביעי וחמישי. ייושם אוטומטית בכל סידור.",
                         width="medium"),
+                    "manual_schedule_only": st.column_config.CheckboxColumn(
+                        "✋ שיבוץ ידני בלבד",
+                        help="אם מסומן — העובד לא ישובץ אוטומטית לסידור העבודה. יופיע רק אם הוספת ידנית.",
+                        width="small"),
                 }
             )
             submit_changes = st.form_submit_button("💾 שמור שינויים בצוות", use_container_width=False)
