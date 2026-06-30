@@ -6886,23 +6886,16 @@ elif role in ("מנהל/ת", "מנהל על"):
                 submit = st.form_submit_button(f"💾 שמור שיבוץ לחודש {hebrew_months[view_month-1]}")
 
             if submit:
-                abs_df = st.session_state.absence_requests.copy()
-                warnings_for = []
-                if not abs_df.empty and 'status' in abs_df.columns:
-                    approved_future = abs_df[
-                        (abs_df['status'].astype(str) == 'approved') &
-                        (abs_df['type'].astype(str) == 'חופש עתידי') &
-                        (abs_df['start_date'].astype(str).str.startswith(view_year_month))
-                    ]
-                    for _, ar in approved_future.iterrows():
-                        emp_n = str(ar['employee']).strip()
-                        old_dept = existing.get(emp_n, '')
-                        new_dept = new_assignments.get(emp_n, '')
-                        if old_dept and new_dept and old_dept != new_dept:
-                            warnings_for.append((emp_n, old_dept, new_dept))
-                if warnings_for:
-                    for emp_n, old_d, new_d in warnings_for:
-                        st.warning(f"⚠️ {emp_n}: יש חופש עתידי מאושר. שינוי: {old_d} → {new_d}.")
+                # Detect all dept changes for this month
+                dept_changes = [
+                    (emp_n, existing[emp_n], new_dept)
+                    for emp_n, new_dept in new_assignments.items()
+                    if (emp_n in existing
+                        and existing[emp_n]
+                        and new_dept != "— לא שובץ —"
+                        and existing[emp_n] != new_dept)
+                ]
+
                 other_months = dr[dr['year_month'] != view_year_month] if not dr.empty else pd.DataFrame(
                     columns=['employee','year_month','daily_dept','side'])
                 new_rows = []
@@ -6919,7 +6912,16 @@ elif role in ("מנהל/ת", "מנהל על"):
                 new_dr = _norm_dr(pd.concat([other_months, pd.DataFrame(new_rows)], ignore_index=True))
                 st.session_state.dept_rotation = new_dr
                 save_to_db("dept_rotation", new_dr)
-                st.success(f"✅ נשמרו {len(new_rows)} שיבוצים לחודש {hebrew_months[view_month-1]}")
+
+                # Migrate absence requests + WSD rows for each dept change
+                total_migrated = sum(
+                    _migrate_requests_on_dept_change(emp_n, old_d, new_d, view_year_month)
+                    for emp_n, old_d, new_d in dept_changes
+                )
+                if total_migrated:
+                    st.session_state['show_gantt_migrate_info'] = total_migrated
+
+                st.session_state['show_gantt_save_success'] = len(new_rows)
                 st.rerun()
 
             # Summary
