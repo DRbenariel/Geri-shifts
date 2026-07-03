@@ -8,3 +8,4 @@ streamlit-extras
 streamlit-shadcn-ui
 streamlit-javascript
 gspread
+ortools>=9.8
