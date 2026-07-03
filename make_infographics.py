@@ -244,6 +244,64 @@ STATIC_FUTURE_ABSENCE_ADD = """
 </div>
 """
 
+STATIC_ABSENCE_CONFLICT = """
+<div class="static-section">
+  <p class="static-intro">המערכת מתריעה כעת אוטומטית כש<strong>שני עובדים מאותה מחלקה</strong> נעדרים באותם ימים — בעת אישור בקשה או הוספת היעדרות:</p>
+  <div class="wf-row">
+    <div class="wf-box">
+      <div class="wf-circle">1</div>
+      <div class="wf-label">לחיצה על <strong>✅ אשר</strong> / <strong>שמור</strong> עם חפיפה במחלקה</div>
+    </div>
+    <div class="wf-arr">←</div>
+    <div class="wf-box">
+      <div class="wf-circle">2</div>
+      <div class="wf-label">מופיעה <strong>אזהרת חפיפה</strong> עם שמות העובדים והתאריכים</div>
+    </div>
+    <div class="wf-arr">←</div>
+    <div class="wf-box">
+      <div class="wf-circle">3</div>
+      <div class="wf-label">החלטה: <strong>✅ אשר למרות החפיפה</strong> או ביטול</div>
+    </div>
+  </div>
+  <div class="static-note">
+    🗑️ <strong>מחיקת בקשה מאושרת:</strong> פתח/י את החלק "מחיקת בקשה מאושרת", בחר/י את הבקשה ולחץ/י <strong>🗑️ מחק בקשה</strong> — ההיעדרות תוסר מלוח העבודה.
+  </div>
+</div>
+"""
+
+STATIC_PNIM_SIDES = """
+<div class="static-section">
+  <p class="static-intro">בלוח העבודה של <strong>פנימית גריאטרית</strong> העובדים מחולקים לשני צדדים, מסומנים בצבע לכל שבוע:</p>
+  <div class="deadline-grid">
+    <div class="dl-card" style="background:#fce7f315;border:1px solid #f9a8d4;">
+      <div class="dl-head"><span class="dl-emoji">🌸</span><span class="dl-title">צד ורוד</span></div>
+      <ul class="dl-list"><li>קבוצת עובדים אחת של פנימית</li></ul>
+    </div>
+    <div class="dl-card" style="background:#dbeafe15;border:1px solid #93c5fd;">
+      <div class="dl-head"><span class="dl-emoji">🔵</span><span class="dl-title">צד כחול</span></div>
+      <ul class="dl-list"><li>קבוצת העובדים השנייה</li></ul>
+    </div>
+  </div>
+  <p class="static-intro" style="margin-top:10px;"><strong>➕ העברה זמנית</strong> — הוספת עובד/ת ממחלקה אחרת ליום מסוים:</p>
+  <div class="wf-row">
+    <div class="wf-box">
+      <div class="wf-circle">1</div>
+      <div class="wf-label">פתח/י <strong>"➕ העברה זמנית"</strong> מתחת ללוח</div>
+    </div>
+    <div class="wf-arr">←</div>
+    <div class="wf-box">
+      <div class="wf-circle">2</div>
+      <div class="wf-label">בחר/י <strong>תאריך</strong>, <strong>עובד/ת</strong> (ובפנימית — צד 🌸/🔵)</div>
+    </div>
+    <div class="wf-arr">←</div>
+    <div class="wf-box">
+      <div class="wf-circle">3</div>
+      <div class="wf-label">לביטול — <strong>✕ הסר</strong>; העובד/ת חוזר/ת למחלקת הבית</div>
+    </div>
+  </div>
+</div>
+"""
+
 STATIC_INTERN_DEADLINES = """
 <div class="static-section">
   <p class="static-intro">בלשונית <strong>הגשת בקשות</strong> יש שני סוגי הגשות, עם מועדי הגשה שונים:</p>
@@ -297,7 +355,7 @@ STATIC_INTERN_FUTURE_ABSENCE = """
   </div>
   <div class="static-note">
     ✅ חופש עתידי מאושר מופיע אוטומטית בלוח העבודה בחודש הרלוונטי.
-    הבקשה מועברת למנהל/ת המחלקה לאישור ומייל יישלח עם התשובה.
+    הבקשה מועברת למנהל/ת המחלקה לאישור.
   </div>
 </div>
 """
@@ -323,7 +381,7 @@ STATIC_SENIOR_FUTURE_ABSENCE = """
     <div class="wf-arr">←</div>
     <div class="wf-box">
       <div class="wf-circle">4</div>
-      <div class="wf-label">מנהל/ת מחלקה מאשר/ת — <strong>מייל</strong> יישלח</div>
+      <div class="wf-label">מנהל/ת מחלקה מאשר/ת</div>
     </div>
   </div>
 </div>
@@ -353,15 +411,21 @@ def shots_manager_al(page):
             {"tab": "סידור תורנויות", "icon": "🌙", "img": f"{role}_03_night_sched",
              "caption": "לוח תורנויות לילה עם כל האילוצים והבקשות שהוגשו"},
             {"tab": "סידור עבודה", "icon": "📅", "img": f"{role}_04_work_sched",
-             "caption": "בחירת מחלקה, עריכת לוח עבודה יומי, הוספת עובד זמני"},
+             "caption": "בחירת מחלקה, עריכת לוח עבודה יומי, חלוקת פנימית לצד ורוד/כחול והעברה זמנית"},
+            {"tab": "פנימית — צדדים והעברה זמנית", "icon": "🌸",
+             "static_html": STATIC_PNIM_SIDES,
+             "caption": ""},
             {"tab": "ניהול בקשות — אישור היעדרות עתידית", "icon": "🗂️",
              "img": f"{role}_05_requests",
-             "caption": "אישור/דחיית בקשות היעדרות, צפייה בחופשות עתידיות מאושרות"},
+             "caption": "אישור/דחיית בקשות היעדרות, צפייה בתצוגת גאנט של חופשות מאושרות עם בורר 12 חודשים קדימה"},
             {"tab": "תהליך אישור חופש עתידי", "icon": "✅",
              "static_html": STATIC_FUTURE_ABSENCE_APPROVAL,
              "caption": ""},
             {"tab": "הוספת היעדרות מאושרת ישירות", "icon": "➕",
              "static_html": STATIC_FUTURE_ABSENCE_ADD,
+             "caption": ""},
+            {"tab": "אזהרת חפיפה ומחיקת בקשה", "icon": "⚠️",
+             "static_html": STATIC_ABSENCE_CONFLICT,
              "caption": ""},
             {"tab": "צוות", "icon": "👥", "img": f"{role}_06_team",
              "caption": "הוספה, עריכה והסרה של עובדים — שם, תפקיד, מחלקה, מכסה"},
@@ -385,15 +449,21 @@ def shots_manageret(page):
             {"tab": "גאנט חודשי", "icon": "🗓️", "img": f"{role}_01_gantt",
              "caption": "שיוך עובדים למחלקות יומיות לפי חודש, הגדרת חודש פעיל, ייצוא סידור"},
             {"tab": "סידור עבודה", "icon": "📅", "img": f"{role}_02_work_sched",
-             "caption": "צפייה ועריכה בלוח העבודה היומי לפי מחלקה, ייצוא לגיליון"},
+             "caption": "צפייה ועריכה בלוח העבודה היומי לפי מחלקה, חלוקת פנימית לצד ורוד/כחול, העברה זמנית וייצוא לגיליון"},
+            {"tab": "פנימית — צדדים והעברה זמנית", "icon": "🌸",
+             "static_html": STATIC_PNIM_SIDES,
+             "caption": ""},
             {"tab": "ניהול בקשות — אישור היעדרות עתידית", "icon": "🗂️",
              "img": f"{role}_03_requests",
-             "caption": "אישור/דחיית בקשות היעדרות, צפייה בחופשות עתידיות מאושרות"},
+             "caption": "אישור/דחיית בקשות היעדרות, צפייה בתצוגת גאנט של חופשות מאושרות עם בורר 12 חודשים קדימה"},
             {"tab": "תהליך אישור חופש עתידי", "icon": "✅",
              "static_html": STATIC_FUTURE_ABSENCE_APPROVAL,
              "caption": ""},
             {"tab": "הוספת היעדרות מאושרת ישירות", "icon": "➕",
              "static_html": STATIC_FUTURE_ABSENCE_ADD,
+             "caption": ""},
+            {"tab": "אזהרת חפיפה ומחיקת בקשה", "icon": "⚠️",
+             "static_html": STATIC_ABSENCE_CONFLICT,
              "caption": ""},
             {"tab": "הגדרות", "icon": "⚙️", "img": f"{role}_04_settings",
              "caption": "שינוי סיסמה אישית"},
@@ -412,7 +482,10 @@ def shots_dept_head(page):
         "subtitle": "ניהול לוח עבודה ובקשות עובדי המחלקה",
         "steps": [
             {"tab": "סידור עבודה", "icon": "📅", "img": f"{role}_01_work_sched",
-             "caption": "עריכת לוח עבודה יומי לעובדי המחלקה, ייצוא סידור, הוספת עובד זמני"},
+             "caption": "עריכת לוח עבודה יומי לעובדי המחלקה, חלוקת פנימית לצד ורוד/כחול, העברה זמנית וייצוא סידור"},
+            {"tab": "פנימית — צדדים והעברה זמנית", "icon": "🌸",
+             "static_html": STATIC_PNIM_SIDES,
+             "caption": ""},
             {"tab": "ניהול בקשות — אישור היעדרות עתידית", "icon": "🗂️",
              "img": f"{role}_02_requests",
              "caption": "אישור/דחיית בקשות חופש של עובדי המחלקה, הוספת היעדרות מאושרת"},
@@ -421,6 +494,9 @@ def shots_dept_head(page):
              "caption": ""},
             {"tab": "הוספת היעדרות מאושרת ישירות", "icon": "➕",
              "static_html": STATIC_FUTURE_ABSENCE_ADD,
+             "caption": ""},
+            {"tab": "אזהרת חפיפה ומחיקת בקשה", "icon": "⚠️",
+             "static_html": STATIC_ABSENCE_CONFLICT,
              "caption": ""},
             {"tab": "הגדרות", "icon": "⚙️", "img": f"{role}_03_settings",
              "caption": "שינוי סיסמה אישית"},
@@ -444,19 +520,18 @@ def shots_intern(page):
             {"tab": "מועדי הגשה חשובים", "icon": "⏰",
              "static_html": STATIC_INTERN_DEADLINES,
              "caption": ""},
-            {"tab": "הגשת בקשות 🌙 — אילוצים ובקשות", "icon": "🌙",
-             "img": f"{role}_01_night_requests",
+            {"tab": "הגשת אילוצים לתורנויות", "icon": "🌙",
+             "img": "toranuyot",
              "caption": "בחירת ימי חסימה (אילוץ) ובקשה לתורנות — יש לשלוח לפני ה-7 לחודש"},
             {"tab": "הגשת בקשות ☀️ — חופש / 202", "icon": "☀️",
-             "img": f"{role}_02_day_requests",
+             "img": "daily",
              "caption": "הגשת בקשת חופש/202 לטווח תאריכים — יש לשלוח לפני ה-20 לחודש"},
             {"tab": "הגשת חופש עתידי", "icon": "🗓️",
              "static_html": STATIC_INTERN_FUTURE_ABSENCE,
+             "img": "future_absence",
              "caption": ""},
-            {"tab": "סידור עבודה", "icon": "📅", "img": f"{role}_03_work_cal",
+            {"tab": "סידור עבודה", "icon": "📅", "img": "sidur",
              "caption": "לוח עבודה אישי לקריאה בלבד — צבע לכל סטטוס יומי"},
-            {"tab": "סידור תורנויות", "icon": "🌙", "img": f"{role}_04_night",
-             "caption": "צפייה בשיבוצי תורנות לילה לחודש"},
             {"tab": "הגדרות", "icon": "⚙️", "img": f"{role}_05_settings",
              "caption": "שינוי סיסמה אישית"},
         ]
@@ -473,12 +548,13 @@ def shots_senior_doc(page):
         "icon": "👨‍⚕️",
         "subtitle": "הגשת בקשות היעדרות ועיון בסידור עבודה יומי",
         "steps": [
-            {"tab": "הגשת בקשות ☀️", "icon": "☀️", "img": f"{role}_01_absences",
+            {"tab": "הגשת בקשות ☀️", "icon": "☀️", "img": "daily",
              "caption": "הגשת בקשות חופש/202 לפי טווח תאריכים"},
             {"tab": "הגשת חופש עתידי", "icon": "🗓️",
              "static_html": STATIC_SENIOR_FUTURE_ABSENCE,
+             "img": "future_absence",
              "caption": ""},
-            {"tab": "סידור עבודה", "icon": "📅", "img": f"{role}_02_work_cal",
+            {"tab": "סידור עבודה", "icon": "📅", "img": "sidur",
              "caption": "לוח עבודה אישי לקריאה בלבד — סטטוס כל יום בצבע"},
             {"tab": "הגדרות", "icon": "⚙️", "img": f"{role}_03_settings",
              "caption": "שינוי סיסמה אישית"},
@@ -555,9 +631,15 @@ def build_html(info):
     cards_html = ""
     for i, step in enumerate(steps, 1):
         if step.get("static_html"):
-            # Static workflow / info card — no screenshot
+            # Static workflow / info card — may optionally also show a screenshot
             caption_html = (f'<p class="step-caption">{step["caption"]}</p>'
                             if step.get("caption") else "")
+            img_html = ""
+            if step.get("img"):
+                _img_data = img_to_b64(step["img"])
+                img_html = (f'<img src="{_img_data}" alt="{step["tab"]}" class="step-img">'
+                            if _img_data else
+                            '<div class="step-img no-img">🖼️ אין תמונה</div>')
             cards_html += f"""
     <div class="step-card static-card">
       <div class="step-num" style="background:{color}">{i}</div>
@@ -566,6 +648,7 @@ def build_html(info):
         <span class="step-tab">{step['tab']}</span>
       </div>
       <div class="step-static-body">{step['static_html']}</div>
+      {img_html}
       {caption_html}
     </div>"""
         else:
@@ -848,15 +931,30 @@ class _NullPage:
     def press(self, *a, **kw): pass
 
 
-def regen_html_only():
-    """Rebuild all HTML files from existing screenshots + static content (no browser)."""
+# Short CLI aliases → role keys (for selective html-only regeneration)
+ROLE_ALIASES = {
+    "super_admin": "מנהל על",   "admin": "מנהל על",
+    "manager": "מנהל/ת",
+    "dept_head": "מנהל מחלקה",
+    "intern": "מתמחה",
+    "senior_doctor": "רופא בכיר", "senior": "רופא בכיר",
+    "extern": "תורן חוץ",
+}
+
+
+def regen_html_only(only=None):
+    """Rebuild HTML files from existing screenshots + static content (no browser).
+
+    only : optional list of role_keys to limit regeneration to (default: all roles).
+    """
     print("\n📄 Re-generating HTML from existing screenshots (html-only mode)...")
     _null = _NullPage()
     login_step = {
         "tab": "כניסה למערכת", "icon": "🔐", "img": "login_screen",
         "caption": "הזן/י שם משתמש וסיסמה. בכניסה ראשונה — שנה/י סיסמה בהגדרות."
     }
-    for role_key in ROLE_ORDER:
+    targets = only if only else ROLE_ORDER
+    for role_key in targets:
         shot_fn = SHOT_FNS[role_key]
         try:
             info = shot_fn(_null)
@@ -882,6 +980,18 @@ if __name__ == "__main__":
             else:
                 print(f"  (missing) {name}.png — will show placeholder")
             return str(path)
-        regen_html_only()
+        # Any extra args after --html-only select specific roles, e.g.
+        #   python make_infographics.py --html-only intern senior_doctor
+        sel = [a for a in sys.argv[1:] if a != "--html-only"]
+        only = None
+        if sel:
+            only = []
+            for a in sel:
+                key = ROLE_ALIASES.get(a, a)
+                if key in SHOT_FNS:
+                    only.append(key)
+                else:
+                    print(f"  ⚠️  Unknown role '{a}' — valid: {', '.join(ROLE_ALIASES)}")
+        regen_html_only(only)
     else:
         main()

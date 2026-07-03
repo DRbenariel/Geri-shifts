@@ -277,6 +277,67 @@ def _delete_absence_request(req_id):
     except Exception:
         return False
 
+
+def _migrate_requests_on_dept_change(emp_name: str, old_dept: str, new_dept: str, year_month: str) -> int:
+    """
+    Called when the Gantt moves emp_name from old_dept → new_dept for year_month (YYYY-MM).
+    Updates:
+      • absence_requests  — dept_at_request + manager_email  (pending & approved rows only)
+      • work_schedule_daily — daily_dept on manual חופש/202 rows in old_dept for this month
+    Returns the number of absence_request rows migrated.
+    """
+    emp_n = str(emp_name).strip()
+    ym    = str(year_month)   # e.g. "2026-07"
+
+    # Resolve new manager email (first מנהל מחלקה whose manage_depts includes new_dept)
+    new_mgr_email = ""
+    try:
+        sf = st.session_state.staff
+        for _, sr in sf[sf['type'].astype(str).str.strip() == 'מנהל מחלקה'].iterrows():
+            if new_dept in _parse_manage_depts(sr.get('manage_depts', '')):
+                new_mgr_email = str(sr.get('email', '')).strip()
+                break
+    except Exception:
+        pass
+
+    migrated = 0
+
+    # ── 1. absence_requests ──────────────────────────────────────────────────
+    ar = st.session_state.absence_requests.copy()
+    if not ar.empty and 'id' in ar.columns:
+        mask = (
+            (ar['employee'].astype(str).str.strip() == emp_n) &
+            (ar['start_date'].astype(str).str.startswith(ym)) &
+            (ar['dept_at_request'].astype(str).str.strip() == old_dept) &
+            (ar['status'].astype(str).isin(['pending', 'approved']))
+        )
+        migrated = int(mask.sum())
+        if migrated:
+            ar.loc[mask, 'dept_at_request'] = new_dept
+            ar.loc[mask, 'manager_email']   = new_mgr_email
+            st.session_state.absence_requests = ar
+            save_to_db("absence_requests", ar)
+            _build_approved_map()
+
+    # ── 2. work_schedule_daily — manual absence rows in old dept ─────────────
+    wsd = st.session_state.work_schedule_daily.copy()
+    if not wsd.empty and 'date' in wsd.columns:
+        wsd_mask = (
+            (wsd['employee'].astype(str).str.strip() == emp_n) &
+            (wsd['date'].astype(str).str.startswith(ym)) &
+            (wsd['daily_dept'].astype(str).str.strip() == old_dept) &
+            (wsd['is_manual'].astype(str).str.lower() == 'true') &
+            (wsd['status'].astype(str).isin(['חופש', '202']))
+        )
+        if wsd_mask.any():
+            wsd.loc[wsd_mask, 'daily_dept'] = new_dept
+            st.session_state.work_schedule_daily = wsd
+            _rebuild_wsd_index()
+            _save_async("work_schedule_daily", wsd.copy())
+
+    return migrated
+
+
 def _generate_work_schedule(year_month, view_month):
     """
     Generate work_schedule_daily for one month.
@@ -384,11 +445,21 @@ def _generate_work_schedule(year_month, view_month):
         post_shifts = 0
         num_days = calendar.monthrange(year, view_month)[1]
 
+        _staff_mso = {
+            str(r['name']).strip(): (r['manual_schedule_only']
+                                     if isinstance(r['manual_schedule_only'], bool)
+                                     else str(r.get('manual_schedule_only', '')).strip().lower() == 'true')
+            for _, r in st.session_state.staff.iterrows()
+            if 'manual_schedule_only' in r.index
+        }
+
         for _, rot in month_rotation.iterrows():
             emp_n = rot['employee']
             dept_n = rot['daily_dept']
             if dept_n == "— לא שובץ —" or not dept_n:
                 continue
+            if _staff_mso.get(emp_n, False):
+                continue  # only appear when manually planted
             for d in range(1, num_days + 1):
                 date_obj = date(year, view_month, d)
                 date_str = date_obj.strftime('%Y-%m-%d')
@@ -425,7 +496,7 @@ def _generate_work_schedule(year_month, view_month):
                 if status == "עובד":
                     for sd, ed, atype in approved_map.get(emp_n, []):
                         if sd <= date_obj <= ed:
-                            status = atype if atype else "חופש"
+                            status = _ABSENCE_TYPE_TO_STATUS.get(atype, atype) if atype else "חופש"
                             break
 
                 # Priority 2: recurring weekly absence? (weekdays only — Fri/Sat handled above)
@@ -711,7 +782,7 @@ def _export_dept_grid_excel(dept_name, year_month, view_month):
                 col_num = i + 2
                 cell = ws_xl.cell(row_num, col_num)
                 lbl = _GRID_STATUS_LABEL_SHORT.get(status, status)
-                cell.value = lbl + (f"\n{note}" if note else "")
+                cell.value = lbl
                 cell.alignment = Alignment(horizontal='center', vertical='center',
                                            wrap_text=True, shrink_to_fit=False)
                 fill_hex = _XL_STATUS_FILL.get(status, "F8FAFC")
@@ -919,9 +990,10 @@ def _build_batched_day_data(dept_name, year_month, view_month, year=None):
                     # מנהל מחלקה not planted (or transferred out) this day → skip
                     continue
                 if status in _BATCHED_ABSENT_STATUSES:
-                    _note = _wsd_get_note(date_str, emp)
-                    if status == "אחר" and _note:
-                        absent.append(f"{emp} - אחר ({_note})")
+                    if status == "אחרי תורנות":
+                        prev_str = (date_obj - timedelta(days=1)).strftime("%Y-%m-%d")
+                        _ns_lbl = _night_shift_dept_label(prev_str, emp)
+                        absent.append(f"{emp} - אחרי תורנות ({_ns_lbl})" if _ns_lbl else f"{emp} - אחרי תורנות")
                     else:
                         absent.append(f"{emp} - {status}")
                 else:
@@ -1245,14 +1317,15 @@ def _build_approved_map():
             ar2['employee']   = ar2['employee'].astype(str).str.strip()
             ar2['start_date'] = ar2['start_date'].astype(str)
             ar2['end_date']   = ar2['end_date'].astype(str)
-            ar2['type']       = ar2['type'].astype(str)
+            ar2['type']       = ar2['type'].astype(str).str.strip()
             for _, r in ar2[ar2['status'] == 'approved'].iterrows():
                 try:
                     sd = datetime.strptime(r['start_date'], '%Y-%m-%d').date()
                     ed = datetime.strptime(r['end_date'],   '%Y-%m-%d').date()
                 except Exception:
                     continue
-                result.setdefault(r['employee'], []).append((sd, ed, r['type']))
+                _atype = _ABSENCE_TYPE_TO_STATUS.get(r['type'], r['type'])
+                result.setdefault(r['employee'], []).append((sd, ed, _atype))
     except Exception:
         pass
     st.session_state._approved_map = result
@@ -1545,6 +1618,13 @@ _GRID_STATUS_LABEL_SHORT = {
     "אחר":          "+",
     "תורנות":       "ת",
 }
+# Maps absence_requests.type → valid work_schedule_daily status.
+# "חופש עתידי" is a request type, not a display status; normalize to "חופש".
+# "היעדרות אחרת" normalizes to "אחר" (the grid's catch-all status).
+_ABSENCE_TYPE_TO_STATUS = {
+    "חופש עתידי":   "חופש",
+    "היעדרות אחרת": "אחר",
+}
 
 def _make_initials(name: str) -> str:
     """Return first letter of each word: 'סלאמה קאסם' → 'ס ק'"""
@@ -1651,16 +1731,21 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         wd_idx = (date_obj.weekday() + 1) % 7  # Sun=0 … Sat=6
 
-        # 0c. מנהל מחלקה rows default to empty unless explicitly planted via is_manual
+        # 0c. מנהל מחלקה or manual_schedule_only employees: never auto-planted
         try:
             sf = st.session_state.staff
             _erow = sf[sf['name'].astype(str).str.strip() == emp]
-            if not _erow.empty and str(_erow.iloc[0].get('type', '')).strip() == 'מנהל מחלקה':
-                _idx = st.session_state.get('wsd_index', {})
-                _ent = _idx.get((date_str, emp), {})
-                if _ent.get('is_manual'):
-                    return _ent.get('status', '')
-                return ""   # empty by default
+            if not _erow.empty:
+                _er = _erow.iloc[0]
+                _is_mgr = str(_er.get('type', '')).strip() == 'מנהל מחלקה'
+                _mso_raw = _er.get('manual_schedule_only', '')
+                _manual_only = _mso_raw if isinstance(_mso_raw, bool) else str(_mso_raw).strip().lower() == 'true'
+                if _is_mgr or _manual_only:
+                    _idx = st.session_state.get('wsd_index', {})
+                    _ent = _idx.get((date_str, emp), {})
+                    if _ent.get('is_manual'):
+                        return _ent.get('status', '')
+                    return ""   # empty by default
         except Exception:
             pass
 
@@ -1704,6 +1789,7 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
             approved_map = st.session_state.get('_approved_map', {})
             for sd, ed, atype in approved_map.get(emp, []):
                 if sd <= date_obj <= ed:
+                    atype = _ABSENCE_TYPE_TO_STATUS.get(str(atype).strip(), str(atype).strip())
                     return atype if atype else "חופש"
         except Exception:
             pass
@@ -1758,6 +1844,30 @@ def _get_night_duty(date_str, daily_dept):
         return emp if emp and emp != '---' else None
     except Exception:
         return None
+
+def _night_shift_dept_label(prev_date_str: str, emp: str) -> str:
+    """Return 'פנג"ר', 'שיקום', or '' — the dept of the employee's night shift on prev_date_str."""
+    try:
+        sch = st.session_state.schedule
+        if sch.empty or 'date' not in sch.columns:
+            return ''
+        night_sch = sch[~sch['dept'].astype(str).isin(_FRIDAY_SHIFT_DEPTS)]
+        mask = (
+            (night_sch['date'].astype(str) == prev_date_str) &
+            (night_sch['employee'].astype(str).str.strip() == emp)
+        )
+        rows = night_sch[mask]
+        if rows.empty:
+            return ''
+        dept = str(rows.iloc[0].get('dept', '')).strip()
+        if 'פנימית' in dept:
+            return 'פנג"ר'
+        if 'שיקום' in dept:
+            return 'שיקום'
+        return dept
+    except Exception:
+        return ''
+
 
 _MANUAL_STATUSES = ["עובד", "חופש", "202", "אחרי תורנות", "אחר"]
 # ── Inclusive display labels for role types (stored values unchanged) ─────────
@@ -3487,6 +3597,12 @@ if 'staff' not in st.session_state:
         st.session_state.staff['manage_depts'] = ''
     if 'recurring_absent_days' not in st.session_state.staff.columns:
         st.session_state.staff['recurring_absent_days'] = ''
+    if 'manual_schedule_only' not in st.session_state.staff.columns:
+        st.session_state.staff['manual_schedule_only'] = False
+    else:
+        st.session_state.staff['manual_schedule_only'] = st.session_state.staff['manual_schedule_only'].apply(
+            lambda v: v if isinstance(v, bool) else str(v).strip().lower() == 'true'
+        )
 
 if 'schedule' not in st.session_state:
     st.session_state.schedule = get_db_data("schedule")
@@ -4248,9 +4364,455 @@ def run_smart_scheduling(year, month, only_weekends=False):
 
     st.session_state.schedule = final_df
     save_to_db("schedule", st.session_state.schedule)
-    
+
     # הצגת דוח האיזון למשתמש
     st.info(balancing_msg)
+
+def run_smart_scheduling_cp(year, month, only_weekends=False):
+    """
+    CP-SAT optimized scheduler. Replaces the greedy slot-by-slot approach with a
+    global optimizer that sees all assignments simultaneously. Falls back to
+    run_smart_scheduling() if ortools is unavailable or the solver fails.
+    All hard/soft constraints are preserved exactly.
+    """
+    try:
+        from ortools.sat.python import cp_model as _cp
+    except ImportError:
+        st.warning("⚠️ ortools לא מותקן — משתמש בשיבוץ חמדני")
+        run_smart_scheduling(year, month, only_weekends)
+        return
+
+    # ── 1. Identical initialization to run_smart_scheduling() ──────────────
+    num_days = calendar.monthrange(year, month)[1]
+    staff_df = st.session_state.staff.copy()
+    all_current_records = st.session_state.schedule.to_dict('records')
+
+    new_schedule = []
+    current_month_prefix = f"{year}-{month:02d}"
+    for r in all_current_records:
+        if not str(r['date']).startswith(current_month_prefix):
+            new_schedule.append(r)
+        else:
+            if r['employee'] != '---':
+                new_schedule.append(r)
+
+    work_load       = {row['name']: 0   for _, row in staff_df.iterrows()}
+    weekends_worked = {row['name']: set() for _, row in staff_df.iterrows()}
+    last_assignment = {row['name']: -999 for _, row in staff_df.iterrows()}
+    wed_counts      = {row['name']: 0   for _, row in staff_df.iterrows()}
+    thu_counts      = {row['name']: 0   for _, row in staff_df.iterrows()}
+
+    for s in new_schedule:
+        if s['employee'] not in work_load or s['employee'] == '---': continue
+        dt = datetime.strptime(s['date'], '%Y-%m-%d')
+        if dt.weekday() == 2: wed_counts[s['employee']] += 1
+        if dt.weekday() == 3: thu_counts[s['employee']] += 1
+        if dt.toordinal() > last_assignment[s['employee']]:
+            last_assignment[s['employee']] = dt.toordinal()
+        if str(s['date']).startswith(current_month_prefix):
+            work_load[s['employee']] += 1
+            if is_functional_weekend(dt, st.session_state.special_days) and "שישי בוקר" not in s.get('dept', ''):
+                weekends_worked[s['employee']].add(dt.isocalendar()[1])
+
+    avg_wed = sum(wed_counts.values()) / len(wed_counts) if wed_counts else 0
+    avg_thu = sum(thu_counts.values()) / len(thu_counts) if thu_counts else 0
+    priority_wed = [k for k, v in wed_counts.items() if v < avg_wed]
+    priority_thu = [k for k, v in thu_counts.items() if v < avg_thu]
+    balancing_msg = (
+        f"**דוח איזון הוגנות (רב-חודשי):**\n"
+        f"- **רביעי:** ממוצע {avg_wed:.1f}. תועדפו: {len(priority_wed)} עובדים.\n"
+        f"- **חמישי:** ממוצע {avg_thu:.1f}. תועדפו: {len(priority_thu)} עובדים.\n"
+        f"- **שישי בוקר:** האיזון מבוצע אוטומטית על סמך כל ההיסטוריה."
+    )
+
+    all_dates = [date(year, month, d) for d in range(1, num_days + 1)]
+
+    def safe_int(val, default=0):
+        try:
+            if pd.isna(val) or val == "": return default
+            return int(float(val))
+        except (ValueError, TypeError):
+            return default
+
+    # ── 2. Lookup structures ────────────────────────────────────────────────
+    DEPTS = ["פנימית גריאטרית", "שיקום"]
+
+    covered = {(str(s['date']), s['dept']) for s in new_schedule if s['employee'] not in ('---', '')}
+
+    employees = []
+    for _, row in staff_df.iterrows():
+        name = str(row.get('name', '')).strip()
+        if not name or name == '---' or name.upper() == 'ADMIN': continue
+        if str(row.get('type', '')).strip() in ('מנהל/ת', 'מנהל מחלקה'): continue
+        if safe_int(row.get('monthly_quota', 0), 0) == 0: continue
+        employees.append(name)
+
+    emp_row   = {}
+    for e in employees:
+        rows = staff_df[staff_df['name'] == e]
+        if not rows.empty:
+            emp_row[e] = rows.iloc[0]
+
+    emp_type     = {e: str(emp_row[e].get('type', '')).strip()           for e in employees if e in emp_row}
+    emp_quota    = {e: safe_int(emp_row[e].get('monthly_quota', 6), 6)   for e in employees if e in emp_row}
+    emp_wq       = {e: safe_int(emp_row[e].get('weekend_quota', 0), 0)   for e in employees if e in emp_row}
+    emp_only_home = {}
+    for e in employees:
+        if e not in emp_row: continue
+        _oh = emp_row[e].get('only_home_dept', False)
+        emp_only_home[e] = _oh if isinstance(_oh, bool) else str(_oh).strip().lower() == 'true'
+    emp_home = {e: (_emp_night_dept(e, f"{year}-{month:02d}") or str(emp_row[e].get('dept', '') or ''))
+                for e in employees if e in emp_row}
+    employees = [e for e in employees if e in emp_row]  # keep only resolved rows
+
+    blocked_set = set()
+    wish_set    = set()
+    for _, r in st.session_state.requests.iterrows():
+        key = (str(r['employee']).strip(), str(r['date']))
+        if str(r['status']) == 'אילוץ':  blocked_set.add(key)
+        elif str(r['status']) == 'בקשה': wish_set.add(key)
+
+    if only_weekends:
+        target_dates = [d for d in all_dates if is_functional_weekend(d, st.session_state.special_days)]
+    else:
+        target_dates = all_dates
+
+    optimizable_slots = [(d, k) for d in target_dates for k in DEPTS if (str(d), k) not in covered]
+
+    if not optimizable_slots:
+        st.info(f"✅ כל המשמרות כבר שובצו.\n\n{balancing_msg}")
+        return
+
+    # ── 3. Build CP-SAT model ───────────────────────────────────────────────
+    model = _cp.CpModel()
+    x = {}  # (emp, date_obj, dept_str) -> BoolVar
+
+    for e in employees:
+        for d, k in optimizable_slots:
+            d_str = str(d)
+            if (e, d_str) in blocked_set: continue
+            if k == "פנימית גריאטרית" and emp_type.get(e) == 'תורן חוץ': continue
+            if emp_only_home.get(e):
+                home = emp_home.get(e, '')
+                if home not in ('כללי', k): continue
+            x[(e, d, k)] = model.new_bool_var(f"x|{e}|{d}|{k}")
+
+    # HC-1: at most one employee per (day, dept)
+    for d, k in optimizable_slots:
+        slot_vars = [x[(e, d, k)] for e in employees if (e, d, k) in x]
+        if slot_vars:
+            model.add(sum(slot_vars) <= 1)
+
+    # HC-2: monthly quota
+    for e in employees:
+        remaining = emp_quota.get(e, 6) - work_load.get(e, 0)
+        all_e = [x[(e, d, k)] for d, k in optimizable_slots if (e, d, k) in x]
+        if all_e:
+            if remaining <= 0:
+                for v in all_e: model.add(v == 0)
+            else:
+                model.add(sum(all_e) <= remaining)
+
+    # HC-3: same-day uniqueness
+    for e in employees:
+        for d in target_dates:
+            day_vars = [x[(e, d, k)] for k in DEPTS if (e, d, k) in x]
+            if len(day_vars) > 1:
+                model.add(sum(day_vars) <= 1)
+
+    # HC-4: rest gap ±2 days (including cross-month boundary)
+    day_list = sorted(set(d for d, k in optimizable_slots))
+    for e in employees:
+        last_ord = last_assignment.get(e, -999)
+        for i, d1 in enumerate(day_list):
+            vars_d1 = [x[(e, d1, k)] for k in DEPTS if (e, d1, k) in x]
+            if not vars_d1: continue
+            # cross-month: forbid if previous assignment is within 2 days
+            if last_ord != -999 and (d1.toordinal() - last_ord) <= 2:
+                for v in vars_d1: model.add(v == 0)
+            # within-month pairs
+            for offset in [1, 2]:
+                if i + offset >= len(day_list): break
+                d2 = day_list[i + offset]
+                vars_d2 = [x[(e, d2, k)] for k in DEPTS if (e, d2, k) in x]
+                if vars_d2:
+                    model.add(sum(vars_d1) + sum(vars_d2) <= 1)
+
+    # HC-5: Wed-Sat rule (מתמחה only)
+    day_set_lookup = set(target_dates)
+    for e in [e for e in employees if emp_type.get(e) == 'מתמחה']:
+        for d in target_dates:
+            vars_d = [x[(e, d, k)] for k in DEPTS if (e, d, k) in x]
+            if not vars_d: continue
+            if d.weekday() == 2:  # Wednesday → forbid Fri (+2) and Sat (+3)
+                for gap in [2, 3]:
+                    d2 = d + timedelta(days=gap)
+                    if d2 in day_set_lookup:
+                        vars_d2 = [x[(e, d2, k)] for k in DEPTS if (e, d2, k) in x]
+                        if vars_d2:
+                            model.add(sum(vars_d) + sum(vars_d2) <= 1)
+            if d.weekday() == 5:  # Saturday → forbid Wed (-3)
+                d2 = d - timedelta(days=3)
+                if d2 in day_set_lookup:
+                    vars_d2 = [x[(e, d2, k)] for k in DEPTS if (e, d2, k) in x]
+                    if vars_d2:
+                        model.add(sum(vars_d) + sum(vars_d2) <= 1)
+
+    # HC-6: weekend quota
+    wknd_days_by_week = {}
+    for d in target_dates:
+        if is_functional_weekend(d, st.session_state.special_days):
+            w = d.isocalendar()[1]
+            wknd_days_by_week.setdefault(w, []).append(d)
+    for e in employees:
+        pre_wknd = weekends_worked.get(e, set())
+        new_wknd_bools = []
+        for w, wdays in wknd_days_by_week.items():
+            if w in pre_wknd: continue
+            wvars = [x[(e, d, k)] for d in wdays for k in DEPTS if (e, d, k) in x]
+            if not wvars: continue
+            wb = model.new_bool_var(f"wknd|{e}|{w}")
+            model.add(sum(wvars) >= 1).only_enforce_if(wb)
+            model.add(sum(wvars) == 0).only_enforce_if(wb.negated())
+            new_wknd_bools.append(wb)
+        if new_wknd_bools:
+            model.add(sum(new_wknd_bools) + len(pre_wknd) <= emp_wq.get(e, 0))
+
+    # HC-7: wish priority — if eligible wishers exist for a slot, only they may fill it
+    for d, k in optimizable_slots:
+        d_str = str(d)
+        wisher_vars    = [x[(e, d, k)] for e in employees if (e, d_str) in wish_set    and (e, d, k) in x]
+        nonwisher_vars = [x[(e, d, k)] for e in employees if (e, d_str) not in wish_set and (e, d, k) in x]
+        if wisher_vars and nonwisher_vars:
+            model.add(sum(nonwisher_vars) == 0)
+
+    # ── 4. Objective (same weights as greedy scoring) ───────────────────────
+    FILL_BONUS = 50_000
+    obj_vars   = []
+    obj_coeffs = []
+
+    for e in employees:
+        q        = max(emp_quota.get(e, 1), 1)
+        last_ord = last_assignment.get(e, -999)
+        for d, k in optimizable_slots:
+            v = x.get((e, d, k))
+            if v is None: continue
+            c  = FILL_BONUS
+            c += int(-100 * work_load.get(e, 0) / q)
+            days_diff = d.toordinal() - last_ord if last_ord != -999 else 30
+            c += int(2 * days_diff)
+            expected = q * (d.day / num_days)
+            c += int(500 * (expected - work_load.get(e, 0)))
+            if emp_type.get(e) == 'תורן חוץ' and k == "שיקום":
+                if d.weekday() in [3, 4, 5] or is_functional_weekend(d, st.session_state.special_days):
+                    c += 2000
+            if emp_type.get(e) == 'מתמחה':
+                if d.weekday() == 2: c += int(-200 * wed_counts.get(e, 0))
+                if d.weekday() == 3: c += int(-200 * thu_counts.get(e, 0))
+            home = emp_home.get(e, '')
+            c += 500 if home in (k, 'כללי') else -5000
+            if (e, str(d)) in wish_set:
+                c += 1000
+            obj_vars.append(v)
+            obj_coeffs.append(int(c))
+
+    if obj_vars:
+        model.maximize(_cp.LinearExpr.weighted_sum(obj_vars, obj_coeffs))
+
+    # ── 5. Solve Phase 1 (primary, 28 s) ───────────────────────────────────
+    solver = _cp.CpSolver()
+    solver.parameters.max_time_in_seconds = 28.0
+    try:
+        solver.parameters.num_workers = 4
+    except Exception:
+        pass
+
+    status = solver.solve(model)
+
+    if status in (_cp.INFEASIBLE, _cp.UNKNOWN):
+        st.warning("⚠️ CP-SAT לא הצליח למצוא פתרון — עובר לשיבוץ חמדני")
+        run_smart_scheduling(year, month, only_weekends)
+        return
+
+    # Extract Phase 1 assignments
+    filled_slots = set()
+    for e in employees:
+        for d, k in optimizable_slots:
+            v = x.get((e, d, k))
+            if v is not None and solver.value(v) == 1:
+                d_str = str(d)
+                new_schedule.append({'date': d_str, 'dept': k, 'employee': e,
+                                     'is_manual': False, 'empty_reason': ''})
+                filled_slots.add((d_str, k))
+                work_load[e]        = work_load.get(e, 0) + 1
+                d_ord               = d.toordinal()
+                if d_ord > last_assignment.get(e, -999): last_assignment[e] = d_ord
+                if d.weekday() == 2: wed_counts[e] = wed_counts.get(e, 0) + 1
+                if d.weekday() == 3: thu_counts[e] = thu_counts.get(e, 0) + 1
+                if is_functional_weekend(d, st.session_state.special_days):
+                    weekends_worked[e].add(d.isocalendar()[1])
+
+    # ── 6. Phase 2: relax rest-gap + weekend-quota for unfilled slots ───────
+    unfilled     = [(d, k) for d, k in optimizable_slots if (str(d), k) not in filled_slots]
+    fallback_cnt = 0
+
+    if unfilled:
+        model2 = _cp.CpModel()
+        x2     = {}
+        for e in employees:
+            for d, k in unfilled:
+                d_str = str(d)
+                if (e, d_str) in blocked_set: continue
+                if k == "פנימית גריאטרית" and emp_type.get(e) == 'תורן חוץ': continue
+                if work_load.get(e, 0) >= emp_quota.get(e, 6): continue
+                # same-day conflict with phase-1 assignments
+                if any(s['date'] == d_str and s['employee'] == e for s in new_schedule
+                       if not str(s.get('empty_reason','')).startswith('לא נמצא')): continue
+                x2[(e, d, k)] = model2.new_bool_var(f"x2|{e}|{d}|{k}")
+
+        for d, k in unfilled:
+            sv = [x2[(e, d, k)] for e in employees if (e, d, k) in x2]
+            if sv: model2.add(sum(sv) <= 1)
+
+        for e in employees:
+            remaining = emp_quota.get(e, 6) - work_load.get(e, 0)
+            all2 = [x2[(e, d, k)] for d, k in unfilled if (e, d, k) in x2]
+            if all2:
+                if remaining <= 0:
+                    for v in all2: model2.add(v == 0)
+                else:
+                    model2.add(sum(all2) <= remaining)
+
+        obj2_v, obj2_c = [], []
+        for e in employees:
+            for d, k in unfilled:
+                v = x2.get((e, d, k))
+                if v is not None:
+                    obj2_v.append(v)
+                    obj2_c.append(50000 - work_load.get(e, 0) * 100)
+        if obj2_v:
+            model2.maximize(_cp.LinearExpr.weighted_sum(obj2_v, obj2_c))
+
+        solver2 = _cp.CpSolver()
+        solver2.parameters.max_time_in_seconds = 10.0
+        status2 = solver2.solve(model2)
+
+        if status2 in (_cp.OPTIMAL, _cp.FEASIBLE):
+            for e in employees:
+                for d, k in unfilled:
+                    v = x2.get((e, d, k))
+                    if v is not None and solver2.value(v) == 1:
+                        d_str = str(d)
+                        new_schedule.append({'date': d_str, 'dept': k, 'employee': e,
+                                             'is_manual': False,
+                                             'empty_reason': 'הושלם מחוסר ברירה (הגמשת חוקים)'})
+                        filled_slots.add((d_str, k))
+                        work_load[e] = work_load.get(e, 0) + 1
+                        fallback_cnt += 1
+
+    # Mark truly empty slots
+    still_empty = [(d, k) for d, k in optimizable_slots if (str(d), k) not in filled_slots]
+    for d, k in still_empty:
+        new_schedule.append({'date': str(d), 'dept': k, 'employee': '---',
+                             'is_manual': False, 'empty_reason': 'לא נמצא פתרון (CP-SAT)'})
+
+    # ── 7. Friday post-pass (verbatim from run_smart_scheduling) ───────────
+    fridays = [d for d in all_dates if d.weekday() == 4
+               or get_functional_day_type(d, st.session_state.special_days) == 'כמו שישי (ערב חג)']
+    for fri_date in fridays:
+        fri_str  = str(fri_date)
+        sat_date = fri_date + timedelta(days=1)
+        sat_str  = str(sat_date)
+
+        fri_worker_pnimia = next((s['employee'] for s in new_schedule
+                                   if s['date'] == fri_str and s['dept'] == 'פנימית גריאטרית'), None)
+        sat_worker_pnimia = next((s['employee'] for s in new_schedule
+                                   if s['date'] == sat_str and s['dept'] == 'פנימית גריאטרית'), None)
+        has_pnimia_1 = any(s for s in new_schedule if s['date'] == fri_str and s['dept'] == 'שישי בוקר - פנימית (1)')
+        has_pnimia_2 = any(s for s in new_schedule if s['date'] == fri_str and s['dept'] == 'שישי בוקר - פנימית (2)')
+        if not has_pnimia_1 and fri_worker_pnimia and fri_worker_pnimia != '---':
+            new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (1)',
+                                  'employee': fri_worker_pnimia, 'is_manual': False,
+                                  'empty_reason': 'נגזר אוטומטית משישי'})
+        if not has_pnimia_2 and sat_worker_pnimia and sat_worker_pnimia != '---':
+            new_schedule.append({'date': fri_str, 'dept': 'שישי בוקר - פנימית (2)',
+                                  'employee': sat_worker_pnimia, 'is_manual': False,
+                                  'empty_reason': 'נגזר אוטומטית משבת'})
+
+        fri_worker_rehab = next((s['employee'] for s in new_schedule
+                                  if s['date'] == fri_str and s['dept'] == 'שיקום'), None)
+        sat_worker_rehab = next((s['employee'] for s in new_schedule
+                                  if s['date'] == sat_str and s['dept'] == 'שיקום'), None)
+
+        def handle_rehab_morning(worker_name, source_day, slot_num):
+            target_dept = f'שישי בוקר - שיקום ({slot_num})'
+            if any(s for s in new_schedule if s['date'] == fri_str and s['dept'] == target_dept): return
+            if not worker_name or worker_name == '---': return
+            w_type = None
+            if worker_name in staff_df['name'].values:
+                w_type = staff_df[staff_df['name'] == worker_name]['type'].iloc[0]
+            if w_type == 'מתמחה':
+                new_schedule.append({'date': fri_str, 'dept': target_dept,
+                                      'employee': worker_name, 'is_manual': False,
+                                      'empty_reason': f'נגזר אוטומטית מ{source_day}'})
+            else:
+                cands = []
+                _fri_ym = fri_str[:7]
+                for _, row in staff_df.iterrows():
+                    if row['type'] != 'מתמחה' or row['name'] == worker_name: continue
+                    _row_dept = _emp_night_dept(row['name'], _fri_ym) or str(row.get('dept', '') or '')
+                    if _row_dept == 'שיקום':
+                        emp = row['name']
+                        is_blocked = not st.session_state.requests[
+                            (st.session_state.requests['employee'] == emp) &
+                            (st.session_state.requests['date'] == fri_str) &
+                            (st.session_state.requests['status'] == "אילוץ")
+                        ].empty
+                        if is_blocked: continue
+                        has_rest = any(
+                            s['employee'] == emp and s['date'] == str(fri_date + timedelta(days=off))
+                            for s in new_schedule for off in [-2, -1, 1, 2]
+                        )
+                        if has_rest: continue
+                        if any(s['employee'] == emp and s['date'] == fri_str for s in new_schedule): continue
+                        if work_load.get(emp, 0) >= safe_int(row['monthly_quota'], 0): continue
+                        fri_cnt = len([s for s in new_schedule if s['employee'] == emp and 'שישי בוקר' in s['dept']])
+                        cands.append((emp, fri_cnt))
+                if cands:
+                    cands.sort(key=lambda z: z[1])
+                    best = cands[0][0]
+                    new_schedule.append({'date': fri_str, 'dept': target_dept,
+                                          'employee': best, 'is_manual': False,
+                                          'empty_reason': f'השלמה במקום {worker_name}'})
+                    work_load[best] = work_load.get(best, 0) + 1
+                else:
+                    new_schedule.append({'date': fri_str, 'dept': target_dept,
+                                          'employee': '---', 'is_manual': False,
+                                          'empty_reason': 'לא נמצא מחליף לבוקר'})
+
+        handle_rehab_morning(fri_worker_rehab, "שישי", "1")
+        handle_rehab_morning(sat_worker_rehab, "שבת", "2")
+
+    # ── 8. Finalize + save ──────────────────────────────────────────────────
+    final_df = pd.DataFrame(new_schedule)
+    if not final_df.empty:
+        final_df = final_df.drop_duplicates(subset=['date', 'dept'], keep='first')
+    st.session_state.schedule = final_df
+    save_to_db("schedule", st.session_state.schedule)
+
+    # ── 9. Summary banner ───────────────────────────────────────────────────
+    n_total  = len(optimizable_slots)
+    n_filled = n_total - len(still_empty)
+    method   = "CP-SAT אופטימלי" if status == _cp.OPTIMAL else "CP-SAT פתרון ישים"
+    if status == _cp.FEASIBLE:
+        method += " (timeout)"
+    fallback_note = f" ({fallback_cnt} בהגמשת חוקים)" if fallback_cnt else ""
+    st.info(
+        f"✅ שיבוץ הושלם ({method}) — "
+        f"{n_filled}/{n_total} משמרות שובצו{fallback_note}.\n\n"
+        f"{balancing_msg}"
+    )
+
 # --- 4. פונקציית ציור הלוח ---
 def draw_calendar_view(year, month, role, user_name=None):
     # --- Pre-compute availability (admin only, only when ALL employees submitted) ---
@@ -5184,16 +5746,27 @@ def _parse_manage_depts(raw):
     return [d.strip() for d in normalised.split(',') if d.strip()]
 
 
+# Managers who stay in `staff` (for approvals, emails, etc.) but must NOT appear
+# as default rows in the admin schedule grid. They can still be added ad-hoc via
+# the "העברה זמנית" widget when needed.
+_MANUAL_PLANT_ONLY_MANAGERS = {"רון צליק", "רתם תלם"}
+
+
 def _get_dept_managers(dept_name: str) -> list[str]:
-    """Return all מנהל מחלקה staff names whose manage_depts includes dept_name."""
+    """Return all מנהל מחלקה staff names whose manage_depts includes dept_name.
+    Managers listed in _MANUAL_PLANT_ONLY_MANAGERS are excluded — they must be
+    planted manually (via cell click or the temporary-add widget)."""
     try:
         sf = st.session_state.staff.copy()
         sf['name'] = sf['name'].astype(str).str.strip()
         sf['type'] = sf['type'].astype(str).str.strip()
         out = []
         for _, r in sf[sf['type'] == 'מנהל מחלקה'].iterrows():
+            _nm = str(r['name']).strip()
+            if _nm in _MANUAL_PLANT_ONLY_MANAGERS:
+                continue
             if dept_name in _parse_manage_depts(r.get('manage_depts', '')):
-                out.append(str(r['name']).strip())
+                out.append(_nm)
         return out
     except Exception:
         return []
@@ -5679,8 +6252,8 @@ elif role in ("מנהל/ת", "מנהל על"):
                 st.rerun()
         # ---------------------------
         c1, c2, c3 = st.columns(3)
-        if c1.button("🪄 שיבוץ אוטומטי מלא"): run_smart_scheduling(2026, sel_month, only_weekends=False); st.rerun()
-        if c2.button("☕ שיבוץ סופ\"שים בלבד"): run_smart_scheduling(2026, sel_month, only_weekends=True); st.rerun()
+        if c1.button("🪄 שיבוץ אוטומטי מלא"): run_smart_scheduling_cp(2026, sel_month, only_weekends=False); st.rerun()
+        if c2.button("☕ שיבוץ סופ\"שים בלבד"): run_smart_scheduling_cp(2026, sel_month, only_weekends=True); st.rerun()
         with c3:
             with st.expander("🗑️ ניקוי"):
                 if st.button("🧹 נקה אוטומטי (חודש זה)", help="מוחק שיבוצים אוטומטיים בחודש הנוכחי בלבד"):
@@ -5995,7 +6568,8 @@ elif role in ("מנהל/ת", "מנהל על"):
             # Build editor view: exclude password & only_home_dept from the editable table
             # (only_home_dept handled via the multiselect above)
             preferred_order = ['name', 'type', 'dept', 'monthly_quota', 'weekend_quota',
-                               'email', 'manage_depts', 'recurring_absent_days']
+                               'email', 'manage_depts', 'recurring_absent_days',
+                               'manual_schedule_only']
             available = [c for c in preferred_order if c in st.session_state.staff.columns]
             # tack on any unexpected extra cols (except hidden)
             extras = [c for c in st.session_state.staff.columns
@@ -6038,6 +6612,10 @@ elif role in ("מנהל/ת", "מנהל על"):
                     "recurring_absent_days": st.column_config.TextColumn(
                         "🔁 ימי היעדרות קבועים",
                         help="ימי שבוע שבהם העובד נעדר באופן קבוע (יומי). אותיות עברית מופרדות בפסיקים: א,ב,ג,ד,ה,ו,ש. דוגמה: 'ד,ה' = רביעי וחמישי. ייושם אוטומטית בכל סידור.",
+                        width="medium"),
+                    "manual_schedule_only": st.column_config.CheckboxColumn(
+                        "✋ שיבוץ ידני בלבד",
+                        help="אם מסומן — העובד לא ישובץ אוטומטית לסידור העבודה. יופיע רק אם הוספת ידנית.",
                         width="medium"),
                 }
             )
@@ -6785,6 +7363,12 @@ elif role in ("מנהל/ת", "מנהל על"):
                 existing = {}
                 existing_sides = {}
 
+            _gantt_saved = st.session_state.pop('show_gantt_save_success', None)
+            if _gantt_saved is not None:
+                st.success(f"✅ נשמרו {_gantt_saved} שיבוצים לחודש {hebrew_months[view_month-1]}")
+            if _mig := st.session_state.pop('show_gantt_migrate_info', 0):
+                st.info(f"↪️ הועברו {_mig} בקשות היעדרות למחלקה החדשה.")
+
             with st.form(f"rotation_form_{view_month}"):
                 new_assignments = {}
                 new_sides = {}
@@ -6825,23 +7409,16 @@ elif role in ("מנהל/ת", "מנהל על"):
                 submit = st.form_submit_button(f"💾 שמור שיבוץ לחודש {hebrew_months[view_month-1]}")
 
             if submit:
-                abs_df = st.session_state.absence_requests.copy()
-                warnings_for = []
-                if not abs_df.empty and 'status' in abs_df.columns:
-                    approved_future = abs_df[
-                        (abs_df['status'].astype(str) == 'approved') &
-                        (abs_df['type'].astype(str) == 'חופש עתידי') &
-                        (abs_df['start_date'].astype(str).str.startswith(view_year_month))
-                    ]
-                    for _, ar in approved_future.iterrows():
-                        emp_n = str(ar['employee']).strip()
-                        old_dept = existing.get(emp_n, '')
-                        new_dept = new_assignments.get(emp_n, '')
-                        if old_dept and new_dept and old_dept != new_dept:
-                            warnings_for.append((emp_n, old_dept, new_dept))
-                if warnings_for:
-                    for emp_n, old_d, new_d in warnings_for:
-                        st.warning(f"⚠️ {emp_n}: יש חופש עתידי מאושר. שינוי: {old_d} → {new_d}.")
+                # Detect all dept changes for this month
+                dept_changes = [
+                    (emp_n, existing[emp_n], new_dept)
+                    for emp_n, new_dept in new_assignments.items()
+                    if (emp_n in existing
+                        and existing[emp_n]
+                        and new_dept != "— לא שובץ —"
+                        and existing[emp_n] != new_dept)
+                ]
+
                 other_months = dr[dr['year_month'] != view_year_month] if not dr.empty else pd.DataFrame(
                     columns=['employee','year_month','daily_dept','side'])
                 new_rows = []
@@ -6858,7 +7435,16 @@ elif role in ("מנהל/ת", "מנהל על"):
                 new_dr = _norm_dr(pd.concat([other_months, pd.DataFrame(new_rows)], ignore_index=True))
                 st.session_state.dept_rotation = new_dr
                 save_to_db("dept_rotation", new_dr)
-                st.success(f"✅ נשמרו {len(new_rows)} שיבוצים לחודש {hebrew_months[view_month-1]}")
+
+                # Migrate absence requests + WSD rows for each dept change
+                total_migrated = sum(
+                    _migrate_requests_on_dept_change(emp_n, old_d, new_d, view_year_month)
+                    for emp_n, old_d, new_d in dept_changes
+                )
+                if total_migrated:
+                    st.session_state['show_gantt_migrate_info'] = total_migrated
+
+                st.session_state['show_gantt_save_success'] = len(new_rows)
                 st.rerun()
 
             # Summary
@@ -7734,6 +8320,10 @@ else:
                                         ["חופש עתידי", "חופש", "202", "היעדרות אחרת"],
                                         key="fut_abs_type")
             fut_note = st.text_input("הערה (רשות):", key="fut_abs_note")
+
+            # Persist request types using the display-normalized form
+            # ("חופש עתידי" → "חופש") so downstream label lookups never miss.
+            fut_type = _ABSENCE_TYPE_TO_STATUS.get(fut_type, fut_type)
 
             if st.button("✅ שלח בקשה לחופש עתידי", key="fut_abs_submit"):
                 if fut_end < fut_start:

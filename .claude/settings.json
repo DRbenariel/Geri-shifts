@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git log *)",
+      "PowerShell(git diff *)",
+      "PowerShell(git status)",
+      "PowerShell(git status *)",
+      "PowerShell(git branch *)",
+      "PowerShell(git show *)",
+      "PowerShell(git remote *)",
+      "PowerShell(git stash list)",
+      "Bash(pip show *)"
+    ]
+  }
+}
