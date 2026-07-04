@@ -942,6 +942,11 @@ def _build_batched_day_data(dept_name, year_month, view_month, year=None):
             (dr['daily_dept'].astype(str) == dept_name))
     employees = dr[mask]['employee'].astype(str).str.strip().tolist()
 
+    # מנהל מחלקה: managers of this dept are auto-planted even without a
+    # dept_rotation row (their dept comes from manage_depts). Merge them in so
+    # exports match the on-screen grid.
+    employees = employees + [m for m in _get_dept_managers(dept_name) if m not in employees]
+
     # Side map (פנימית) + day-specific incoming transfers
     side_map = {}
     if is_pnim and 'side' in dr.columns:
@@ -1731,21 +1736,30 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         wd_idx = (date_obj.weekday() + 1) % 7  # Sun=0 … Sat=6
 
-        # 0c. מנהל מחלקה or manual_schedule_only employees: never auto-planted
+        # 0c. manual_schedule_only: never auto-planted, blank unless explicit manual override.
+        #     מנהל מחלקה: auto-planted as worker in managed depts, blank elsewhere; manual wins.
         try:
             sf = st.session_state.staff
             _erow = sf[sf['name'].astype(str).str.strip() == emp]
             if not _erow.empty:
                 _er = _erow.iloc[0]
-                _is_mgr = str(_er.get('type', '')).strip() == 'מנהל מחלקה'
                 _mso_raw = _er.get('manual_schedule_only', '')
                 _manual_only = _mso_raw if isinstance(_mso_raw, bool) else str(_mso_raw).strip().lower() == 'true'
-                if _is_mgr or _manual_only:
+                if _manual_only:
                     _idx = st.session_state.get('wsd_index', {})
                     _ent = _idx.get((date_str, emp), {})
                     if _ent.get('is_manual'):
                         return _ent.get('status', '')
-                    return ""   # empty by default
+                    return ""
+                if str(_er.get('type', '')).strip() == 'מנהל מחלקה':
+                    _idx = st.session_state.get('wsd_index', {})
+                    _ent = _idx.get((date_str, emp), {})
+                    if _ent.get('is_manual'):
+                        return _ent.get('status', '')
+                    _managed = _parse_manage_depts(_er.get('manage_depts', ''))
+                    if daily_dept and str(daily_dept).strip() not in _managed:
+                        return ""   # not their dept → blank
+                    # else: fall through to normal auto logic → planted as עובד
         except Exception:
             pass
 
@@ -1918,162 +1932,6 @@ def _render_export_buttons(dept_name, year_month, view_month, key_ns, user_name=
                 st.markdown(f"[🔗 פתח גיליון]({url})")
             else:
                 st.error(f"שגיאה: {err}")
-
-# DEPRECATED: replaced by _render_dept_grid(..., readonly=True)
-def _render_dept_grid_readonly_DEPRECATED(dept_name, year_month, view_month, highlight_user=None):
-    """
-    Read-only department schedule grid — used in the employee סידור יומי view.
-    Shows all employees in dept_rotation for the month, color-coded by status.
-    No editable buttons; renders as colored HTML divs.
-    highlight_user: name to bold/highlight (the viewing employee).
-    """
-    year = 2026
-    num_days = calendar.monthrange(year, view_month)[1]
-    WD_SHORT  = ["ש", "ו", "ה", "ד", "ג", "ב", "א"]   # col 0=Sat … col 6=Sun
-
-    # Employees
-    dr = st.session_state.dept_rotation
-    employees: list[str] = []
-    if not dr.empty and 'employee' in dr.columns:
-        mask = ((dr['year_month'].astype(str) == year_month) &
-                (dr['daily_dept'].astype(str) == dept_name))
-        employees = dr[mask]['employee'].astype(str).str.strip().tolist()
-    employees = _sort_employees_by_role(employees)
-    if not employees:
-        st.info(f"אין עובדים משובצים ל-{dept_name} בחודש זה.")
-        return
-
-    # Status → bg/text colors
-    _SC = {
-        "עובד":        ("#dcfce7", "#166534"),
-        "חופש":        ("#dbeafe", "#1e40af"),
-        "202":         ("#fef9c3", "#854d0e"),
-        "אחרי תורנות": ("#ffedd5", "#9a3412"),
-        "תורנות":      ("#ede9fe", "#5b21b6"),
-        "אחר":         ("#f1f5f9", "#475569"),
-    }
-    # Status → short label
-    _SL = {
-        "עובד": "ע", "חופש": "ח", "202": "202",
-        "אחרי תורנות": "אח", "תורנות": "ת", "אחר": "+",
-    }
-
-    # Pre-compute statuses for all employees × all days
-    _statuses: dict[tuple[str, int], str] = {}
-    for emp in employees:
-        for d in range(1, num_days + 1):
-            ds = f"{year}-{view_month:02d}-{d:02d}"
-            raw = _wsd_get_status(ds, emp, default=None)
-            if raw is None or (raw == "עובד" and not _wsd_is_manual(ds, emp)):
-                _statuses[(emp, d)] = _derive_auto_status(ds, emp, daily_dept=dept_name)
-            else:
-                _statuses[(emp, d)] = raw
-
-    # Helper: render one labeled info-row (תורן / שישי בוקר)
-    def _info_row(col_w, label, label_bg, label_color, cells):
-        """cells: list of (text, bg_color) per day in segment."""
-        rc = st.columns(col_w)
-        rc[0].markdown(
-            f"<div style='background:{label_bg};color:{label_color};font-weight:700;"
-            f"font-size:0.7rem;border-radius:5px;text-align:center;"
-            f"padding:3px 2px;white-space:nowrap'>{label}</div>",
-            unsafe_allow_html=True)
-        for ci, (txt, cell_bg) in enumerate(cells):
-            rc[ci + 1].markdown(
-                f"<div style='background:{cell_bg};color:#374151;border-radius:5px;"
-                f"text-align:center;font-size:0.68rem;padding:3px 1px;"
-                f"min-height:28px;line-height:1.3;overflow:hidden;"
-                f"white-space:nowrap;text-overflow:ellipsis'>"
-                f"{txt or ''}</div>",
-                unsafe_allow_html=True)
-
-    # Render per 10-day segment so columns don't overflow
-    seg1 = list(range(1, 11))
-    seg2 = list(range(11, 21))
-    seg3 = list(range(21, num_days + 1))
-    for seg in [s for s in [seg1, seg2, seg3] if s]:
-        _days_in_seg = seg
-        n_days = len(_days_in_seg)
-        col_w  = [2] + [1] * n_days   # label col (left) + one col per day
-
-        # ── Day header ───────────────────────────────────────────────────
-        hdr_cols = st.columns(col_w)
-        hdr_cols[0].markdown(
-            "<div style='font-size:0.72rem;color:#64748b;text-align:center;"
-            "font-weight:700;padding:2px 4px'>&nbsp;</div>",
-            unsafe_allow_html=True)
-        for ci, d in enumerate(_days_in_seg):
-            date_obj = date(year, view_month, d)
-            wd_idx   = (date_obj.weekday() + 1) % 7  # 0=Sun … 6=Sat
-            is_wk    = wd_idx in (5, 6)
-            hdr_cols[ci + 1].markdown(
-                f"<div style='text-align:center;font-size:0.7rem;"
-                f"font-weight:700;color:{'#7c3aed' if is_wk else '#64748b'};"
-                f"padding:1px 0'>{d}<br><span style='font-size:0.62rem'>"
-                f"{WD_SHORT[wd_idx]}</span></div>",
-                unsafe_allow_html=True)
-
-        # ── Employee rows ────────────────────────────────────────────────
-        for emp in employees:
-            is_me = (str(emp).strip() == str(highlight_user or '').strip())
-            row_cols = st.columns(col_w)
-            _name_style = "font-weight:700;color:#0f172a" if is_me else "color:#374151"
-            row_cols[0].markdown(
-                f"<div style='font-size:0.75rem;{_name_style};"
-                f"text-align:right;padding:2px 4px;white-space:nowrap;"
-                f"overflow:hidden;text-overflow:ellipsis'>"
-                f"{'▶ ' if is_me else ''}{emp}</div>",
-                unsafe_allow_html=True)
-            for ci, d in enumerate(_days_in_seg):
-                st_val = _statuses.get((emp, d), "עובד")
-                bg, fg = _SC.get(st_val, ("#f1f5f9", "#475569"))
-                lbl    = _SL.get(st_val, st_val[:2])
-                row_cols[ci + 1].markdown(
-                    f"<div style='background:{bg};color:{fg};border-radius:5px;"
-                    f"text-align:center;font-size:0.72rem;font-weight:600;"
-                    f"padding:4px 1px;min-height:28px;line-height:1.2'>{lbl}</div>",
-                    unsafe_allow_html=True)
-
-        # ── תורנ/ית row ──────────────────────────────────────────────────
-        nd_cells = []
-        for d in _days_in_seg:
-            ds      = f"{year}-{view_month:02d}-{d:02d}"
-            nd      = _get_night_duty(ds, dept_name)
-            wd_idx  = (date(year, view_month, d).weekday() + 1) % 7
-            cell_bg = "#fef2f2" if wd_idx in (5, 6) else "#f5f3ff"
-            nd_cells.append((_make_initials(nd) if nd else "—", cell_bg))
-        _info_row(col_w, "🌙 תורנ/ית", "#ede9fe", "#5b21b6", nd_cells)
-
-        # ── שישי בוקר row ────────────────────────────────────────────────
-        fri_cells = []
-        for d in _days_in_seg:
-            ds     = f"{year}-{view_month:02d}-{d:02d}"
-            wd_idx = (date(year, view_month, d).weekday() + 1) % 7
-            if wd_idx == 5:   # Friday
-                fw      = _get_fri_shift_workers(ds, dept_name)
-                txt     = " / ".join(_make_initials(n) for n in fw) if fw else "—"
-                cell_bg = "#fffbeb"
-            else:
-                txt, cell_bg = "", "#f8fafc"
-            fri_cells.append((txt, cell_bg))
-        _info_row(col_w, "☀️ שישי בוקר", "#fef9c3", "#854d0e", fri_cells)
-
-        st.markdown("<div style='margin-bottom:10px'></div>", unsafe_allow_html=True)
-
-    # Legend
-    st.markdown(
-        "<div style='direction:rtl;font-size:0.72rem;color:#64748b;"
-        "margin-top:6px;line-height:2.2'>"
-        "<span style='background:#dcfce7;color:#166534;border-radius:3px;padding:1px 6px'>ע</span> עובד/ת &nbsp;|&nbsp;"
-        "<span style='background:#dbeafe;color:#1e40af;border-radius:3px;padding:1px 6px'>ח</span> חופש &nbsp;|&nbsp;"
-        "<span style='background:#fef9c3;color:#854d0e;border-radius:3px;padding:1px 6px'>202</span> 202 &nbsp;|&nbsp;"
-        "<span style='background:#ffedd5;color:#9a3412;border-radius:3px;padding:1px 6px'>אח</span> אחרי תורנות &nbsp;|&nbsp;"
-        "<span style='background:#ede9fe;color:#5b21b6;border-radius:3px;padding:1px 6px'>ת</span> תורנות &nbsp;|&nbsp;"
-        "<span style='background:#f5f3ff;color:#5b21b6;border-radius:3px;padding:1px 6px'>🌙</span> תורנ/ית &nbsp;|&nbsp;"
-        "<span style='background:#fffbeb;color:#854d0e;border-radius:3px;padding:1px 6px'>☀️</span> שישי בוקר"
-        "</div>",
-        unsafe_allow_html=True)
-
 
 def _render_dept_grid(dept_name, year_month, view_month, key_ns,
                       employees=None, max_days=None,
@@ -3660,12 +3518,6 @@ if 'manual_emp' not in st.session_state:
     st.session_state.manual_emp = st.session_state.staff['name'].iloc[0] if not st.session_state.staff.empty else ""
 
 # --- 3. לוגיקת שיבוץ עם אבחון ---
-def toggle_state(key):
-    """Callback to toggle boolean state for calendar buttons"""
-    if key in st.session_state:
-        st.session_state[key] = not st.session_state[key]
-        # st.toast(f"עודכן: {st.session_state[key]}") # Optional Debug
-
 def render_modern_calendar(year, month, default_constraint_days, default_wish_days,
                            special_days_df=None, key_prefix='cal', show_validation=True):
     """
@@ -5814,60 +5666,6 @@ def _set_setting(key, value):
     st.session_state.settings = s
     save_to_db("settings", s)
 
-def _sw_month_selector(active_m: int, key_ns: str) -> int:
-    """Month toggle for the work-schedule tab.
-
-    Always shows exactly two buttons:
-      [current calendar month]  [active submission month (active_m)]
-    The current calendar month is derived from today's date so it
-    disappears naturally on the 1st of the new month.
-    Default selection: active_m (the submission month).
-    Session-state key: f"{key_ns}_vm".
-    """
-    cur_m = datetime.now().month   # real calendar month (e.g. June = 6)
-
-    # If both are the same (can happen briefly on month rollover), just show one
-    if cur_m == active_m:
-        sk = f"{key_ns}_vm"
-        st.session_state[sk] = active_m
-        c1, _ = st.columns([2, 10])
-        with c1:
-            st.button(
-                f"📅 {_HEB_MONTHS[active_m - 1]}",
-                key=f"{key_ns}_btn_cur",
-                use_container_width=True,
-                type="primary",
-                disabled=True,
-            )
-        return active_m
-
-    valid_months = (cur_m, active_m)
-    sk = f"{key_ns}_vm"
-    if sk not in st.session_state or st.session_state[sk] not in valid_months:
-        st.session_state[sk] = active_m   # default: submission month
-
-    c1, c2, _ = st.columns([2, 2, 8])
-    with c1:
-        if st.button(
-            f"📅 {_HEB_MONTHS[cur_m - 1]}",
-            key=f"{key_ns}_btn_cur",
-            use_container_width=True,
-            type="primary" if st.session_state[sk] == cur_m else "secondary",
-        ):
-            st.session_state[sk] = cur_m
-            st.rerun()
-    with c2:
-        if st.button(
-            f"📅 {_HEB_MONTHS[active_m - 1]}",
-            key=f"{key_ns}_btn_nxt",
-            use_container_width=True,
-            type="primary" if st.session_state[sk] == active_m else "secondary",
-        ):
-            st.session_state[sk] = active_m
-            st.rerun()
-    return st.session_state[sk]
-
-
 def _sw_month_selector_12(key_ns: str) -> tuple[int, int]:
     """
     Auto-advancing 12-month forward selector for the 'סידור עבודה' tab.
@@ -7275,8 +7073,20 @@ elif role in ("מנהל/ת", "מנהל על"):
         if st.session_state.get('show_active_month_success'):
             st.success(f"✅ סידור לחודש {st.session_state.pop('show_active_month_success')} נוצר. הגשות נפתחו.")
 
-        # 12 distinct months in calendar order starting from the active month (no duplicates)
-        view_opts = [((daily_active_month_int - 1 + i) % 12) + 1 for i in range(12)]
+        # 12 consecutive months starting from the active month, each carrying its
+        # correct year so the window rolls into the next year past December
+        # (e.g. active=December → ... דצמבר 2026 / ינואר 2027 / ... נובמבר 2027).
+        # base_year follows the real clock: if the active month already passed
+        # this calendar year, it refers to next year's occurrence.
+        _now = datetime.now()
+        base_year = _now.year if daily_active_month_int >= _now.month else _now.year + 1
+        view_pairs = [
+            (base_year + (daily_active_month_int - 1 + i) // 12,
+             ((daily_active_month_int - 1 + i) % 12) + 1)
+            for i in range(12)
+        ]
+        view_opts = [m for (_y, m) in view_pairs]          # months in window order
+        _month_to_year = {m: y for (y, m) in view_pairs}   # month → its window year
 
         # Single session-state key — the selectbox IS the state; no double-assignment
         if 'daily_view_month' not in st.session_state or \
@@ -7288,11 +7098,12 @@ elif role in ("מנהל/ת", "מנהל על"):
             st.selectbox(
                 "🗓️ חודש לתכנון/עריכה:",
                 view_opts,
-                format_func=lambda m: f"{hebrew_months[m-1]} ({m})",
+                format_func=lambda m: f"{hebrew_months[m-1]} {_month_to_year[m]}",
                 key="daily_view_month",   # session state IS the widget state
             )
         view_month = st.session_state.daily_view_month
-        view_year_month = f"2026-{view_month:02d}"
+        view_year  = _month_to_year[view_month]
+        view_year_month = f"{view_year}-{view_month:02d}"
 
         with col_top2:
             is_active = (view_month == daily_active_month_int)
@@ -7334,7 +7145,7 @@ elif role in ("מנהל/ת", "מנהל על"):
         st.divider()
 
         # ── שיבוץ חודשי — flat layout, no sub-tabs ───────────────────
-        st.markdown(f"#### שיוך עובדים למחלקות — {hebrew_months[view_month-1]} 2026")
+        st.markdown(f"#### שיוך עובדים למחלקות — {hebrew_months[view_month-1]} {view_year}")
         st.caption("בחר לכל עובד את המחלקה היומית שלו לחודש זה. תורן חוץ ומנהלים אינם בטבלה.")
 
         DAILY_DEPTS = list(DAILY_DEPTS_ALL) + ["— לא שובץ —"]
@@ -7732,6 +7543,9 @@ elif role in ("מנהל/ת", "מנהל על"):
                 )
                 st.session_state.absence_requests = new_nb_df
                 save_to_db("absence_requests", new_nb_df)
+                _materialize_absence_to_wsd(
+                    adm_nb_emp, adm_nb_type,
+                    new_nb_row['start_date'], new_nb_row['end_date'])
                 _build_approved_map()
                 st.session_state['show_nb_adm_success'] = True
                 st.rerun()
@@ -8705,6 +8519,9 @@ else:
                     )
                     st.session_state.absence_requests = _nb_new_df
                     save_to_db("absence_requests", _nb_new_df)
+                    _materialize_absence_to_wsd(
+                        _nb_mgr_sel_emp, _nb_mgr_type,
+                        _nb_new_row['start_date'], _nb_new_row['end_date'])
                     _build_approved_map()
                     st.session_state['show_nb_mgr_success'] = True
                     st.rerun()

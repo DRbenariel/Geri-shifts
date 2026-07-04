@@ -111,38 +111,6 @@ def get_active_month(settings_df):
 # Scheduling Agent helpers (pure Python — no Streamlit)
 # ---------------------------------------------------------------------------
 
-def load_all_data(sh):
-    """Load staff, requests, schedule, special_days, settings from Google Sheets."""
-    def _load(name):
-        try:
-            ws = sh.worksheet(name)
-            data = ws.get_all_records()
-            return pd.DataFrame(data)
-        except gspread.exceptions.WorksheetNotFound:
-            return pd.DataFrame()
-
-    staff_df       = _load('staff')
-    requests_df    = _load('requests')
-    schedule_df    = _load('schedule')
-    special_days_df= _load('special_days')
-    settings_df    = _load('settings')
-
-    # Normalise only_home_dept (stored as string "True"/"False")
-    if not staff_df.empty and 'only_home_dept' in staff_df.columns:
-        staff_df['only_home_dept'] = staff_df['only_home_dept'].apply(
-            lambda v: v if isinstance(v, bool) else str(v).strip().lower() == 'true'
-        )
-
-    active_month = get_active_month(settings_df)
-    return {
-        'staff_df':        staff_df,
-        'requests_df':     requests_df,
-        'schedule_df':     schedule_df,
-        'special_days_df': special_days_df,
-        'active_month':    active_month,
-    }
-
-
 def is_functional_weekend_standalone(date_obj, special_days_df):
     """Pure-Python replica of is_functional_weekend() — no Streamlit required."""
     if isinstance(date_obj, str):

@@ -86,7 +86,6 @@ Score = `empty_slots * 100 + fallback_slots * 10`. Lowest score wins.
 4. Wish priority = +1000 score bonus instead of pool restriction (non-wishers still fill slot if wisher blocked).
 
 ## Scheduling simulation — standalone helpers in `daily_report.py`
-- `load_all_data(sh)` — loads all 5 sheets into a dict.
 - `is_functional_weekend_standalone(date_obj, special_days_df)` — pure-Python replica of `is_functional_weekend()`.
 - `count_eligible_for_slot(date_str, dept, staff_df, requests_df, schedule_df)` — counts candidates by type+block+assigned (no quota/rest-gap). Treats any dept containing `'פנימית'` as off-limits to תורן חוץ.
 - `build_ordering(year, month, data, strategy)` — returns `[(date_obj, dept), ...]` for a given strategy. Only ordering for the 2 main depts (`פנימית גריאטרית`, `שיקום`); Friday morning shifts are not in the ordering.
@@ -191,15 +190,12 @@ Gate: `daily_requests_open` setting. Admin opens/closes via 🔓/🔒 button in 
 ### Department-grid editing (לוח מחלקה / לוח עבודה כללי)
 - One row per employee × one column per day. Cell shows status (עובד/חופש/202/אחרי/אחר), clicking cycles through statuses.
 - Any manual edit writes `is_manual=True` to `work_schedule_daily` — these rows are **never overwritten** by the schedule generator.
-- מנהל מחלקה appears as a row in the grid even without a `dept_rotation` row (their dept is read from `manage_depts`). They can "plant" themselves directly without going through the absence-request workflow.
+- מנהל מחלקה appears as a row in the grid even without a `dept_rotation` row (their dept is read from `manage_depts`). They are **auto-planted as `עובד` every day** in each dept they manage (Sat→חופש, Fri→שישי בוקר check, approved absences still apply); `_derive_auto_status` falls through to the normal worker logic for managed depts and returns blank only for depts they don't manage. The grid toggle (empty↔עובד, writes `is_manual=True`) lets them remove themselves for a specific day. Exports include managers via `_build_batched_day_data` (merges `_get_dept_managers(dept)`).
 
-### Schedule generation (`_generate_work_schedule`)
-- Triggered by admin via "צור סידור" button.
-- For each (employee, day) in the month based on `dept_rotation`:
-  - **Priority 1**: approved absence covers this day → status = type
-  - **Priority 2**: night shift on day-1 (in `schedule` sheet, excluding שישי בוקר) → status = "אחרי תורנות"
-  - Else → status = "עובד"
-- Preserves all rows where `is_manual=True`.
+### Schedule generation
+- No batch generator: day-schedule status is derived live per cell by `_derive_auto_status()`
+  (approved absence → night-shift-on-day-1 → "אחרי תורנות" → "עובד"; `is_manual=True` rows always win).
+  The old `_generate_work_schedule` / "צור סידור" button was removed.
 
 ### Settings keys
 - `daily_active_month` — int 1..12, the live month employees are submitting for.
@@ -214,7 +210,6 @@ Gate: `daily_requests_open` setting. Admin opens/closes via 🔓/🔒 button in 
 ### Helpers
 - `_get_setting(key, default)` / `_set_setting(key, value)` — settings sheet read/write
 - `_approve_request(req_id, responder)` / `_reject_request(req_id, responder)` — wrap `_update_absence_status()` which updates row + emails requester
-- `_generate_work_schedule(year_month, view_month)` — main scheduler
 - `_wsd_get_status(date_str, employee, default)` — O(1) status lookup via `wsd_index`
 - **`_emp_dept_for_date(emp, date)`** — Gantt-canonical dept for an employee on a given date. Reads `dept_rotation.daily_dept` for the date's year-month; falls back to `staff.dept` only when no rotation row. Single source of truth for `dept_at_request` writes and renders.
 - **`_emp_night_dept(emp, year_month)`** — night-shift dept resolver. Returns `שיקום` for any `שיקום…` rotation, `פנימית גריאטרית` for that rotation, intern-default `פנימית גריאטרית` when no rotation, else falls back to `staff.dept`. Used by `run_smart_scheduling`, `check_assignment_validity`, the Friday-post-pass, and the scoring fn.
