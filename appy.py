@@ -247,8 +247,39 @@ def _update_absence_status(req_id, new_status, responder_name):
         pass
     return True
 
+def _materialize_absence_to_wsd(employee, atype, start_date, end_date):
+    """Write one work_schedule_daily row per day in [start_date, end_date] for an
+    approved absence, so the request appears directly in the WSD sheet — not only
+    as a runtime overlay via _derive_auto_status. Normalizes type via
+    _ABSENCE_TYPE_TO_STATUS so 'חופש עתידי' becomes 'חופש', etc."""
+    try:
+        emp = str(employee).strip()
+        status = _ABSENCE_TYPE_TO_STATUS.get(str(atype).strip(), str(atype).strip()) or "חופש"
+        sd = datetime.strptime(str(start_date)[:10], '%Y-%m-%d').date()
+        ed = datetime.strptime(str(end_date)[:10],   '%Y-%m-%d').date()
+        if ed < sd:
+            sd, ed = ed, sd
+        cur = sd
+        while cur <= ed:
+            date_str = cur.strftime('%Y-%m-%d')
+            dept = _emp_dept_for_date(emp, date_str) or ''
+            _wsd_upsert(date_str, emp, dept, status, is_manual=True, note='')
+            cur = cur + timedelta(days=1)
+    except Exception:
+        pass
+
+
 def _approve_request(req_id, responder_name):
     result = _update_absence_status(req_id, 'approved', responder_name)
+    if result:
+        try:
+            df = st.session_state.absence_requests
+            row = df[df['id'].astype(str) == str(req_id)].iloc[0]
+            _materialize_absence_to_wsd(
+                row.get('employee', ''), row.get('type', ''),
+                row.get('start_date', ''), row.get('end_date', ''))
+        except Exception:
+            pass
     _build_approved_map()   # keep cache in sync immediately
     return result
 
@@ -3478,6 +3509,21 @@ if 'special_days' not in st.session_state:
 if 'swap_requests' not in st.session_state:
     st.session_state.swap_requests = get_db_data("swap_requests")
 
+if 'konenut' not in st.session_state:
+    try:
+        _kdf = get_db_data("konenut")
+        if _kdf.empty or 'date' not in _kdf.columns:
+            _kdf = pd.DataFrame(columns=['date', 'pnim_dr', 'rehab_dr1', 'rehab_dr2'])
+    except Exception:
+        _kdf = pd.DataFrame(columns=['date', 'pnim_dr', 'rehab_dr1', 'rehab_dr2'])
+    for _c in ['pnim_dr', 'rehab_dr1', 'rehab_dr2']:
+        if _c not in _kdf.columns:
+            _kdf[_c] = ''
+    _kdf['date'] = _kdf['date'].astype(str)
+    for _c in ['pnim_dr', 'rehab_dr1', 'rehab_dr2']:
+        _kdf[_c] = _kdf[_c].fillna('').astype(str)
+    st.session_state.konenut = _kdf
+
 # ── Daily schedule feature data (load lazily, create empty if missing) ──
 if 'dept_rotation' not in st.session_state:
     df = get_db_data("dept_rotation")
@@ -4664,6 +4710,80 @@ def run_smart_scheduling_cp(year, month, only_weekends=False):
         f"{n_filled}/{n_total} משמרות שובצו{fallback_note}.\n\n"
         f"{balancing_msg}"
     )
+
+# --- כוננויות ---
+def _render_konenut_tab(active_month_int):
+    import calendar as _cal
+    year = 2026
+    WD = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
+
+    sel_month = st.selectbox(
+        "חודש:", range(1, 13), index=active_month_int - 1,
+        key="konenut_month_sel",
+        format_func=lambda m: f"{m:02d}/{year}"
+    )
+    year_month = f"{year}-{sel_month:02d}"
+
+    try:
+        seniors = [''] + sorted(
+            st.session_state.staff[
+                st.session_state.staff['type'].astype(str).str.strip() == 'רופא בכיר'
+            ]['name'].astype(str).str.strip().tolist()
+        )
+    except Exception:
+        seniors = ['']
+
+    num_days = _cal.monthrange(year, sel_month)[1]
+    kdf = st.session_state.konenut
+    month_kdf = kdf[kdf['date'].str.startswith(year_month)].set_index('date')
+
+    rows = []
+    for d in range(1, num_days + 1):
+        date_str = f"{year}-{sel_month:02d}-{d:02d}"
+        wd = WD[(date(year, sel_month, d).weekday() + 1) % 7]
+        existing = month_kdf.loc[date_str] if date_str in month_kdf.index else None
+        rows.append({
+            'תאריך':        date_str,
+            'יום':          wd,
+            'כונן פנימית':  str(existing['pnim_dr'])   if existing is not None else '',
+            'כונן שיקום 1': str(existing['rehab_dr1']) if existing is not None else '',
+            'כונן שיקום 2': str(existing['rehab_dr2']) if existing is not None else '',
+        })
+    display_df = pd.DataFrame(rows)
+
+    edited = st.data_editor(
+        display_df,
+        column_config={
+            'תאריך':        st.column_config.TextColumn(disabled=True, width='small'),
+            'יום':          st.column_config.TextColumn(disabled=True, width='small'),
+            'כונן פנימית':  st.column_config.SelectboxColumn(options=seniors, width='medium'),
+            'כונן שיקום 1': st.column_config.SelectboxColumn(options=seniors, width='medium'),
+            'כונן שיקום 2': st.column_config.SelectboxColumn(options=seniors, width='medium'),
+        },
+        hide_index=True,
+        use_container_width=True,
+        key=f"konenut_editor_{year_month}",
+    )
+
+    if st.button("💾 שמור שינויים", key="konenut_save", type="primary"):
+        new_rows = []
+        for _, r in edited.iterrows():
+            new_rows.append({
+                'date':      r['תאריך'],
+                'pnim_dr':   str(r['כונן פנימית']  or ''),
+                'rehab_dr1': str(r['כונן שיקום 1'] or ''),
+                'rehab_dr2': str(r['כונן שיקום 2'] or ''),
+            })
+        new_month_df = pd.DataFrame(new_rows)
+        full = st.session_state.konenut
+        full = full[~full['date'].str.startswith(year_month)]
+        full = pd.concat([full, new_month_df], ignore_index=True)
+        full = full.sort_values('date').reset_index(drop=True)
+        st.session_state.konenut = full
+        save_to_db("konenut", full)
+        st.success("✅ הכוננויות נשמרו בהצלחה")
+        st.rerun()
+
 
 # --- 4. פונקציית ציור הלוח ---
 def draw_calendar_view(year, month, role, user_name=None):
@@ -5958,7 +6078,10 @@ if selected_nav == 'הגדרות':
                         st.rerun()
 
 elif role in ("מנהל/ת", "מנהל על"):
-    if selected_nav == 'סידור תורנויות':
+    if selected_nav == 'סידור כוננויות':
+        _render_konenut_tab(active_month_int)
+
+    elif selected_nav == 'סידור תורנויות':
         
         # --- Month Selector for Schedule Tab (Admin Only) ---
         with st.expander("הגדרות תצוגה", expanded=False):
