@@ -4715,7 +4715,6 @@ def run_smart_scheduling_cp(year, month, only_weekends=False):
 def _render_konenut_tab(active_month_int):
     import calendar as _cal
     year = 2026
-    WD = ["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"]
 
     sel_month = st.selectbox(
         "חודש:", range(1, 13), index=active_month_int - 1,
@@ -4733,46 +4732,77 @@ def _render_konenut_tab(active_month_int):
     except Exception:
         seniors = ['']
 
-    num_days = _cal.monthrange(year, sel_month)[1]
     kdf = st.session_state.konenut
     month_kdf = kdf[kdf['date'].str.startswith(year_month)].set_index('date')
 
-    rows = []
-    for d in range(1, num_days + 1):
-        date_str = f"{year}-{sel_month:02d}-{d:02d}"
-        wd = WD[(date(year, sel_month, d).weekday() + 1) % 7]
-        existing = month_kdf.loc[date_str] if date_str in month_kdf.index else None
-        rows.append({
-            'תאריך':        date_str,
-            'יום':          wd,
-            'כונן פנימית':  str(existing['pnim_dr'])   if existing is not None else '',
-            'כונן שיקום 1': str(existing['rehab_dr1']) if existing is not None else '',
-            'כונן שיקום 2': str(existing['rehab_dr2']) if existing is not None else '',
-        })
-    display_df = pd.DataFrame(rows)
+    # Calendar grid — same layout as draw_calendar_view (RTL: col0=Sat … col6=Sun)
+    cal = [list(reversed(w)) for w in _cal.Calendar(firstweekday=6).monthdayscalendar(year, sel_month)]
+    days_names = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
 
-    edited = st.data_editor(
-        display_df,
-        column_config={
-            'תאריך':        st.column_config.TextColumn(disabled=True, width='small'),
-            'יום':          st.column_config.TextColumn(disabled=True, width='small'),
-            'כונן פנימית':  st.column_config.SelectboxColumn(options=seniors, width='medium'),
-            'כונן שיקום 1': st.column_config.SelectboxColumn(options=seniors, width='medium'),
-            'כונן שיקום 2': st.column_config.SelectboxColumn(options=seniors, width='medium'),
-        },
-        hide_index=True,
-        use_container_width=True,
-        key=f"konenut_editor_{year_month}",
+    # Legend
+    st.markdown(
+        "<div style='font-size:0.78rem;color:#475569;margin-bottom:6px'>"
+        "🏥 <b>פנימית</b> &nbsp;|&nbsp; 🦽 <b>שיקום 1</b> &nbsp;|&nbsp; 🦽 <b>שיקום 2</b>"
+        "</div>",
+        unsafe_allow_html=True,
     )
 
-    if st.button("💾 שמור שינויים", key="konenut_save", type="primary"):
+    # Header row
+    hcols = st.columns(7)
+    for i, name in enumerate(days_names):
+        hcols[i].markdown(
+            f"<div style='text-align:center;font-weight:bold;font-size:0.88rem;"
+            f"padding:2px 0'>{name}</div>",
+            unsafe_allow_html=True,
+        )
+
+    with st.form("konenut_form"):
+        for week in cal:
+            cols = st.columns(7)
+            for i, day in enumerate(week):
+                with cols[i]:
+                    if day == 0:
+                        st.markdown("<div style='min-height:10px'></div>", unsafe_allow_html=True)
+                        continue
+                    date_str  = f"{year}-{sel_month:02d}-{day:02d}"
+                    existing  = month_kdf.loc[date_str] if date_str in month_kdf.index else None
+                    is_wknd   = i <= 1  # col0=Sat, col1=Fri
+                    bg        = "#fef9c3" if is_wknd else "#f1f5f9"
+
+                    st.markdown(
+                        f"<div style='text-align:center;font-weight:700;font-size:0.82rem;"
+                        f"background:{bg};border-radius:4px;padding:2px 0;margin-bottom:2px'>"
+                        f"{day}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    def _idx(val):
+                        v = str(val) if val is not None else ''
+                        return seniors.index(v) if v in seniors else 0
+
+                    pnim_v = existing['pnim_dr']   if existing is not None else ''
+                    r1_v   = existing['rehab_dr1'] if existing is not None else ''
+                    r2_v   = existing['rehab_dr2'] if existing is not None else ''
+
+                    st.selectbox("פ", seniors, index=_idx(pnim_v),
+                                 key=f"kn_p_{date_str}", label_visibility="collapsed")
+                    st.selectbox("ש1", seniors, index=_idx(r1_v),
+                                 key=f"kn_r1_{date_str}", label_visibility="collapsed")
+                    st.selectbox("ש2", seniors, index=_idx(r2_v),
+                                 key=f"kn_r2_{date_str}", label_visibility="collapsed")
+
+        submitted = st.form_submit_button("💾 שמור שינויים", type="primary", use_container_width=True)
+
+    if submitted:
+        num_days = _cal.monthrange(year, sel_month)[1]
         new_rows = []
-        for _, r in edited.iterrows():
+        for d in range(1, num_days + 1):
+            date_str = f"{year}-{sel_month:02d}-{d:02d}"
             new_rows.append({
-                'date':      r['תאריך'],
-                'pnim_dr':   str(r['כונן פנימית']  or ''),
-                'rehab_dr1': str(r['כונן שיקום 1'] or ''),
-                'rehab_dr2': str(r['כונן שיקום 2'] or ''),
+                'date':      date_str,
+                'pnim_dr':   st.session_state.get(f"kn_p_{date_str}",  '') or '',
+                'rehab_dr1': st.session_state.get(f"kn_r1_{date_str}", '') or '',
+                'rehab_dr2': st.session_state.get(f"kn_r2_{date_str}", '') or '',
             })
         new_month_df = pd.DataFrame(new_rows)
         full = st.session_state.konenut
