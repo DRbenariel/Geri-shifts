@@ -390,7 +390,7 @@ def render_navbar(role):
 
     # סידור כוננויות — מנהל על ומנהל/ת
     if role in ("מנהל על", "מנהל/ת"):
-        items.append(sac.TabsItem('סידור כוננויות', icon='shield-plus'))
+        items.append(sac.TabsItem('סידור כוננויות', icon='shield'))
 
     # גאנט חודשי — מנהל על ומנהל/ת
     if role in ("מנהל על", "מנהל/ת"):
