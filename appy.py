@@ -4715,6 +4715,7 @@ def run_smart_scheduling_cp(year, month, only_weekends=False):
 def _render_konenut_tab(active_month_int):
     import calendar as _cal
     year = 2026
+    _FREE_TEXT_OPT = "✏️ הקלד שם..."
 
     sel_month = st.selectbox(
         "חודש:", range(1, 13), index=active_month_int - 1,
@@ -4723,14 +4724,18 @@ def _render_konenut_tab(active_month_int):
     )
     year_month = f"{year}-{sel_month:02d}"
 
+    # Include ALL doctor types (רופא בכיר + מנהל מחלקה) — exclude interns and external
     try:
-        seniors = [''] + sorted(
+        _eligible_types = {'רופא בכיר', 'מנהל מחלקה', 'מנהל/ת', 'מנהל על'}
+        _doc_names = sorted(
             st.session_state.staff[
-                st.session_state.staff['type'].astype(str).str.strip() == 'רופא בכיר'
+                st.session_state.staff['type'].astype(str).str.strip().isin(_eligible_types)
             ]['name'].astype(str).str.strip().tolist()
         )
     except Exception:
-        seniors = ['']
+        _doc_names = []
+    # options: blank → known doctors → free-text marker
+    seniors = [''] + _doc_names + [_FREE_TEXT_OPT]
 
     kdf = st.session_state.konenut
     month_kdf = kdf[kdf['date'].str.startswith(year_month)].set_index('date')
@@ -4756,53 +4761,72 @@ def _render_konenut_tab(active_month_int):
             unsafe_allow_html=True,
         )
 
-    with st.form("konenut_form"):
-        for week in cal:
-            cols = st.columns(7)
-            for i, day in enumerate(week):
-                with cols[i]:
-                    if day == 0:
-                        st.markdown("<div style='min-height:10px'></div>", unsafe_allow_html=True)
-                        continue
-                    date_str  = f"{year}-{sel_month:02d}-{day:02d}"
-                    existing  = month_kdf.loc[date_str] if date_str in month_kdf.index else None
-                    is_wknd   = i <= 1  # col0=Sat, col1=Fri
-                    bg        = "#fef9c3" if is_wknd else "#f1f5f9"
+    def _sel_idx(val):
+        v = str(val).strip() if val else ''
+        if v in seniors:
+            return seniors.index(v)
+        # saved value was free text — mark as free-text option
+        return seniors.index(_FREE_TEXT_OPT) if _FREE_TEXT_OPT in seniors else 0
 
-                    st.markdown(
-                        f"<div style='text-align:center;font-weight:700;font-size:0.82rem;"
-                        f"background:{bg};border-radius:4px;padding:2px 0;margin-bottom:2px'>"
-                        f"{day}</div>",
-                        unsafe_allow_html=True,
-                    )
+    def _slot(label, date_str, saved_val, sel_key, txt_key):
+        """Render one on-call slot: selectbox + optional free-text input."""
+        v = str(saved_val).strip() if saved_val else ''
+        # If the saved value isn't in the dropdown it was free-typed → pre-select marker
+        init_idx = _sel_idx(v)
+        chosen = st.selectbox(label, seniors, index=init_idx,
+                              key=sel_key, label_visibility="collapsed")
+        if chosen == _FREE_TEXT_OPT:
+            # pre-fill text box with the saved free-text if any
+            init_txt = v if v not in seniors else ''
+            return st.text_input("שם", value=init_txt, key=txt_key,
+                                 placeholder="שם רופא/ה", label_visibility="collapsed")
+        return chosen
 
-                    def _idx(val):
-                        v = str(val) if val is not None else ''
-                        return seniors.index(v) if v in seniors else 0
+    for week in cal:
+        cols = st.columns(7)
+        for i, day in enumerate(week):
+            with cols[i]:
+                if day == 0:
+                    st.markdown("<div style='min-height:10px'></div>", unsafe_allow_html=True)
+                    continue
+                date_str = f"{year}-{sel_month:02d}-{day:02d}"
+                existing = month_kdf.loc[date_str] if date_str in month_kdf.index else None
+                is_wknd  = i <= 1
+                bg       = "#fef9c3" if is_wknd else "#f1f5f9"
 
-                    pnim_v = existing['pnim_dr']   if existing is not None else ''
-                    r1_v   = existing['rehab_dr1'] if existing is not None else ''
-                    r2_v   = existing['rehab_dr2'] if existing is not None else ''
+                st.markdown(
+                    f"<div style='text-align:center;font-weight:700;font-size:0.82rem;"
+                    f"background:{bg};border-radius:4px;padding:2px 0;margin-bottom:2px'>"
+                    f"{day}</div>",
+                    unsafe_allow_html=True,
+                )
 
-                    st.selectbox("פ", seniors, index=_idx(pnim_v),
-                                 key=f"kn_p_{date_str}", label_visibility="collapsed")
-                    st.selectbox("ש1", seniors, index=_idx(r1_v),
-                                 key=f"kn_r1_{date_str}", label_visibility="collapsed")
-                    st.selectbox("ש2", seniors, index=_idx(r2_v),
-                                 key=f"kn_r2_{date_str}", label_visibility="collapsed")
+                pnim_v = existing['pnim_dr']   if existing is not None else ''
+                r1_v   = existing['rehab_dr1'] if existing is not None else ''
+                r2_v   = existing['rehab_dr2'] if existing is not None else ''
 
-        submitted = st.form_submit_button("💾 שמור שינויים", type="primary", use_container_width=True)
+                _slot("פ",  date_str, pnim_v, f"kn_p_sel_{date_str}",  f"kn_p_txt_{date_str}")
+                _slot("ש1", date_str, r1_v,   f"kn_r1_sel_{date_str}", f"kn_r1_txt_{date_str}")
+                _slot("ש2", date_str, r2_v,   f"kn_r2_sel_{date_str}", f"kn_r2_txt_{date_str}")
 
-    if submitted:
+    st.divider()
+    if st.button("💾 שמור שינויים", key="konenut_save", type="primary", use_container_width=True):
         num_days = _cal.monthrange(year, sel_month)[1]
+
+        def _get_val(sel_key, txt_key):
+            chosen = st.session_state.get(sel_key, '')
+            if chosen == _FREE_TEXT_OPT:
+                return (st.session_state.get(txt_key, '') or '').strip()
+            return (chosen or '').strip()
+
         new_rows = []
         for d in range(1, num_days + 1):
             date_str = f"{year}-{sel_month:02d}-{d:02d}"
             new_rows.append({
                 'date':      date_str,
-                'pnim_dr':   st.session_state.get(f"kn_p_{date_str}",  '') or '',
-                'rehab_dr1': st.session_state.get(f"kn_r1_{date_str}", '') or '',
-                'rehab_dr2': st.session_state.get(f"kn_r2_{date_str}", '') or '',
+                'pnim_dr':   _get_val(f"kn_p_sel_{date_str}",  f"kn_p_txt_{date_str}"),
+                'rehab_dr1': _get_val(f"kn_r1_sel_{date_str}", f"kn_r1_txt_{date_str}"),
+                'rehab_dr2': _get_val(f"kn_r2_sel_{date_str}", f"kn_r2_txt_{date_str}"),
             })
         new_month_df = pd.DataFrame(new_rows)
         full = st.session_state.konenut
