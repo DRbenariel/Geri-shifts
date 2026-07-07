@@ -2095,6 +2095,27 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns,
     cal_weeks = [list(reversed(w))
                  for w in calendar.Calendar(firstweekday=6).monthdayscalendar(year, view_month)]
 
+    # Pre-load konenut on-call doctor per day for this dept/month
+    _KONENUT_DEPT_SET = {"פנימית גריאטרית", "שיקום גריאטרי א'", "שיקום גריאטרי ב'"}
+    _konenut_day_map = {}
+    if dept_name in _KONENUT_DEPT_SET:
+        try:
+            _kdf = st.session_state.get('konenut', pd.DataFrame())
+            if not _kdf.empty and 'date' in _kdf.columns:
+                _km = _kdf[_kdf['date'].str.startswith(f"{year}-{view_month:02d}")]
+                for _, _kr in _km.iterrows():
+                    _ds  = str(_kr['date'])
+                    _r1  = str(_kr.get('rehab_dr1', '') or '').strip()
+                    _r2  = str(_kr.get('rehab_dr2', '') or '').strip()
+                    if dept_name == "פנימית גריאטרית":
+                        _konenut_day_map[_ds] = str(_kr.get('pnim_dr', '') or '').strip()
+                    elif dept_name == "שיקום גריאטרי א'":
+                        _konenut_day_map[_ds] = _r1
+                    else:  # שיקום גריאטרי ב'
+                        _konenut_day_map[_ds] = _r2 if _r2 else _r1
+        except Exception:
+            pass
+
     # Mobile auto-detection: set the toggle's session-state key directly
     # so it flips ON as soon as JS resolves the device type (render 2).
     # Once detected, we stop overriding so manual user flips are preserved.
@@ -2311,6 +2332,29 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                     else:
                         st.write("")
 
+            # Konenut (on-call doctor) row — mobile
+            if _konenut_day_map:
+                st.markdown(
+                    "<div style='background:#dcfce7;font-weight:700;text-align:right;"
+                    "padding:2px 8px;border-radius:5px;font-size:0.75rem;"
+                    "color:#166534;margin:2px 0 1px'>🔔 כונן/ית</div>",
+                    unsafe_allow_html=True)
+                _kn_mob_cols = st.columns(7)
+                for _ci, d in enumerate(week_rtl):
+                    if d == 0:
+                        _kn_mob_cols[_ci].write("")
+                        continue
+                    _kds  = f"{year}-{view_month:02d}-{d:02d}"
+                    _kval = _konenut_day_map.get(_kds, '')
+                    with _kn_mob_cols[_ci]:
+                        st.markdown(
+                            f"<div style='background:#{'bbf7d0' if _kval else 'f0fdf4'};"
+                            f"text-align:center;padding:4px 1px;border-radius:6px;"
+                            f"font-size:0.68rem;color:#166534;"
+                            f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                            f"{_kval or '—'}</div>",
+                            unsafe_allow_html=True)
+
     else:
         # ════════════════════════════════════════════════════════════════
         # DESKTOP — 8 cols: full name on right, button + popover per cell
@@ -2456,6 +2500,29 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                     f"{cell_txt}</div>",
                     unsafe_allow_html=True)
 
+            # Konenut (on-call doctor) row — green
+            if _konenut_day_map:
+                _krow_cols = st.columns(_COL_W_D)
+                _krow_cols[7].markdown(
+                    "<div style='background:#dcfce7;font-weight:700;text-align:center;"
+                    "padding:6px 2px;border-radius:6px;font-size:0.75rem;color:#166534'>"
+                    "🔔 כונן/ית</div>",
+                    unsafe_allow_html=True)
+                for _ci, d in enumerate(week_rtl):
+                    if d == 0:
+                        _krow_cols[_ci].write("")
+                        continue
+                    _kds  = f"{year}-{view_month:02d}-{d:02d}"
+                    _kval = _konenut_day_map.get(_kds, '')
+                    _kbg  = "#bbf7d0" if _kval else ("#f0fdf4" if not _WD_IS_WK[_ci] else "#f0fdf4")
+                    _krow_cols[_ci].markdown(
+                        f"<div style='background:{_kbg};min-height:36px;border-radius:6px;"
+                        f"text-align:center;font-weight:600;font-size:0.72rem;color:#166534;"
+                        f"display:flex;align-items:center;justify-content:center;padding:2px;"
+                        f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                        f"{_kval or '—'}</div>",
+                        unsafe_allow_html=True)
+
     # ── Day-specific temporary transfer form (persisted to work_schedule_daily) ──
     if allow_temp_add and not readonly:
         _is_pnim = (dept_name == PNIM_DEPT)
@@ -2466,16 +2533,19 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
             "<b>➕ העברה זמנית — הוסף עובד/ת ממחלקה אחרת ליום מסוים</b></div>",
             unsafe_allow_html=True)
 
-        # Employees already permanently rostered to this dept this month — not addable
+        # Employees already permanently rostered to this dept this month — not addable.
+        # Exception: in sides mode (פנימית ורוד/כחול), don't exclude same-dept employees
+        # so admins can transfer between sides; the target side is chosen explicitly below.
         _roster_set = set()
-        try:
-            _dr = st.session_state.dept_rotation
-            if not _dr.empty and 'employee' in _dr.columns:
-                _rmask = ((_dr['year_month'].astype(str) == year_month) &
-                          (_dr['daily_dept'].astype(str) == dept_name))
-                _roster_set = set(_dr[_rmask]['employee'].astype(str).str.strip().tolist())
-        except Exception:
-            pass
+        if side_groups is None:
+            try:
+                _dr = st.session_state.dept_rotation
+                if not _dr.empty and 'employee' in _dr.columns:
+                    _rmask = ((_dr['year_month'].astype(str) == year_month) &
+                              (_dr['daily_dept'].astype(str) == dept_name))
+                    _roster_set = set(_dr[_rmask]['employee'].astype(str).str.strip().tolist())
+            except Exception:
+                pass
         _all_staff_names = []
         if not st.session_state.staff.empty and 'name' in st.session_state.staff.columns:
             _all_staff_names = (st.session_state.staff['name']
@@ -4805,8 +4875,11 @@ def _render_konenut_tab(active_month_int):
                 r1_v   = existing['rehab_dr1'] if existing is not None else ''
                 r2_v   = existing['rehab_dr2'] if existing is not None else ''
 
+                st.markdown("<div style='font-size:0.6rem;color:#9a3412;font-weight:600;line-height:1;margin-top:2px'>🏥פנ׳</div>", unsafe_allow_html=True)
                 _slot("פ",  date_str, pnim_v, f"kn_p_sel_{date_str}",  f"kn_p_txt_{date_str}")
+                st.markdown("<div style='font-size:0.6rem;color:#1e3a8a;font-weight:600;line-height:1;margin-top:2px'>🦽ש׳1</div>", unsafe_allow_html=True)
                 _slot("ש1", date_str, r1_v,   f"kn_r1_sel_{date_str}", f"kn_r1_txt_{date_str}")
+                st.markdown("<div style='font-size:0.6rem;color:#1e3a8a;font-weight:600;line-height:1;margin-top:2px'>🦽ש׳2</div>", unsafe_allow_html=True)
                 _slot("ש2", date_str, r2_v,   f"kn_r2_sel_{date_str}", f"kn_r2_txt_{date_str}")
 
     st.divider()
