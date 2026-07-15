@@ -6591,6 +6591,7 @@ elif role in ("מנהל/ת", "מנהל על"):
 
                             st.session_state.staff = pd.concat([st.session_state.staff, new_emp_row], ignore_index=True)
                             save_to_db("staff", st.session_state.staff)
+                            _fetch_sheet_data_silently.clear()
                             st.session_state['_staff_editor_ver'] = st.session_state.get('_staff_editor_ver', 0) + 1
                             st.success(f"העובד/ת {new_name} נוספ/ה בהצלחה! (סיסמה: 1234)")
                             st.rerun()
@@ -6603,7 +6604,7 @@ elif role in ("מנהל/ת", "מנהל על"):
         # bump the form version so the data_editor re-initializes from fresh data
         # instead of its stale cached widget state.
         try:
-            _fresh_staff = get_db_data("staff")
+            _fresh_staff = _fetch_live("staff")
             if not _fresh_staff.empty:
                 _cur_names = set(st.session_state.staff['name'].astype(str).str.strip())
                 _new_names = set(_fresh_staff['name'].astype(str).str.strip())
@@ -6739,6 +6740,7 @@ elif role in ("מנהל/ת", "מנהל על"):
 
             st.session_state.staff = final_new_staff
             save_to_db("staff", st.session_state.staff)
+            _fetch_sheet_data_silently.clear()
             st.success("הנתונים נשמרו בהצלחה!")
             st.rerun()
         
