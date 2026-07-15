@@ -1564,8 +1564,7 @@ def _absence_conflicts(employee, dept, start_date, end_date,
     try:
         emp_n = str(employee).strip()
         dept_n = str(dept or '').strip()
-        if not dept_n:
-            return out
+        _filter_by_dept = bool(dept_n)
         # Coerce inputs to date
         def _to_date(v):
             if hasattr(v, 'strftime') and not isinstance(v, str):
@@ -1595,10 +1594,12 @@ def _absence_conflicts(employee, dept, start_date, end_date,
                 continue
             if exclude_id is not None and str(r.get('id', '')) == str(exclude_id):
                 continue
-            # Normalize the OTHER employee's dept via Gantt for fair comparison
-            other_dept = _emp_dept_for_date(r['_emp'], r_sd)
-            if str(other_dept).strip() != dept_n:
-                continue
+            if _filter_by_dept:
+                other_dept = str(r.get('dept_at_request', '') or '').strip()
+                if not other_dept:
+                    other_dept = _emp_dept_for_date(r['_emp'], r_sd)
+                if other_dept and str(other_dept).strip() != dept_n:
+                    continue
             out.append({
                 'employee': r['_emp'],
                 'start':    r_sd,
@@ -6581,6 +6582,7 @@ elif role in ("מנהל/ת", "מנהל על"):
 
                             st.session_state.staff = pd.concat([st.session_state.staff, new_emp_row], ignore_index=True)
                             save_to_db("staff", st.session_state.staff)
+                            st.session_state['_staff_editor_ver'] = st.session_state.get('_staff_editor_ver', 0) + 1
                             st.success(f"העובד/ת {new_name} נוספ/ה בהצלחה! (סיסמה: 1234)")
                             st.rerun()
         
@@ -6588,7 +6590,7 @@ elif role in ("מנהל/ת", "מנהל על"):
         st.caption("שינויים בטבלה נשמרים רק בלחיצה על כפתור השמירה")
         
         # עטיפה בטופס (Form) כדי למנוע טעינה מחדש בכל שינוי תא
-        with st.form(key="staff_batch_edit_form"):
+        with st.form(key=f"staff_batch_edit_form_{st.session_state.get('_staff_editor_ver', 0)}"):
             # Ensure only_home_dept exists
             if 'only_home_dept' not in st.session_state.staff.columns:
                 st.session_state.staff['only_home_dept'] = False
