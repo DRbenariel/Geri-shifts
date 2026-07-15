@@ -4792,6 +4792,11 @@ def _render_konenut_tab(active_month_int):
     year = 2026
     _FREE_TEXT_OPT = "✏️ הקלד שם..."
 
+    if st.button("🔄 רענן רשימת רופאים", key="konenut_refresh_staff"):
+        st.session_state.pop('staff', None)
+        st.session_state.pop('konenut', None)
+        st.rerun()
+
     sel_month = st.selectbox(
         "חודש:", range(1, 13), index=active_month_int - 1,
         key="konenut_month_sel",
@@ -6716,7 +6721,16 @@ elif role in ("מנהל/ת", "מנהל על"):
             
             # Reconstruct DataFrame including password
             final_new_staff = pd.DataFrame(final_df_list)
-            
+
+            # Preserve staff added by other sessions not visible in this editor.
+            if not latest_staff.empty:
+                _editor_names = set(edited_df['name'].astype(str).str.strip())
+                _hidden = latest_staff[
+                    ~latest_staff['name'].astype(str).str.strip().isin(_editor_names)
+                ]
+                if not _hidden.empty:
+                    final_new_staff = pd.concat([final_new_staff, _hidden], ignore_index=True)
+
             st.session_state.staff = final_new_staff
             save_to_db("staff", st.session_state.staff)
             st.success("הנתונים נשמרו בהצלחה!")
