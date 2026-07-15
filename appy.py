@@ -1595,7 +1595,11 @@ def _absence_conflicts(employee, dept, start_date, end_date,
             if exclude_id is not None and str(r.get('id', '')) == str(exclude_id):
                 continue
             if _filter_by_dept:
-                other_dept = str(r.get('dept_at_request', '') or '').strip()
+                _raw = r.get('dept_at_request')
+                try:
+                    other_dept = '' if pd.isna(_raw) else str(_raw).strip()
+                except TypeError:
+                    other_dept = str(_raw or '').strip()
                 if not other_dept:
                     other_dept = _emp_dept_for_date(r['_emp'], r_sd)
                 if other_dept and str(other_dept).strip() != dept_n:
