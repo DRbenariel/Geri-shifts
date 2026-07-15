@@ -21,6 +21,11 @@ env/
 # Local DBs (legacy, not used in production)
 *.db
 
+# Diagnostic logs (temporary)
+staff_add_debug.log
+streamlit_err.log
+streamlit_out.log
+
 # IDE
 .vscode/
 .idea/

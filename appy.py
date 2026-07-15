@@ -2977,7 +2977,12 @@ def save_to_db(worksheet_name, df, is_rtl=False):
     Never calls ws.clear() before writing, so a mid-write failure never leaves the sheet empty.
     """
     url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-    df_str = df.astype(str).replace('nan', '', regex=True).replace('None', '', regex=True)
+    # NaN/None/NaT-safe stringification — the previous .astype(str).replace(...)
+    # pattern let real float NaN leak through to gspread's JSON encoder for
+    # bool/object columns produced by pd.concat with missing keys, causing
+    # `Out of range float values are not JSON compliant: nan`. Using .where +
+    # .fillna forces every cell to a JSON-safe string.
+    df_str = df.where(pd.notna(df), '').fillna('').astype(str)
     data = [df_str.columns.tolist()] + df_str.values.tolist()
     n_rows = len(data)
     n_cols = max((len(r) for r in data), default=1)
@@ -6594,11 +6599,33 @@ elif role in ("מנהל/ת", "מנהל על"):
                                 save_to_db("staff", st.session_state.staff)
                                 _fetch_sheet_data_silently.clear()
                                 st.session_state['_staff_editor_ver'] = st.session_state.get('_staff_editor_ver', 0) + 1
-                                st.success(f"העובד/ת {new_name} נוספ/ה בהצלחה! (סיסמה: 1234)")
+                                st.session_state.pop('_last_staff_save_error', None)
+                                st.session_state['_last_staff_save_success'] = (
+                                    f"העובד/ת {new_name} נוספ/ה בהצלחה! (סיסמה: 1234)"
+                                )
                                 st.rerun()
                             except RuntimeError as _save_err:
-                                st.error(str(_save_err))
-        
+                                # Roll back the ghost row from the concat above so
+                                # session_state matches Sheets after a failed write.
+                                try:
+                                    st.session_state.staff = st.session_state.staff.iloc[:-1].reset_index(drop=True)
+                                except Exception:
+                                    pass
+                                # Persist so it survives the next rerun (st.error inside a
+                                # form handler is wiped by any subsequent rerun).
+                                st.session_state['_last_staff_save_error'] = str(_save_err)
+
+        # Persistent success / error banners — rendered outside the form so
+        # reruns don't wipe them (st.success / st.error inside a form handler
+        # is cleared by any subsequent rerun).
+        if st.session_state.get('_last_staff_save_success'):
+            st.success(f"✅ {st.session_state.pop('_last_staff_save_success')}")
+        if st.session_state.get('_last_staff_save_error'):
+            st.error(f"❌ שגיאה בהוספת עובד: {st.session_state['_last_staff_save_error']}")
+            if st.button("נקה שגיאה", key="_clear_staff_err"):
+                st.session_state.pop('_last_staff_save_error', None)
+                st.rerun()
+
         st.divider()
         st.caption("שינויים בטבלה נשמרים רק בלחיצה על כפתור השמירה")
 
