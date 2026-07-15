@@ -6597,7 +6597,22 @@ elif role in ("מנהל/ת", "מנהל על"):
         
         st.divider()
         st.caption("שינויים בטבלה נשמרים רק בלחיצה על כפתור השמירה")
-        
+
+        # Reload staff from DB before rendering the editor. If DB has different
+        # staff than session state (names added/removed by another session), also
+        # bump the form version so the data_editor re-initializes from fresh data
+        # instead of its stale cached widget state.
+        try:
+            _fresh_staff = get_db_data("staff")
+            if not _fresh_staff.empty:
+                _cur_names = set(st.session_state.staff['name'].astype(str).str.strip())
+                _new_names = set(_fresh_staff['name'].astype(str).str.strip())
+                if _new_names != _cur_names:
+                    st.session_state.staff = _fresh_staff
+                    st.session_state['_staff_editor_ver'] = st.session_state.get('_staff_editor_ver', 0) + 1
+        except Exception:
+            pass  # keep existing session state on DB failure
+
         # עטיפה בטופס (Form) כדי למנוע טעינה מחדש בכל שינוי תא
         with st.form(key=f"staff_batch_edit_form_{st.session_state.get('_staff_editor_ver', 0)}"):
             # Ensure only_home_dept exists
@@ -6721,15 +6736,6 @@ elif role in ("מנהל/ת", "מנהל על"):
             
             # Reconstruct DataFrame including password
             final_new_staff = pd.DataFrame(final_df_list)
-
-            # Preserve staff added by other sessions not visible in this editor.
-            if not latest_staff.empty:
-                _editor_names = set(edited_df['name'].astype(str).str.strip())
-                _hidden = latest_staff[
-                    ~latest_staff['name'].astype(str).str.strip().isin(_editor_names)
-                ]
-                if not _hidden.empty:
-                    final_new_staff = pd.concat([final_new_staff, _hidden], ignore_index=True)
 
             st.session_state.staff = final_new_staff
             save_to_db("staff", st.session_state.staff)
