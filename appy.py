@@ -6607,7 +6607,7 @@ elif role in ("מנהל/ת", "מנהל על"):
             if not _fresh_staff.empty:
                 _cur_names = set(st.session_state.staff['name'].astype(str).str.strip())
                 _new_names = set(_fresh_staff['name'].astype(str).str.strip())
-                if _new_names != _cur_names:
+                if _new_names - _cur_names:  # DB has names not yet in session → another session added staff
                     st.session_state.staff = _fresh_staff
                     st.session_state['_staff_editor_ver'] = st.session_state.get('_staff_editor_ver', 0) + 1
         except Exception:
