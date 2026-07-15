@@ -3028,7 +3028,7 @@ def save_to_db(worksheet_name, df, is_rtl=False):
             last_err = e
             break
 
-    st.error(f"שגיאה קריטית בשמירה לגיליון '{worksheet_name}': {last_err}")
+    raise RuntimeError(f"שגיאה קריטית בשמירה לגיליון '{worksheet_name}': {last_err}")
 
 def init_db():
     """
@@ -6590,11 +6590,14 @@ elif role in ("מנהל/ת", "מנהל על"):
                             }])
 
                             st.session_state.staff = pd.concat([st.session_state.staff, new_emp_row], ignore_index=True)
-                            save_to_db("staff", st.session_state.staff)
-                            _fetch_sheet_data_silently.clear()
-                            st.session_state['_staff_editor_ver'] = st.session_state.get('_staff_editor_ver', 0) + 1
-                            st.success(f"העובד/ת {new_name} נוספ/ה בהצלחה! (סיסמה: 1234)")
-                            st.rerun()
+                            try:
+                                save_to_db("staff", st.session_state.staff)
+                                _fetch_sheet_data_silently.clear()
+                                st.session_state['_staff_editor_ver'] = st.session_state.get('_staff_editor_ver', 0) + 1
+                                st.success(f"העובד/ת {new_name} נוספ/ה בהצלחה! (סיסמה: 1234)")
+                                st.rerun()
+                            except RuntimeError as _save_err:
+                                st.error(str(_save_err))
         
         st.divider()
         st.caption("שינויים בטבלה נשמרים רק בלחיצה על כפתור השמירה")
@@ -6739,10 +6742,13 @@ elif role in ("מנהל/ת", "מנהל על"):
             final_new_staff = pd.DataFrame(final_df_list)
 
             st.session_state.staff = final_new_staff
-            save_to_db("staff", st.session_state.staff)
-            _fetch_sheet_data_silently.clear()
-            st.success("הנתונים נשמרו בהצלחה!")
-            st.rerun()
+            try:
+                save_to_db("staff", st.session_state.staff)
+                _fetch_sheet_data_silently.clear()
+                st.success("הנתונים נשמרו בהצלחה!")
+                st.rerun()
+            except RuntimeError as _save_err:
+                st.error(str(_save_err))
         
         st.markdown("---")
         col_sync, col_warn = st.columns([1, 3])
