@@ -6893,19 +6893,37 @@ elif role in ("מנהל/ת", "מנהל על"):
                         st.markdown(f"**🟡 ממתינות לאישור ({len(pending_da)})**")
                         for idx_da, row_da in pending_da.iterrows():
                             with st.container(border=True):
+                                # Overlap check up front — drives the approve UX
+                                # (same pattern as the ניהול היעדרויות admin view at ~7680).
+                                req_id_da = str(row_da.get('id', idx_da))
+                                _rs_da = pd.to_datetime(row_da.get('start_date', ''), errors='coerce')
+                                _re_da = pd.to_datetime(row_da.get('end_date', ''), errors='coerce')
+                                _rdept_da_canon = _emp_dept_for_date(emp_n, _rs_da)
+                                _row_conflicts_da = _absence_conflicts(
+                                    emp_n, _rdept_da_canon, _rs_da, _re_da,
+                                    exclude_id=row_da.get('id'))
+
                                 ca, cb, cc, cd, ce = st.columns([2, 2, 2, 1, 1])
                                 ca.write(f"{row_da['start_date']} – {row_da['end_date']}")
                                 cb.write(row_da.get('type', '—'))
                                 cc.write(row_da.get('dept_at_request', '—') or '—')
-                                req_id_da = str(row_da.get('id', idx_da))
+                                # Disable inline ✅ when there's a conflict — force button appears below.
                                 if cd.button("✅ אשר", key=f"tzv_ap_{req_id_da}",
-                                             use_container_width=True):
+                                             use_container_width=True,
+                                             disabled=bool(_row_conflicts_da)):
                                     _approve_request(req_id_da, str(user_name).strip())
                                     st.rerun()
                                 if ce.button("❌ דחה", key=f"tzv_rj_{req_id_da}",
                                              use_container_width=True):
                                     _reject_request(req_id_da, str(user_name).strip())
                                     st.rerun()
+                                if _row_conflicts_da:
+                                    st.warning(_format_absence_conflict_question(_row_conflicts_da))
+                                    if st.button("✅ כן, אשר למרות החפיפה",
+                                                 key=f"tzv_ap_force_{req_id_da}",
+                                                 type="primary"):
+                                        _approve_request(req_id_da, str(user_name).strip())
+                                        st.rerun()
                                 if row_da.get('notes'):
                                     st.caption(f"💬 {row_da['notes']}")
                     # All requests (including approved/rejected) as a compact table
