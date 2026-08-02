@@ -7402,25 +7402,28 @@ elif role in ("מנהל/ת", "מנהל על"):
         if st.session_state.get('show_active_month_success'):
             st.success(f"✅ סידור לחודש {st.session_state.pop('show_active_month_success')} נוצר. הגשות נפתחו.")
 
-        # 12 consecutive months starting from the active month, each carrying its
+        # 12-month rolling window anchored to the CURRENT month, each carrying its
         # correct year so the window rolls into the next year past December
-        # (e.g. active=December → ... דצמבר 2026 / ינואר 2027 / ... נובמבר 2027).
-        # base_year follows the real clock: if the active month already passed
-        # this calendar year, it refers to next year's occurrence.
+        # (e.g. in Aug 2026 → אוגוסט 2026 / ... / יולי 2027).
+        # This must match _sw_month_selector_12 (used by the סידור עבודה tabs): both
+        # write/read dept_rotation by the same year_month key, so their windows have
+        # to agree. Anchoring to the active month instead pushed a just-passed active
+        # month (e.g. July while it's August) a full year forward, hiding every
+        # near-term month and orphaning any assignments under a 2027-* key.
         _now = datetime.now()
-        base_year = _now.year if daily_active_month_int >= _now.month else _now.year + 1
         view_pairs = [
-            (base_year + (daily_active_month_int - 1 + i) // 12,
-             ((daily_active_month_int - 1 + i) % 12) + 1)
+            (_now.year + (_now.month - 1 + i) // 12,
+             ((_now.month - 1 + i) % 12) + 1)
             for i in range(12)
         ]
         view_opts = [m for (_y, m) in view_pairs]          # months in window order
         _month_to_year = {m: y for (y, m) in view_pairs}   # month → its window year
 
-        # Single session-state key — the selectbox IS the state; no double-assignment
+        # Single session-state key — the selectbox IS the state; no double-assignment.
+        # Default to the current month; a stale selection outside the window resets here.
         if 'daily_view_month' not in st.session_state or \
                 st.session_state.daily_view_month not in view_opts:
-            st.session_state.daily_view_month = daily_active_month_int
+            st.session_state.daily_view_month = _now.month
 
         col_top1, col_top2, col_top3 = st.columns([2, 2, 2])
         with col_top1:
