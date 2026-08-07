@@ -2689,6 +2689,7 @@ _ABSENCE_GANTT_COLORS = {
     "חופש":          ("#dbeafe", "#1e3a8a"),
     "חופש עתידי":    ("#dbeafe", "#1e3a8a"),
     "202":           ("#fef08a", "#854d0e"),
+    "אחר":           ("#e2e8f0", "#475569"),
     "היעדרות אחרת":  ("#e2e8f0", "#475569"),
 }
 
@@ -2707,63 +2708,47 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
     month_start = date(year, month, 1)
     month_end   = date(year, month, num_days)
 
-    ar = st.session_state.get('absence_requests', pd.DataFrame())
-    if ar.empty or 'status' not in ar.columns:
-        st.info("אין בקשות שאושרו בחודש זה.")
+    # Single source of truth: derive every employee's per-day status from
+    # _derive_auto_status, which fuses ALL absence sources with correct priority —
+    #   1. manual schedule-tab overrides (work_schedule_daily, is_manual=True)
+    #   2. approved absence_requests
+    #   3. permanent recurring weekly absences (staff.recurring_absent_days)
+    # Reading absence_requests alone (the old behaviour) hid absences that exist
+    # ONLY as a recurring rule (e.g. מאשה קרופניקוב Sun+Thu) or ONLY as a manual
+    # schedule edit (e.g. דן מנשס 17.8, שאדי 10.8/31.8). We therefore iterate every
+    # active employee × every Sun–Thu day and keep the days whose derived status is
+    # an absence. daily_dept=None so the dept-aware manual branch can't hide a real
+    # absence when the stored dept differs from the employee's canonical dept.
+    _ABSENCE_STATUSES = {"חופש", "202", "אחר"}
+    sf_g = st.session_state.get('staff', pd.DataFrame())
+    if sf_g.empty or 'name' not in sf_g.columns:
+        st.info("אין היעדרויות בחודש זה.")
         return
+    _active_types = ['מתמחה', 'רופא בכיר', 'מנהל מחלקה', 'מנהל/ת']
+    emp_names = sorted(set(
+        sf_g[sf_g['type'].astype(str).str.strip().isin(_active_types)]
+        ['name'].astype(str).str.strip().tolist()
+    ))
 
-    ar2 = ar.copy()
-    ar2['_status'] = ar2['status'].astype(str).str.lower()
-    ar2 = ar2[ar2['_status'] == 'approved']
-    if ar2.empty:
-        st.info("אין בקשות שאושרו בחודש זה.")
-        return
-
-    def _to_date(v):
-        try:
-            if hasattr(v, 'strftime') and not isinstance(v, str):
-                return v if isinstance(v, date) else v.date()
-            return datetime.strptime(str(v)[:10], '%Y-%m-%d').date()
-        except Exception:
-            return None
-
-    # Collect (emp, dept_canon, sd, ed, type) intersecting this month
-    rows = []
-    for _, r in ar2.iterrows():
-        sd = _to_date(r.get('start_date'))
-        ed = _to_date(r.get('end_date'))
-        if not sd or not ed:
+    # Group by (dept, employee) → list of (day_int, type). Canonical dept is stable
+    # within a month (dept_rotation is keyed by year_month), so resolve it once.
+    by_dept = {}
+    for emp in emp_names:
+        if not emp:
             continue
-        if ed < sd:
-            sd, ed = ed, sd
-        # Intersect with [month_start, month_end]
-        i_s = max(sd, month_start); i_e = min(ed, month_end)
-        if i_s > i_e:
-            continue
-        emp = str(r.get('employee', '')).strip()
-        dept_canon = _emp_dept_for_date(emp, sd) or '—'
+        dept_canon = _emp_dept_for_date(emp, month_start) or '—'
         if dept_filter and dept_canon not in dept_filter:
             continue
-        rows.append({
-            'emp':  emp,
-            'dept': dept_canon,
-            'sd':   i_s,
-            'ed':   i_e,
-            'type': str(r.get('type', '') or '').strip() or 'חופש',
-        })
+        for d in days:
+            if (date(year, month, d).weekday() + 1) % 7 >= 5:
+                continue   # skip Fri/Sat — weekend closure, not a real absence
+            status = _derive_auto_status(f"{year}-{month:02d}-{d:02d}", emp, daily_dept=None)
+            if status in _ABSENCE_STATUSES:
+                by_dept.setdefault(dept_canon, {}).setdefault(emp, []).append((d, status))
 
-    if not rows:
-        st.info("אין בקשות שאושרו בחודש זה.")
+    if not by_dept:
+        st.info("אין היעדרויות בחודש זה.")
         return
-
-    # Group by (dept, employee) → list of (day_int, type)
-    by_dept = {}
-    for row in rows:
-        cur = row['sd']
-        while cur <= row['ed']:
-            d = cur.day
-            by_dept.setdefault(row['dept'], {}).setdefault(row['emp'], []).append((d, row['type']))
-            cur = cur + timedelta(days=1)
 
     # Compute conflict days per (dept, day) — ≥2 distinct employees absent that day
     conflicts = {}   # {(dept, day_int): [emp1, emp2, ...]}
@@ -7738,7 +7723,7 @@ elif role in ("מנהל/ת", "מנהל על"):
         st.divider()
 
         # ── Section 2: Gantt-style approved-absence view (Feature 3) ────
-        st.markdown("#### ✅ בקשות שאושרו — תצוגת גאנט")
+        st.markdown("#### ✅ כל ההיעדרויות בחודש — תצוגת גאנט")
         # 12-month selector for which month to visualise (auto-advancing).
         _gantt_year, _gantt_month = _sw_month_selector_12("nb_adm_gantt")
         _render_absence_gantt(_gantt_year, _gantt_month)
@@ -8702,7 +8687,7 @@ else:
             st.divider()
 
             # ── Section 2: Gantt-style approved-absence view (Feature 3) ────
-            st.markdown("#### ✅ בקשות שאושרו — תצוגת גאנט")
+            st.markdown("#### ✅ כל ההיעדרויות בחודש — תצוגת גאנט")
             _mgr_gantt_year, _mgr_gantt_month = _sw_month_selector_12("nb_mgr_gantt")
             _render_absence_gantt(_mgr_gantt_year, _mgr_gantt_month,
                                   dept_filter=set(_mgr_managed_depts))
