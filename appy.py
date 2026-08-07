@@ -1063,16 +1063,14 @@ def _write_batched_sheet(ws, dept_name, year_month, view_month,
                          per_day_workers, per_day_toranet, per_day_absent,
                          per_day_workers_by_side=None, year=None):
     """
-    Write batched schedule data into an existing openpyxl Worksheet.
-    Layout (rows × cols-per-day):
-      Row 1  : dept title header
-      Row 2  : day-number + weekday-letter header
-      Row 3  : 'עובדים' section label
-      Rows 4+ : worker slots (max across all days)
-      Next   : תורן row (single data row, label in col A)
-      Next   : 'לא נמצאים' section label
-      Next+  : absent slots (max across all days)
-    No merged cells.
+    Write batched schedule data into an existing openpyxl Worksheet, laid out for
+    printing on landscape-A4 pages: the month is split into Sun–Sat week blocks
+    stacked vertically (8 cols = label + 7 days). Each block is:
+      day-number/weekday header → 'עובדים' (or פנימית side blocks) → תורן →
+      'לא נמצאים' → absent rows.
+    Page setup fits all columns to one page wide and inserts a page break between
+    weeks so no week is ever split across pages. Row 1 (dept title) repeats atop
+    every printed page. No merged cells.
     """
     import openpyxl
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -1115,119 +1113,159 @@ def _write_batched_sheet(ws, dept_name, year_month, view_month,
             setattr(c, attr, v)
         return c
 
-    # ── Row 1: dept title ────────────────────────────────────────────────
+    # ── Row 1: dept title (repeated atop every printed page) ─────────────
+    TOTAL_COLS = 8   # col A label + 7 day columns (Sun..Sat)
     _set(1, 1, f"{dept_name} — {year_month}",
          font=Font(bold=True, size=12, color="FFFFFF"),
          fill=f_hdr_dept,
          alignment=Alignment(horizontal='right'))
-    for d in days:
-        _set(1, d + 1, fill=f_hdr_dept)
+    for c in range(2, TOTAL_COLS + 1):
+        _set(1, c, fill=f_hdr_dept)
 
-    # ── Row 2: day numbers + weekday letters ─────────────────────────────
-    _set(2, 1, "יום / תאריך",
-         font=Font(bold=True, color="FFFFFF", size=9),
-         fill=f_hdr_day,
-         alignment=Alignment(horizontal='center'))
-    for d in days:
-        date_obj = date(year, view_month, d)
-        wd_idx   = (date_obj.weekday() + 1) % 7
-        _set(2, d + 1, f"{d}\n{WD[wd_idx]}",
+    # Month laid out as Sun–Sat weeks stacked vertically (one block per week) so
+    # each week fits a landscape-A4 page width. 0 = a day outside the month.
+    weeks = calendar.Calendar(firstweekday=6).monthdayscalendar(year, view_month)
+
+    def _week_worker_max(wk):
+        return max((len(per_day_workers.get(d, [])) for d in wk if d), default=1)
+
+    def _week_side_max(wk, side):
+        return max((len(per_day_workers_by_side.get(d, {}).get(side, []))
+                    for d in wk if d), default=0)
+
+    def _week_abs_max(wk):
+        return max((len(per_day_absent.get(d, [])) for d in wk if d), default=0)
+
+    def _week_block_rows(wk):
+        """Exact number of rows _write_week emits for wk (drives pagination)."""
+        rows = 1  # day-number header
+        if per_day_workers_by_side is not None:
+            for s in PNIM_SIDES:
+                rows += 1 + max(_week_side_max(wk, s), 1)
+        else:
+            rows += 1 + max(_week_worker_max(wk), 1)
+        rows += 1                       # תורן
+        rows += 1 + _week_abs_max(wk)   # לא נמצאים label + absent rows
+        return rows
+
+    def _day_fill(j):
+        return f_sat_cell if j == 6 else f_fri_cell if j == 5 else f_work_cell
+
+    def _write_week(wk):
+        """Write one Sun–Sat week block starting at the enclosing `r`."""
+        nonlocal r
+        real = [d for d in wk if d]
+        rng = f"{real[0]}–{real[-1]}/{view_month}" if real else ""
+
+        # Day-number + weekday header
+        _set(r, 1, rng,
              font=Font(bold=True, color="FFFFFF", size=9),
              fill=f_hdr_day,
-             alignment=Alignment(horizontal='center', vertical='center', wrap_text=True))
-    ws.row_dimensions[2].height = 26
-
-    # ── Worker section ───────────────────────────────────────────────────
-    r = 3
-
-    def _write_worker_rows(getter, n_rows):
-        """Write n_rows worker-slot rows; getter(d) → that day's name list."""
-        nonlocal r
-        for i in range(n_rows):
-            _set(r, 1)
-            for d in days:
-                wd_idx = (date(year, view_month, d).weekday() + 1) % 7
-                lst = getter(d)
-                val = lst[i] if i < len(lst) else ""
-                if wd_idx == 6:
-                    bg = f_sat_cell
-                elif wd_idx == 5:
-                    bg = f_fri_cell
-                else:
-                    bg = f_work_cell
-                _set(r, d + 1, val,
-                     font=Font(size=9),
-                     fill=bg,
-                     alignment=Alignment(horizontal='right', vertical='center'))
-            r += 1
-
-    if per_day_workers_by_side is not None:
-        # פנימית: one labelled block per side (🌸 ורוד then 🔵 כחול)
-        f_side = {"ורוד": PatternFill("solid", fgColor="FCE7F3"),
-                  "כחול": PatternFill("solid", fgColor="DBEAFE")}
-        for _s in PNIM_SIDES:
-            _max_s = max((len(v.get(_s, [])) for v in per_day_workers_by_side.values()),
-                         default=0)
-            _set(r, 1, f"{PNIM_ICONS[_s]} צד {_s}",
-                 font=Font(bold=True, size=9, color="1E293B"),
-                 fill=f_side.get(_s, f_sec_work),
-                 alignment=Alignment(horizontal='right'))
-            for d in days:
-                _set(r, d + 1, fill=f_side.get(_s, f_sec_work))
-            r += 1
-            _write_worker_rows(
-                lambda d, _s=_s: per_day_workers_by_side.get(d, {}).get(_s, []),
-                max(_max_s, 1))
-    else:
-        _set(r, 1, "עובדים",
-             font=Font(bold=True, size=9, color="166534"),
-             fill=f_sec_work,
-             alignment=Alignment(horizontal='right'))
-        for d in days:
-            _set(r, d + 1, fill=f_sec_work)
+             alignment=Alignment(horizontal='center', vertical='center'))
+        for j in range(7):
+            d = wk[j]
+            _set(r, 2 + j, f"{d}\n{WD[j]}" if d else "",
+                 font=Font(bold=True, color="FFFFFF", size=9),
+                 fill=f_hdr_day,
+                 alignment=Alignment(horizontal='center', vertical='center', wrap_text=True))
+        ws.row_dimensions[r].height = 26
         r += 1
-        _write_worker_rows(lambda d: per_day_workers.get(d, []), max_work_rows)
 
-    # ── תורן row (label + data in same row) ──────────────────────────────
-    _set(r, 1, toranet_label,
-         font=Font(bold=True, size=9, color="5B21B6"),
-         fill=f_sec_toran,
-         alignment=Alignment(horizontal='right'))
-    for d in days:
-        nd = per_day_toranet.get(d) or ""
-        _set(r, d + 1, nd,
-             font=Font(size=9, color="5B21B6"),
-             fill=f_sec_toran,
-             alignment=Alignment(horizontal='right', vertical='center'))
-    r += 1
+        def _worker_rows(getter, n_rows):
+            nonlocal r
+            for i in range(n_rows):
+                _set(r, 1)
+                for j in range(7):
+                    d = wk[j]
+                    lst = getter(d) if d else []
+                    _set(r, 2 + j, lst[i] if i < len(lst) else "",
+                         font=Font(size=9), fill=_day_fill(j),
+                         alignment=Alignment(horizontal='right', vertical='center'))
+                r += 1
 
-    # ── לא נמצאים section label ──────────────────────────────────────────
-    _set(r, 1, "לא נמצאים",
-         font=Font(bold=True, size=9, color="991B1B"),
-         fill=f_sec_absent,
-         alignment=Alignment(horizontal='right'))
-    for d in days:
-        _set(r, d + 1, fill=f_sec_absent)
-    r += 1
+        if per_day_workers_by_side is not None:
+            # פנימית: one labelled block per side (🌸 ורוד then 🔵 כחול)
+            f_side = {"ורוד": PatternFill("solid", fgColor="FCE7F3"),
+                      "כחול": PatternFill("solid", fgColor="DBEAFE")}
+            for _s in PNIM_SIDES:
+                _set(r, 1, f"{PNIM_ICONS[_s]} צד {_s}",
+                     font=Font(bold=True, size=9, color="1E293B"),
+                     fill=f_side.get(_s, f_sec_work),
+                     alignment=Alignment(horizontal='right'))
+                for j in range(7):
+                    _set(r, 2 + j, fill=f_side.get(_s, f_sec_work))
+                r += 1
+                _worker_rows(lambda d, _s=_s: per_day_workers_by_side.get(d, {}).get(_s, []),
+                             max(_week_side_max(wk, _s), 1))
+        else:
+            _set(r, 1, "עובדים",
+                 font=Font(bold=True, size=9, color="166534"),
+                 fill=f_sec_work, alignment=Alignment(horizontal='right'))
+            for j in range(7):
+                _set(r, 2 + j, fill=f_sec_work)
+            r += 1
+            _worker_rows(lambda d: per_day_workers.get(d, []), max(_week_worker_max(wk), 1))
 
-    # Absent rows
-    for i in range(max_abs_rows):
-        _set(r, 1)
-        for d in days:
-            lst = per_day_absent.get(d, [])
-            val = lst[i] if i < len(lst) else ""
-            _set(r, d + 1, val,
-                 font=Font(size=9, color="991B1B" if val else "9CA3AF"),
-                 fill=f_abs_cell,
+        # תורן row (label + data in same row)
+        _set(r, 1, toranet_label,
+             font=Font(bold=True, size=9, color="5B21B6"),
+             fill=f_sec_toran, alignment=Alignment(horizontal='right'))
+        for j in range(7):
+            d = wk[j]
+            _set(r, 2 + j, (per_day_toranet.get(d) or "") if d else "",
+                 font=Font(size=9, color="5B21B6"), fill=f_sec_toran,
                  alignment=Alignment(horizontal='right', vertical='center'))
         r += 1
 
-    # ── Column widths + freeze ────────────────────────────────────────────
-    ws.column_dimensions['A'].width = 14
-    for d in days:
-        ws.column_dimensions[
-            openpyxl.utils.get_column_letter(d + 1)].width = 11
-    ws.freeze_panes = "B3"
+        # לא נמצאים section
+        _set(r, 1, "לא נמצאים",
+             font=Font(bold=True, size=9, color="991B1B"),
+             fill=f_sec_absent, alignment=Alignment(horizontal='right'))
+        for j in range(7):
+            _set(r, 2 + j, fill=f_sec_absent)
+        r += 1
+        for i in range(_week_abs_max(wk)):
+            _set(r, 1)
+            for j in range(7):
+                d = wk[j]
+                lst = per_day_absent.get(d, []) if d else []
+                val = lst[i] if i < len(lst) else ""
+                _set(r, 2 + j, val,
+                     font=Font(size=9, color="991B1B" if val else "9CA3AF"),
+                     fill=f_abs_cell, alignment=Alignment(horizontal='right', vertical='center'))
+            r += 1
+
+    # ── Lay out weeks with content-aware page breaks (never split a week) ──
+    from openpyxl.worksheet.pagebreak import Break
+    PAGE_ROW_BUDGET = 34   # ~printable rows per landscape-A4 page (excl. repeated title)
+    r = 2
+    page_rows = 0
+    for wk in weeks:
+        block = _week_block_rows(wk)
+        if page_rows > 0 and page_rows + block + 1 > PAGE_ROW_BUDGET:
+            ws.row_breaks.append(Break(id=r - 1))   # break after prior spacer → new page
+            page_rows = 0
+        _write_week(wk)
+        r += 1                 # spacer row between week blocks
+        page_rows += block + 1
+
+    # ── Column widths + print/page setup (Excel desktop) ──────────────────
+    ws.column_dimensions['A'].width = 15
+    for j in range(7):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(2 + j)].width = 13
+    ws.freeze_panes = "B2"
+
+    from openpyxl.worksheet.properties import PageSetupProperties
+    from openpyxl.worksheet.page import PageMargins
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.paperSize   = 9        # A4
+    ws.page_setup.fitToWidth  = 1        # fit all columns onto one page wide
+    ws.page_setup.fitToHeight = 0        # do NOT scale height; flow across pages
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    ws.print_options.horizontalCentered = True
+    ws.page_margins = PageMargins(left=0.3, right=0.3, top=0.4, bottom=0.4,
+                                  header=0.2, footer=0.2)
+    ws.print_title_rows = '1:1'          # repeat dept title atop every printed page
 
 
 def _export_dept_grid_batched(dept_name, year_month, view_month):
