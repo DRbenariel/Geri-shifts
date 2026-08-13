@@ -7483,8 +7483,11 @@ elif role in ("מנהל/ת", "מנהל על"):
                     # Refresh TTL timestamp so the TTL block does NOT overwrite the
                     # in-memory settings with a potentially-stale DB read on the next render.
                     st.session_state['_settings_fetched_at'] = time.time()
-                    # Sync month selector so both tabs open on the new month
-                    st.session_state.daily_view_month = view_month
+                    # No write-back to st.session_state.daily_view_month needed here:
+                    # it already holds view_month (read from that same key above), and
+                    # writing to a widget-owned key after the widget has rendered this
+                    # run raises StreamlitAPIException ("cannot be modified after the
+                    # widget ... is instantiated").
                     st.session_state['show_active_month_success'] = hebrew_months[view_month-1]
                     st.rerun()
         with col_top3:
