@@ -132,11 +132,21 @@ def _fetch_sheet_data_silently(worksheet_name):
     except gspread.exceptions.WorksheetNotFound:
         return pd.DataFrame()
 
+_RETRYABLE_API_STATUS = {429, 500, 502, 503, 504}
+
 def _fetch_live(worksheet_name):
     """
     Direct Sheets read that bypasses the cache — use only immediately before a write.
     Uses get_all_values() + _clean_sheet_values() to preserve column names even on
     header-only sheets and to strip surrounding quotes baked in by CSV imports.
+
+    Retries on 429 (rate limit) AND transient 5xx server errors — Google's Sheets
+    API can surface backend hiccups as 500/503 as well as a clean 429, and this is
+    on the login critical path (called by every session before anything else runs),
+    so a single transient blip must not crash the whole app. Non-retryable errors
+    (401/403/404/etc.) still raise immediately — this is a bug, not something to
+    silently mask. If retries are exhausted, callers already handle an empty
+    DataFrame gracefully (e.g. login_screen()'s "could not load staff list" guard).
     """
     for attempt in range(3):
         try:
@@ -148,7 +158,7 @@ def _fetch_live(worksheet_name):
         except gspread.exceptions.WorksheetNotFound:
             return pd.DataFrame()
         except gspread.exceptions.APIError as e:
-            if e.response.status_code == 429:
+            if e.response.status_code in _RETRYABLE_API_STATUS:
                 time.sleep(2 ** attempt)
             else:
                 raise
