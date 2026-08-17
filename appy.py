@@ -2739,6 +2739,13 @@ _ABSENCE_GANTT_COLORS = {
     "202":           ("#fef08a", "#854d0e"),
     "אחר":           ("#e2e8f0", "#475569"),
     "היעדרות אחרת":  ("#e2e8f0", "#475569"),
+    "אחרי תורנות":   ("#fed7aa", "#9a3412"),   # orange — matches the app's symbol legend
+}
+
+# "אחרי תורנות"[:3] == "אחר" (same first 3 chars as the unrelated "אחר" status), so
+# the default typ[:3] cell label would render identically for both — override it.
+_ABSENCE_GANTT_LABELS = {
+    "אחרי תורנות": "אחה\"ת",
 }
 
 def _render_absence_gantt(year: int, month: int, dept_filter=None):
@@ -2767,7 +2774,10 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
     # active employee × every Sun–Thu day and keep the days whose derived status is
     # an absence. daily_dept=None so the dept-aware manual branch can't hide a real
     # absence when the stored dept differs from the employee's canonical dept.
-    _ABSENCE_STATUSES = {"חופש", "202", "אחר"}
+    # "אחרי תורנות" (post-night-shift rest day, priority 5 in _derive_auto_status)
+    # is included too — it's not "on leave" but the employee isn't available that
+    # day either, same as the other statuses here.
+    _ABSENCE_STATUSES = {"חופש", "202", "אחר", "אחרי תורנות"}
     sf_g = st.session_state.get('staff', pd.DataFrame())
     if sf_g.empty or 'name' not in sf_g.columns:
         st.info("אין היעדרויות בחודש זה.")
@@ -2814,6 +2824,7 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
         "<div style='direction:rtl;font-size:0.78rem;color:#475569;margin:6px 0 4px;line-height:2'>"
         "<span style='background:#dbeafe;border-radius:4px;padding:1px 10px'>&nbsp;</span> חופש &nbsp;|&nbsp; "
         "<span style='background:#fef08a;border-radius:4px;padding:1px 10px'>&nbsp;</span> 202 &nbsp;|&nbsp; "
+        "<span style='background:#fed7aa;border-radius:4px;padding:1px 10px'>&nbsp;</span> אחרי תורנות &nbsp;|&nbsp; "
         "<span style='background:#e2e8f0;border-radius:4px;padding:1px 10px'>&nbsp;</span> היעדרות אחרת &nbsp;|&nbsp; "
         "<span style='background:#dbeafe;border:2px solid #ef4444;border-radius:4px;padding:1px 10px'>&nbsp;</span> "
         "חפיפה במחלקה</div>",
@@ -2831,7 +2842,8 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
         if d in items_by_day:
             typ = items_by_day[d]
             bg, fg = _ABSENCE_GANTT_COLORS.get(typ, ("#cbd5e1", "#0f172a"))
-            return bg, fg, typ[:3] or "·"
+            lbl = _ABSENCE_GANTT_LABELS.get(typ, typ[:3] or "·")
+            return bg, fg, lbl
         return "#f8fafc", "#cbd5e1", ""
 
     # RTL ordering: name column is LAST (rightmost in display), days laid out
