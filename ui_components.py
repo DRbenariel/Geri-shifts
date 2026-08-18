@@ -424,23 +424,36 @@ def render_navbar(role):
     if st.session_state.current_nav_index >= len(items):
         st.session_state.current_nav_index = 0
 
-    # On mobile, a centered tab strip that overflows breaks touch-scroll reachability
-    # (content past a point becomes visually unreachable) — left-pack instead so
-    # overflow only spills past the trailing edge. 'start' is sac.tabs' own default;
-    # desktop keeps the existing 'center' override untouched.
-    _navbar_align = 'start' if st.session_state.get('analytics_device_type') == 'mobile' else 'center'
+    # Mobile gets a native Streamlit control instead of sac.tabs: the Ant Design
+    # Tabs component's overflow "more" button ships with an unconditional
+    # `display:none` in streamlit_antd_components' compiled CSS — confirmed
+    # across every published version (0.2.0 through the latest 0.3.2), not a
+    # config issue we can fix via align/size/etc. With 8 tabs (מנהל על) on a
+    # narrow screen, whatever doesn't fit becomes permanently unreachable: no
+    # scroll, no working escape hatch. Desktop is unaffected and keeps the
+    # original sac.tabs strip unchanged.
+    is_mobile = st.session_state.get('analytics_device_type') == 'mobile'
 
-    st.markdown('<div dir="rtl" style="text-align: right;">', unsafe_allow_html=True)
-    result = sac.tabs(
-        items=items,
-        index=st.session_state.current_nav_index,
-        format_func='title',
-        size='lg',
-        color='#4f46e5',
-        return_index=False,
-        align=_navbar_align
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
+    if is_mobile:
+        labels = [it.label for it in items]
+        result = st.selectbox(
+            "ניווט:", labels,
+            index=st.session_state.current_nav_index,
+            key="mobile_nav_select",
+            label_visibility="collapsed",
+        )
+    else:
+        st.markdown('<div dir="rtl" style="text-align: right;">', unsafe_allow_html=True)
+        result = sac.tabs(
+            items=items,
+            index=st.session_state.current_nav_index,
+            format_func='title',
+            size='lg',
+            color='#4f46e5',
+            return_index=False,
+            align='center'
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
     selected_idx = 0
     for i, item in enumerate(items):
