@@ -2833,10 +2833,7 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
     # One row of columns per calendar WEEK (max 8: 7 days + name), never the whole
     # month in one row — the old single st.columns([1]*num_days+[3]) call (up to 33
     # columns for a 31-day month) was unreadable on mobile ("smeared"). Reuses the
-    # exact cal_weeks construction proven in _render_dept_grid (appy.py ~2154). No
-    # separate mobile/desktop branch needed here (unlike _render_dept_grid): cells
-    # are short 2-4 char status labels, not editable buttons or full names, so 8
-    # columns is comfortable on any device.
+    # exact cal_weeks construction proven in _render_dept_grid (appy.py ~2154).
     _WD_HDRS  = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
     _WD_IS_WK = [True, True, False, False, False, False, False]  # Sat, Fri = weekend
     cal_weeks = [list(reversed(w))
@@ -2850,8 +2847,36 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
             return bg, fg, lbl
         return "#f8fafc", "#cbd5e1", ""
 
-    # RTL ordering: name column is LAST (rightmost in display). Mirrors the
-    # _render_dept_grid desktop layout.
+    # Mobile auto-detection: identical pattern to _render_dept_grid (~2178-2200).
+    # An 8-column row (7 days + name) is NOT safe on mobile after all — verified
+    # live: Streamlit's default responsive CSS stacks any st.columns() row with a
+    # column count other than exactly 7 vertically below ~768px, and the app's one
+    # rescue CSS rule (~3296) only matches exactly-7-column rows. So mobile needs
+    # its own branch, matching _render_dept_grid exactly: pure 7-column grids with
+    # the employee name as a full-width banner above each row instead of an 8th
+    # column, so the existing rescue CSS actually applies.
+    _gantt_key_ns = f"gantt_{year}_{month}"
+    _tog_key      = f"mob_toggle_{_gantt_key_ns}"
+    _detected_key = f"mob_det_{_gantt_key_ns}"
+    if not st.session_state.get(_detected_key, False):
+        _dev = st.session_state.get('analytics_device_type', 'unknown')
+        _vp  = 0
+        try:
+            _vp = int(st.session_state.get('analytics_vp_width', 0) or 0)
+        except (ValueError, TypeError):
+            pass
+        _ua      = str(st.session_state.get('analytics_ua', '') or '')
+        _mob_ua  = any(x in _ua for x in ['Android', 'iPhone', 'iPad', 'Mobile', 'webOS'])
+        _mob_any = (_dev == 'mobile' or
+                    st.session_state.get('mobile_detected_persistent', False) or
+                    _mob_ua or (0 < _vp < 768))
+        if _dev != 'unknown':
+            st.session_state[_tog_key]      = _mob_any
+            st.session_state[_detected_key] = True
+    is_mobile = st.toggle("📱 תצוגת מובייל", value=False, key=_tog_key)
+
+    # RTL ordering: name column is LAST (rightmost in display) on desktop. Mirrors
+    # the _render_dept_grid desktop layout.
     name_col   = 7
     col_widths = [1] * 7 + [3]
 
@@ -2865,53 +2890,98 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
         _emp_items = {emp: {d: t for d, t in by_dept[dept_n][emp]}
                      for emp in sorted(by_dept[dept_n].keys())}
 
-        for week in cal_weeks:
-            if all(d == 0 for d in week):
-                continue
-
-            hdr_cols = st.columns(col_widths)
-            hdr_cols[name_col].markdown(
-                "<div style='font-weight:700;font-size:0.78rem;text-align:right;"
-                "padding:4px 8px'>עובד/ת / יום</div>",
-                unsafe_allow_html=True)
-            for i, d in enumerate(week):
-                if d == 0:
-                    hdr_cols[i].write("")
+        if is_mobile:
+            for week in cal_weeks:
+                if all(d == 0 for d in week):
                     continue
-                hbg = "#fef2f2" if _WD_IS_WK[i] else "#eef2ff"
-                hfg = "#b91c1c" if _WD_IS_WK[i] else "#3730a3"
-                hdr_cols[i].markdown(
-                    f"<div style='background:{hbg};color:{hfg};text-align:center;"
-                    f"padding:2px 0;border-radius:5px;font-size:0.65rem;line-height:1.2'>"
-                    f"{d}<br>{_WD_HDRS[i]}</div>",
-                    unsafe_allow_html=True)
 
-            for emp, items_by_day in _emp_items.items():
-                row_cols = st.columns(col_widths)
-                row_cols[name_col].markdown(
-                    f"<div style='font-weight:600;font-size:0.78rem;color:#0f172a;"
-                    f"padding:4px 8px;background:white;border-radius:5px;"
-                    f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>",
+                hdr_cols = st.columns(7)
+                for i, d in enumerate(week):
+                    if d == 0:
+                        hdr_cols[i].write("")
+                        continue
+                    hbg = "#fef2f2" if _WD_IS_WK[i] else "#eef2ff"
+                    hfg = "#b91c1c" if _WD_IS_WK[i] else "#3730a3"
+                    hdr_cols[i].markdown(
+                        f"<div style='background:{hbg};color:{hfg};text-align:center;"
+                        f"padding:2px 0;border-radius:5px;font-size:0.65rem;line-height:1.2'>"
+                        f"{d}<br>{_WD_HDRS[i]}</div>",
+                        unsafe_allow_html=True)
+
+                for emp, items_by_day in _emp_items.items():
+                    st.markdown(
+                        f"<div style='font-weight:600;font-size:0.78rem;color:#0f172a;"
+                        f"padding:2px 8px;background:white;border-radius:5px;"
+                        f"border:1px solid #e2e8f0;text-align:right;margin:2px 0 1px'>"
+                        f"{emp}</div>",
+                        unsafe_allow_html=True)
+                    row_cols = st.columns(7)
+                    for i, d in enumerate(week):
+                        if d == 0:
+                            row_cols[i].write("")
+                            continue
+                        bg, fg, lbl = _cell_for(emp, d, items_by_day)
+                        _ttl = ""
+                        _border = "1px solid #e2e8f0"
+                        if (dept_n, d) in conflicts and emp in items_by_day:
+                            _others = [n for n in conflicts[(dept_n, d)] if n != emp]
+                            if _others:
+                                _border = "2px solid #ef4444"
+                                _ttl = f" title='חפיפה: {', '.join(_others)}'"
+                        row_cols[i].markdown(
+                            f"<div{_ttl} style='background:{bg};color:{fg};text-align:center;"
+                            f"padding:3px 0;border-radius:5px;border:{_border};"
+                            f"font-size:0.7rem;font-weight:700;min-height:22px;line-height:1.2'>"
+                            f"{lbl}</div>",
+                            unsafe_allow_html=True)
+        else:
+            for week in cal_weeks:
+                if all(d == 0 for d in week):
+                    continue
+
+                hdr_cols = st.columns(col_widths)
+                hdr_cols[name_col].markdown(
+                    "<div style='font-weight:700;font-size:0.78rem;text-align:right;"
+                    "padding:4px 8px'>עובד/ת / יום</div>",
                     unsafe_allow_html=True)
                 for i, d in enumerate(week):
                     if d == 0:
-                        row_cols[i].write("")
+                        hdr_cols[i].write("")
                         continue
-                    bg, fg, lbl = _cell_for(emp, d, items_by_day)
-                    # Conflict day overlay
-                    _ttl = ""
-                    _border = "1px solid #e2e8f0"
-                    if (dept_n, d) in conflicts and emp in items_by_day:
-                        _others = [n for n in conflicts[(dept_n, d)] if n != emp]
-                        if _others:
-                            _border = "2px solid #ef4444"
-                            _ttl = f" title='חפיפה: {', '.join(_others)}'"
-                    row_cols[i].markdown(
-                        f"<div{_ttl} style='background:{bg};color:{fg};text-align:center;"
-                        f"padding:3px 0;border-radius:5px;border:{_border};"
-                        f"font-size:0.7rem;font-weight:700;min-height:22px;line-height:1.2'>"
-                        f"{lbl}</div>",
+                    hbg = "#fef2f2" if _WD_IS_WK[i] else "#eef2ff"
+                    hfg = "#b91c1c" if _WD_IS_WK[i] else "#3730a3"
+                    hdr_cols[i].markdown(
+                        f"<div style='background:{hbg};color:{hfg};text-align:center;"
+                        f"padding:2px 0;border-radius:5px;font-size:0.65rem;line-height:1.2'>"
+                        f"{d}<br>{_WD_HDRS[i]}</div>",
                         unsafe_allow_html=True)
+
+                for emp, items_by_day in _emp_items.items():
+                    row_cols = st.columns(col_widths)
+                    row_cols[name_col].markdown(
+                        f"<div style='font-weight:600;font-size:0.78rem;color:#0f172a;"
+                        f"padding:4px 8px;background:white;border-radius:5px;"
+                        f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>",
+                        unsafe_allow_html=True)
+                    for i, d in enumerate(week):
+                        if d == 0:
+                            row_cols[i].write("")
+                            continue
+                        bg, fg, lbl = _cell_for(emp, d, items_by_day)
+                        # Conflict day overlay
+                        _ttl = ""
+                        _border = "1px solid #e2e8f0"
+                        if (dept_n, d) in conflicts and emp in items_by_day:
+                            _others = [n for n in conflicts[(dept_n, d)] if n != emp]
+                            if _others:
+                                _border = "2px solid #ef4444"
+                                _ttl = f" title='חפיפה: {', '.join(_others)}'"
+                        row_cols[i].markdown(
+                            f"<div{_ttl} style='background:{bg};color:{fg};text-align:center;"
+                            f"padding:3px 0;border-radius:5px;border:{_border};"
+                            f"font-size:0.7rem;font-weight:700;min-height:22px;line-height:1.2'>"
+                            f"{lbl}</div>",
+                            unsafe_allow_html=True)
 
 
 def log_event(event_type, detail_1='', detail_2=''):
