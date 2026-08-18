@@ -2830,13 +2830,17 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
         "חפיפה במחלקה</div>",
         unsafe_allow_html=True)
 
-    # RTL day-number header. Use ~26 cols: 1 emp-name col + 25 days. For 28-31
-    # day months, split into segments to keep cells legible.
-    WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
-
-    def _wd_label(d):
-        wi = (date(year, month, d).weekday() + 1) % 7
-        return WD[wi]
+    # One row of columns per calendar WEEK (max 8: 7 days + name), never the whole
+    # month in one row — the old single st.columns([1]*num_days+[3]) call (up to 33
+    # columns for a 31-day month) was unreadable on mobile ("smeared"). Reuses the
+    # exact cal_weeks construction proven in _render_dept_grid (appy.py ~2154). No
+    # separate mobile/desktop branch needed here (unlike _render_dept_grid): cells
+    # are short 2-4 char status labels, not editable buttons or full names, so 8
+    # columns is comfortable on any device.
+    _WD_HDRS  = ["ש'", "ו'", "ה'", "ד'", "ג'", "ב'", "א'"]
+    _WD_IS_WK = [True, True, False, False, False, False, False]  # Sat, Fri = weekend
+    cal_weeks = [list(reversed(w))
+                for w in calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)]
 
     def _cell_for(emp, d, items_by_day):
         if d in items_by_day:
@@ -2846,11 +2850,10 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
             return bg, fg, lbl
         return "#f8fafc", "#cbd5e1", ""
 
-    # RTL ordering: name column is LAST (rightmost in display), days laid out
-    # in reverse so day 1 sits at the right (next to the name) and day N at the
-    # left. Mirrors the _render_dept_grid desktop layout.
-    days_rtl = list(reversed(days))
-    name_col = num_days   # last column index
+    # RTL ordering: name column is LAST (rightmost in display). Mirrors the
+    # _render_dept_grid desktop layout.
+    name_col   = 7
+    col_widths = [1] * 7 + [3]
 
     for dept_n in sorted(by_dept.keys()):
         st.markdown(
@@ -2859,47 +2862,56 @@ def _render_absence_gantt(year: int, month: int, dept_filter=None):
             f"text-align:right'>📌 {dept_n}</div>",
             unsafe_allow_html=True)
 
-        col_widths = [1] * num_days + [3]   # name col LAST + wider
-        hdr_cols = st.columns(col_widths)
-        hdr_cols[name_col].markdown(
-            "<div style='font-weight:700;font-size:0.78rem;text-align:right;"
-            "padding:4px 8px'>עובד/ת / יום</div>",
-            unsafe_allow_html=True)
-        for i, d in enumerate(days_rtl):
-            wi = (date(year, month, d).weekday() + 1) % 7
-            is_wk = wi in (5, 6)
-            hbg = "#fef2f2" if is_wk else "#eef2ff"
-            hfg = "#b91c1c" if is_wk else "#3730a3"
-            hdr_cols[i].markdown(
-                f"<div style='background:{hbg};color:{hfg};text-align:center;"
-                f"padding:2px 0;border-radius:5px;font-size:0.65rem;line-height:1.2'>"
-                f"{d}<br>{_wd_label(d)}</div>",
-                unsafe_allow_html=True)
+        _emp_items = {emp: {d: t for d, t in by_dept[dept_n][emp]}
+                     for emp in sorted(by_dept[dept_n].keys())}
 
-        for emp in sorted(by_dept[dept_n].keys()):
-            items_by_day = {d: t for d, t in by_dept[dept_n][emp]}
-            row_cols = st.columns(col_widths)
-            row_cols[name_col].markdown(
-                f"<div style='font-weight:600;font-size:0.78rem;color:#0f172a;"
-                f"padding:4px 8px;background:white;border-radius:5px;"
-                f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>",
+        for week in cal_weeks:
+            if all(d == 0 for d in week):
+                continue
+
+            hdr_cols = st.columns(col_widths)
+            hdr_cols[name_col].markdown(
+                "<div style='font-weight:700;font-size:0.78rem;text-align:right;"
+                "padding:4px 8px'>עובד/ת / יום</div>",
                 unsafe_allow_html=True)
-            for i, d in enumerate(days_rtl):
-                bg, fg, lbl = _cell_for(emp, d, items_by_day)
-                # Conflict day overlay
-                _ttl = ""
-                _border = "1px solid #e2e8f0"
-                if (dept_n, d) in conflicts and emp in items_by_day:
-                    _others = [n for n in conflicts[(dept_n, d)] if n != emp]
-                    if _others:
-                        _border = "2px solid #ef4444"
-                        _ttl = f" title='חפיפה: {', '.join(_others)}'"
-                row_cols[i].markdown(
-                    f"<div{_ttl} style='background:{bg};color:{fg};text-align:center;"
-                    f"padding:3px 0;border-radius:5px;border:{_border};"
-                    f"font-size:0.7rem;font-weight:700;min-height:22px;line-height:1.2'>"
-                    f"{lbl}</div>",
+            for i, d in enumerate(week):
+                if d == 0:
+                    hdr_cols[i].write("")
+                    continue
+                hbg = "#fef2f2" if _WD_IS_WK[i] else "#eef2ff"
+                hfg = "#b91c1c" if _WD_IS_WK[i] else "#3730a3"
+                hdr_cols[i].markdown(
+                    f"<div style='background:{hbg};color:{hfg};text-align:center;"
+                    f"padding:2px 0;border-radius:5px;font-size:0.65rem;line-height:1.2'>"
+                    f"{d}<br>{_WD_HDRS[i]}</div>",
                     unsafe_allow_html=True)
+
+            for emp, items_by_day in _emp_items.items():
+                row_cols = st.columns(col_widths)
+                row_cols[name_col].markdown(
+                    f"<div style='font-weight:600;font-size:0.78rem;color:#0f172a;"
+                    f"padding:4px 8px;background:white;border-radius:5px;"
+                    f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>",
+                    unsafe_allow_html=True)
+                for i, d in enumerate(week):
+                    if d == 0:
+                        row_cols[i].write("")
+                        continue
+                    bg, fg, lbl = _cell_for(emp, d, items_by_day)
+                    # Conflict day overlay
+                    _ttl = ""
+                    _border = "1px solid #e2e8f0"
+                    if (dept_n, d) in conflicts and emp in items_by_day:
+                        _others = [n for n in conflicts[(dept_n, d)] if n != emp]
+                        if _others:
+                            _border = "2px solid #ef4444"
+                            _ttl = f" title='חפיפה: {', '.join(_others)}'"
+                    row_cols[i].markdown(
+                        f"<div{_ttl} style='background:{bg};color:{fg};text-align:center;"
+                        f"padding:3px 0;border-radius:5px;border:{_border};"
+                        f"font-size:0.7rem;font-weight:700;min-height:22px;line-height:1.2'>"
+                        f"{lbl}</div>",
+                        unsafe_allow_html=True)
 
 
 def log_event(event_type, detail_1='', detail_2=''):
