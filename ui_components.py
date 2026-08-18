@@ -424,6 +424,12 @@ def render_navbar(role):
     if st.session_state.current_nav_index >= len(items):
         st.session_state.current_nav_index = 0
 
+    # On mobile, a centered tab strip that overflows breaks touch-scroll reachability
+    # (content past a point becomes visually unreachable) — left-pack instead so
+    # overflow only spills past the trailing edge. 'start' is sac.tabs' own default;
+    # desktop keeps the existing 'center' override untouched.
+    _navbar_align = 'start' if st.session_state.get('analytics_device_type') == 'mobile' else 'center'
+
     st.markdown('<div dir="rtl" style="text-align: right;">', unsafe_allow_html=True)
     result = sac.tabs(
         items=items,
@@ -432,7 +438,7 @@ def render_navbar(role):
         size='lg',
         color='#4f46e5',
         return_index=False,
-        align='center'
+        align=_navbar_align
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -444,9 +450,3 @@ def render_navbar(role):
     st.session_state.current_nav_index = selected_idx
 
     return result
-
-def render_mobile_bottom_nav(role):
-    """Renders a bottom navigation bar specifically for mobile."""
-    # Note: SAC doesn't have a built-in 'bottom' mode, so we use st.columns at the bottom or stick to Top Nav for now.
-    # For this iteration, we will use the Top Horizontal Menu which is mobile responsive (scrolls horizontally).
-    pass
