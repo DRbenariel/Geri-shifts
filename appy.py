@@ -4900,14 +4900,29 @@ def _render_konenut_tab(active_month_int):
         unsafe_allow_html=True,
     )
 
-    # Header row
-    hcols = st.columns(7)
-    for i, name in enumerate(days_names):
-        hcols[i].markdown(
-            f"<div style='text-align:center;font-weight:bold;font-size:0.88rem;"
-            f"padding:2px 0'>{name}</div>",
-            unsafe_allow_html=True,
-        )
+    # Mobile auto-detection: identical pattern to _render_dept_grid (appy.py ~2178-2200).
+    # Column count (7) isn't the mobile problem here — 3 stacked st.selectbox widgets
+    # per day-column are, since a selectbox can't display a full name at ~1/7 phone
+    # width. That can't be fixed by shrinking columns further, so mobile gets a
+    # different interaction: a read-only overview + a single-day full-width editor.
+    _tog_key      = f"mob_toggle_konenut_{sel_month}"
+    _detected_key = f"mob_det_konenut_{sel_month}"
+    if not st.session_state.get(_detected_key, False):
+        _dev = st.session_state.get('analytics_device_type', 'unknown')
+        _vp  = 0
+        try:
+            _vp = int(st.session_state.get('analytics_vp_width', 0) or 0)
+        except (ValueError, TypeError):
+            pass
+        _ua      = str(st.session_state.get('analytics_ua', '') or '')
+        _mob_ua  = any(x in _ua for x in ['Android', 'iPhone', 'iPad', 'Mobile', 'webOS'])
+        _mob_any = (_dev == 'mobile' or
+                    st.session_state.get('mobile_detected_persistent', False) or
+                    _mob_ua or (0 < _vp < 768))
+        if _dev != 'unknown':
+            st.session_state[_tog_key]      = _mob_any
+            st.session_state[_detected_key] = True
+    is_mobile = st.toggle("📱 תצוגת מובייל", value=False, key=_tog_key)
 
     def _sel_idx(val):
         v = str(val).strip() if val else ''
@@ -4930,64 +4945,175 @@ def _render_konenut_tab(active_month_int):
                                  placeholder="שם רופא/ה", label_visibility="collapsed")
         return chosen
 
-    for week in cal:
-        cols = st.columns(7)
-        for i, day in enumerate(week):
-            with cols[i]:
-                if day == 0:
-                    st.markdown("<div style='min-height:10px'></div>", unsafe_allow_html=True)
-                    continue
-                date_str = f"{year}-{sel_month:02d}-{day:02d}"
-                existing = month_kdf.loc[date_str] if date_str in month_kdf.index else None
-                is_wknd  = i <= 1
-                bg       = "#fef9c3" if is_wknd else "#f1f5f9"
+    if is_mobile:
+        # ── MOBILE: read-only monthly overview (compact, tap-for-detail) ──────
+        hcols = st.columns(7)
+        for i, name in enumerate(days_names):
+            hcols[i].markdown(
+                f"<div style='text-align:center;font-weight:bold;font-size:0.88rem;"
+                f"padding:2px 0'>{name}</div>",
+                unsafe_allow_html=True,
+            )
+        for week in cal:
+            cols = st.columns(7)
+            for i, day in enumerate(week):
+                with cols[i]:
+                    if day == 0:
+                        st.markdown("<div style='min-height:10px'></div>", unsafe_allow_html=True)
+                        continue
+                    date_str = f"{year}-{sel_month:02d}-{day:02d}"
+                    existing = month_kdf.loc[date_str] if date_str in month_kdf.index else None
+                    is_wknd  = i <= 1
+                    bg       = "#fef9c3" if is_wknd else "#f1f5f9"
+                    st.markdown(
+                        f"<div style='text-align:center;font-weight:700;font-size:0.82rem;"
+                        f"background:{bg};border-radius:4px;padding:2px 0;margin-bottom:2px'>"
+                        f"{day}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    pnim_v = existing['pnim_dr']   if existing is not None else ''
+                    r1_v   = existing['rehab_dr1'] if existing is not None else ''
+                    r2_v   = existing['rehab_dr2'] if existing is not None else ''
+                    _assigned = [v for v in (pnim_v, r1_v, r2_v) if v]
+                    if _assigned:
+                        _initials = " / ".join(_make_initials(v) for v in _assigned)
+                        try:
+                            with st.popover(_initials, key=f"kn_ov_pop_{date_str}",
+                                            use_container_width=True):
+                                if pnim_v: st.markdown(f"🏥 פנימית: **{pnim_v}**")
+                                if r1_v:   st.markdown(f"🦽 שיקום 1: **{r1_v}**")
+                                if r2_v:   st.markdown(f"🦽 שיקום 2: **{r2_v}**")
+                        except Exception:
+                            st.markdown(
+                                f"<div style='text-align:center;padding:4px 1px;"
+                                f"border-radius:6px;font-size:0.68rem;color:#166534;"
+                                f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                                f"{_initials}</div>",
+                                unsafe_allow_html=True)
+                    else:
+                        st.markdown(
+                            "<div style='text-align:center;padding:4px 1px;"
+                            "font-size:0.68rem;color:#94a3b8'>—</div>",
+                            unsafe_allow_html=True)
 
-                st.markdown(
-                    f"<div style='text-align:center;font-weight:700;font-size:0.82rem;"
-                    f"background:{bg};border-radius:4px;padding:2px 0;margin-bottom:2px'>"
-                    f"{day}</div>",
-                    unsafe_allow_html=True,
-                )
+        st.divider()
 
-                pnim_v = existing['pnim_dr']   if existing is not None else ''
-                r1_v   = existing['rehab_dr1'] if existing is not None else ''
-                r2_v   = existing['rehab_dr2'] if existing is not None else ''
+        # ── Day-picker + single-day full-width editor ──────────────────────────
+        _num_days_mob = _cal.monthrange(year, sel_month)[1]
+        _mob_day = st.selectbox(
+            "בחר יום לעריכה:", range(1, _num_days_mob + 1),
+            key=f"konenut_mob_day_sel_{sel_month}",
+            format_func=lambda d: f"{d:02d}/{sel_month:02d}")
+        _mob_date_str = f"{year}-{sel_month:02d}-{_mob_day:02d}"
+        _mob_existing = month_kdf.loc[_mob_date_str] if _mob_date_str in month_kdf.index else None
+        _mob_pnim_v = _mob_existing['pnim_dr']   if _mob_existing is not None else ''
+        _mob_r1_v   = _mob_existing['rehab_dr1'] if _mob_existing is not None else ''
+        _mob_r2_v   = _mob_existing['rehab_dr2'] if _mob_existing is not None else ''
 
-                st.markdown("<div style='font-size:0.6rem;color:#9a3412;font-weight:600;line-height:1;margin-top:2px'>🏥פנ׳</div>", unsafe_allow_html=True)
-                _slot("פ",  date_str, pnim_v, f"kn_p_sel_{date_str}",  f"kn_p_txt_{date_str}")
-                st.markdown("<div style='font-size:0.6rem;color:#1e3a8a;font-weight:600;line-height:1;margin-top:2px'>🦽ש׳1</div>", unsafe_allow_html=True)
-                _slot("ש1", date_str, r1_v,   f"kn_r1_sel_{date_str}", f"kn_r1_txt_{date_str}")
-                st.markdown("<div style='font-size:0.6rem;color:#1e3a8a;font-weight:600;line-height:1;margin-top:2px'>🦽ש׳2</div>", unsafe_allow_html=True)
-                _slot("ש2", date_str, r2_v,   f"kn_r2_sel_{date_str}", f"kn_r2_txt_{date_str}")
+        st.markdown(f"**עריכת כוננויות ל-{_mob_day:02d}/{sel_month:02d}/{year}**")
+        st.markdown("🏥 פנימית")
+        _slot("פנימית", _mob_date_str, _mob_pnim_v,
+             f"kn_p_sel_{_mob_date_str}", f"kn_p_txt_{_mob_date_str}")
+        st.markdown("🦽 שיקום 1")
+        _slot("שיקום 1", _mob_date_str, _mob_r1_v,
+             f"kn_r1_sel_{_mob_date_str}", f"kn_r1_txt_{_mob_date_str}")
+        st.markdown("🦽 שיקום 2")
+        _slot("שיקום 2", _mob_date_str, _mob_r2_v,
+             f"kn_r2_sel_{_mob_date_str}", f"kn_r2_txt_{_mob_date_str}")
 
-    st.divider()
-    if st.button("💾 שמור שינויים", key="konenut_save", type="primary", use_container_width=True):
-        num_days = _cal.monthrange(year, sel_month)[1]
+        if st.button("💾 שמור יום זה", key=f"konenut_mob_save_{sel_month}",
+                     type="primary", use_container_width=True):
+            def _get_val_mob(sel_key, txt_key):
+                chosen = st.session_state.get(sel_key, '')
+                if chosen == _FREE_TEXT_OPT:
+                    return (st.session_state.get(txt_key, '') or '').strip()
+                return (chosen or '').strip()
 
-        def _get_val(sel_key, txt_key):
-            chosen = st.session_state.get(sel_key, '')
-            if chosen == _FREE_TEXT_OPT:
-                return (st.session_state.get(txt_key, '') or '').strip()
-            return (chosen or '').strip()
+            # Replace ONLY this one date's row — never touches days not rendered
+            # this session, unlike the month-wide desktop save below.
+            new_row = {
+                'date':      _mob_date_str,
+                'pnim_dr':   _get_val_mob(f"kn_p_sel_{_mob_date_str}",  f"kn_p_txt_{_mob_date_str}"),
+                'rehab_dr1': _get_val_mob(f"kn_r1_sel_{_mob_date_str}", f"kn_r1_txt_{_mob_date_str}"),
+                'rehab_dr2': _get_val_mob(f"kn_r2_sel_{_mob_date_str}", f"kn_r2_txt_{_mob_date_str}"),
+            }
+            full = st.session_state.konenut
+            full = full[full['date'] != _mob_date_str]
+            full = pd.concat([full, pd.DataFrame([new_row])], ignore_index=True)
+            full = full.sort_values('date').reset_index(drop=True)
+            st.session_state.konenut = full
+            save_to_db("konenut", full)
+            st.success(f"✅ נשמר עבור {_mob_day:02d}/{sel_month:02d}")
+            st.rerun()
 
-        new_rows = []
-        for d in range(1, num_days + 1):
-            date_str = f"{year}-{sel_month:02d}-{d:02d}"
-            new_rows.append({
-                'date':      date_str,
-                'pnim_dr':   _get_val(f"kn_p_sel_{date_str}",  f"kn_p_txt_{date_str}"),
-                'rehab_dr1': _get_val(f"kn_r1_sel_{date_str}", f"kn_r1_txt_{date_str}"),
-                'rehab_dr2': _get_val(f"kn_r2_sel_{date_str}", f"kn_r2_txt_{date_str}"),
-            })
-        new_month_df = pd.DataFrame(new_rows)
-        full = st.session_state.konenut
-        full = full[~full['date'].str.startswith(year_month)]
-        full = pd.concat([full, new_month_df], ignore_index=True)
-        full = full.sort_values('date').reset_index(drop=True)
-        st.session_state.konenut = full
-        save_to_db("konenut", full)
-        st.success("✅ הכוננויות נשמרו בהצלחה")
-        st.rerun()
+    else:
+        # ── DESKTOP: unchanged ──────────────────────────────────────────────────
+        hcols = st.columns(7)
+        for i, name in enumerate(days_names):
+            hcols[i].markdown(
+                f"<div style='text-align:center;font-weight:bold;font-size:0.88rem;"
+                f"padding:2px 0'>{name}</div>",
+                unsafe_allow_html=True,
+            )
+
+        for week in cal:
+            cols = st.columns(7)
+            for i, day in enumerate(week):
+                with cols[i]:
+                    if day == 0:
+                        st.markdown("<div style='min-height:10px'></div>", unsafe_allow_html=True)
+                        continue
+                    date_str = f"{year}-{sel_month:02d}-{day:02d}"
+                    existing = month_kdf.loc[date_str] if date_str in month_kdf.index else None
+                    is_wknd  = i <= 1
+                    bg       = "#fef9c3" if is_wknd else "#f1f5f9"
+
+                    st.markdown(
+                        f"<div style='text-align:center;font-weight:700;font-size:0.82rem;"
+                        f"background:{bg};border-radius:4px;padding:2px 0;margin-bottom:2px'>"
+                        f"{day}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    pnim_v = existing['pnim_dr']   if existing is not None else ''
+                    r1_v   = existing['rehab_dr1'] if existing is not None else ''
+                    r2_v   = existing['rehab_dr2'] if existing is not None else ''
+
+                    st.markdown("<div style='font-size:0.6rem;color:#9a3412;font-weight:600;line-height:1;margin-top:2px'>🏥פנ׳</div>", unsafe_allow_html=True)
+                    _slot("פ",  date_str, pnim_v, f"kn_p_sel_{date_str}",  f"kn_p_txt_{date_str}")
+                    st.markdown("<div style='font-size:0.6rem;color:#1e3a8a;font-weight:600;line-height:1;margin-top:2px'>🦽ש׳1</div>", unsafe_allow_html=True)
+                    _slot("ש1", date_str, r1_v,   f"kn_r1_sel_{date_str}", f"kn_r1_txt_{date_str}")
+                    st.markdown("<div style='font-size:0.6rem;color:#1e3a8a;font-weight:600;line-height:1;margin-top:2px'>🦽ש׳2</div>", unsafe_allow_html=True)
+                    _slot("ש2", date_str, r2_v,   f"kn_r2_sel_{date_str}", f"kn_r2_txt_{date_str}")
+
+        st.divider()
+        if st.button("💾 שמור שינויים", key="konenut_save", type="primary", use_container_width=True):
+            num_days = _cal.monthrange(year, sel_month)[1]
+
+            def _get_val(sel_key, txt_key):
+                chosen = st.session_state.get(sel_key, '')
+                if chosen == _FREE_TEXT_OPT:
+                    return (st.session_state.get(txt_key, '') or '').strip()
+                return (chosen or '').strip()
+
+            new_rows = []
+            for d in range(1, num_days + 1):
+                date_str = f"{year}-{sel_month:02d}-{d:02d}"
+                new_rows.append({
+                    'date':      date_str,
+                    'pnim_dr':   _get_val(f"kn_p_sel_{date_str}",  f"kn_p_txt_{date_str}"),
+                    'rehab_dr1': _get_val(f"kn_r1_sel_{date_str}", f"kn_r1_txt_{date_str}"),
+                    'rehab_dr2': _get_val(f"kn_r2_sel_{date_str}", f"kn_r2_txt_{date_str}"),
+                })
+            new_month_df = pd.DataFrame(new_rows)
+            full = st.session_state.konenut
+            full = full[~full['date'].str.startswith(year_month)]
+            full = pd.concat([full, new_month_df], ignore_index=True)
+            full = full.sort_values('date').reset_index(drop=True)
+            st.session_state.konenut = full
+            save_to_db("konenut", full)
+            st.success("✅ הכוננויות נשמרו בהצלחה")
+            st.rerun()
 
 
 # --- 4. פונקציית ציור הלוח ---
