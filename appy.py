@@ -944,6 +944,26 @@ def _export_dept_to_new_gsheet(dept_name, year_month, view_month):
         return False, '', str(e)
 
 
+def _is_functional_friday(date_obj_or_str):
+    """True for a real Friday, or a date flagged 'כמו שישי (ערב חג)' in special_days."""
+    date_obj = (datetime.strptime(date_obj_or_str, "%Y-%m-%d").date()
+                if isinstance(date_obj_or_str, str) else date_obj_or_str)
+    if (date_obj.weekday() + 1) % 7 == 5:
+        return True
+    sd = st.session_state.get('special_days', pd.DataFrame())
+    return get_functional_day_type(date_obj, sd) == 'כמו שישי (ערב חג)'
+
+
+def _is_functional_saturday(date_obj_or_str):
+    """True for a real Saturday, or a date flagged 'כמו שבת (חג)' in special_days."""
+    date_obj = (datetime.strptime(date_obj_or_str, "%Y-%m-%d").date()
+                if isinstance(date_obj_or_str, str) else date_obj_or_str)
+    if (date_obj.weekday() + 1) % 7 == 6:
+        return True
+    sd = st.session_state.get('special_days', pd.DataFrame())
+    return get_functional_day_type(date_obj, sd) == 'כמו שבת (חג)'
+
+
 # ── Batched export helpers ────────────────────────────────────────────────────
 _BATCHED_ABSENT_STATUSES = {"חופש", "202", "אחרי תורנות", "אחר"}
 _BATCHED_SHIKUM_DEPTS    = {"שיקום גריאטרי א'", "שיקום גריאטרי ב'"}
@@ -1015,9 +1035,8 @@ def _build_batched_day_data(dept_name, year_month, view_month, year=None):
     for d in days:
         date_str = f"{year}-{view_month:02d}-{d:02d}"
         date_obj = date(year, view_month, d)
-        weekday  = (date_obj.weekday() + 1) % 7  # 0=Sun 5=Fri 6=Sat
-        is_friday   = weekday == 5
-        is_saturday = weekday == 6
+        is_saturday = _is_functional_saturday(date_obj)
+        is_friday   = (not is_saturday) and _is_functional_friday(date_obj)
 
         workers, absent = [], []
 
@@ -1340,13 +1359,14 @@ def _export_all_depts_batched(year_month, view_month):
 def _get_fri_shift_workers(date_str, daily_dept):
     """
     Return list of employee names assigned to the department's Friday-morning
-    shifts on date_str (Fridays only). Returns [] for any other weekday.
+    shifts on date_str (real Fridays and "כמו שישי" special days only).
+    Returns [] for any other weekday.
     For פנימית גריאטרית returns both slot-1 and slot-2 names;
     for each שיקום dept returns the single matching slot name.
     """
     try:
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
-        if (date_obj.weekday() + 1) % 7 != 5:   # not Friday
+        if not _is_functional_friday(date_obj):   # not Friday (real or special-day)
             return []
         fri_shifts = _DAILY_DEPT_TO_FRIDAY_SHIFTS.get(str(daily_dept), [])
         if not fri_shifts:
@@ -1812,8 +1832,8 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
     """
     SINGLE SOURCE OF TRUTH for day-schedule status.
     Priority order:
-      0a. Saturday → "חופש"
-      0b. Friday + daily_dept known → check שישי בוקר assignment
+      0a. Saturday (real or special-day "like שבת") → "חופש"
+      0b. Friday (real or special-day "like שישי") + daily_dept known → check שישי בוקר assignment
       1.  is_manual=True override in WSD → return stored status (human decision)
       2.  Approved absence in absence_requests covers date → return type
       3.  Recurring weekly absence (staff.recurring_absent_days) → "חופש"
@@ -1853,12 +1873,12 @@ def _derive_auto_status(date_str, employee, daily_dept=None):
         except Exception:
             pass
 
-        # 0a. Saturday: department closed
-        if wd_idx == 6:
+        # 0a. Saturday (real or special-day "like שבת"): department closed
+        if _is_functional_saturday(date_obj):
             return "חופש"
 
-        # 0b. Friday: working employees come from שישי בוקר assignments
-        if wd_idx == 5 and daily_dept:
+        # 0b. Friday (real or special-day "like שישי"): working employees come from שישי בוקר assignments
+        if _is_functional_friday(date_obj) and daily_dept:
             fri_shifts = _DAILY_DEPT_TO_FRIDAY_SHIFTS.get(str(daily_dept), [])
             if fri_shifts:
                 try:
@@ -2304,7 +2324,7 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                         lbl        = _GRID_STATUS_LABEL_SHORT.get(cur_status, "?")
                         pfx        = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
                         cell_key   = f"{pfx}_{key_ns}_{emp}_{d}"
-                        if _WD_IS_WK[_ci] and cur_status == "חופש" and not _wsd_is_manual(date_str, emp):
+                        if (_WD_IS_WK[_ci] or _is_functional_saturday(date_str)) and cur_status == "חופש" and not _wsd_is_manual(date_str, emp):
                             st.markdown(
                                 "<div style='height:36px;background:#f8fafc;"
                                 "border-radius:8px;border:1px solid #e2e8f0'></div>",
@@ -2367,7 +2387,7 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                     continue
                 date_str_fri = f"{year}-{view_month:02d}-{d:02d}"
                 with fri_cols[_ci]:
-                    if _ci == 1:
+                    if _is_functional_friday(date_str_fri):
                         fw = _get_fri_shift_workers(date_str_fri, dept_name)
                         if fw:
                             fw_initials = " / ".join(_make_initials(n) for n in fw)
@@ -2474,7 +2494,7 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                         lbl        = _GRID_STATUS_LABEL_SHORT.get(cur_status, "?")
                         pfx        = _GRID_STATUS_PFX.get(cur_status, "wsdcell_w")
                         cell_key   = f"{pfx}_{key_ns}_{emp}_{d}"
-                        _is_wknd   = _WD_IS_WK[_ci]
+                        _is_wknd   = _WD_IS_WK[_ci] or _is_functional_saturday(date_str)
                         if _is_wknd and cur_status == "חופש" and not _wsd_is_manual(date_str, emp):
                             st.markdown(
                                 "<div style='height:32px;background:#f8fafc;"
@@ -2534,7 +2554,7 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                     f"{nd or '—'}</div>",
                     unsafe_allow_html=True)
 
-            # Friday-morning row (col 1 = Friday)
+            # Friday-morning row (real Friday or "כמו שישי" special day)
             fri_cols = st.columns(_COL_W_D)
             fri_cols[7].markdown(
                 "<div style='background:#fef9c3;font-weight:700;text-align:center;"
@@ -2545,7 +2565,7 @@ div[class*="st-key-wsdcell_e_{_kn}"] button {{
                     fri_cols[_ci].write("")
                     continue
                 date_str_fri = f"{year}-{view_month:02d}-{d:02d}"
-                if _ci == 1:
+                if _is_functional_friday(date_str_fri):
                     fw = _get_fri_shift_workers(date_str_fri, dept_name)
                     cell_txt    = " / ".join(fw) if fw else "—"
                     cell_bg_fri = "#fef3c7"
