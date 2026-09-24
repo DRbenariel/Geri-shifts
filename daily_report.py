@@ -8,8 +8,10 @@ Run via CI:    GitHub Actions (.github/workflows/daily_report.yml)
 
 import os
 import json
+import time
 import calendar
 import gspread
+import requests
 import pandas as pd
 from datetime import datetime, date, timedelta
 from google.oauth2.service_account import Credentials
@@ -27,6 +29,36 @@ DEPTS = ['פנימית גריאטרית', 'שיקום']
 # Google Sheets helpers
 # ---------------------------------------------------------------------------
 
+# Transient Google API failures (rate limits, 5xx, dropped connections) used to
+# crash the whole run. Retry those with backoff; anything else fails as before.
+RETRY_ATTEMPTS = 4
+RETRY_BASE_DELAY = 5  # seconds: waits 5, 10, 20 between attempts
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+def _is_transient(exc):
+    if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+        return True
+    if isinstance(exc, gspread.exceptions.APIError):
+        status = getattr(getattr(exc, 'response', None), 'status_code', None)
+        return status in RETRYABLE_STATUS
+    return False
+
+
+def with_retry(func, *args, **kwargs):
+    """Call a Google Sheets operation, retrying transient errors with backoff."""
+    for attempt in range(1, RETRY_ATTEMPTS + 1):
+        try:
+            return func(*args, **kwargs)
+        except Exception as exc:
+            if attempt == RETRY_ATTEMPTS or not _is_transient(exc):
+                raise
+            delay = RETRY_BASE_DELAY * 2 ** (attempt - 1)
+            print(f"Google Sheets call failed ({type(exc).__name__}: {exc}); "
+                  f"retry {attempt}/{RETRY_ATTEMPTS - 1} in {delay}s")
+            time.sleep(delay)
+
+
 def get_client():
     """Connect using env var (GitHub Actions) or local JSON file."""
     creds_json = os.environ.get('GSHEETS_CREDENTIALS')
@@ -42,8 +74,8 @@ def get_client():
 
 def load_sheet(sh, name):
     try:
-        ws = sh.worksheet(name)
-        data = ws.get_all_records()
+        ws = with_retry(sh.worksheet, name)
+        data = with_retry(ws.get_all_records)
         return pd.DataFrame(data)
     except gspread.exceptions.WorksheetNotFound:
         return pd.DataFrame()
@@ -1057,12 +1089,12 @@ def save_report(sh, problems, year, month):
             for p in problems]
 
     try:
-        ws = sh.worksheet('daily_report')
-        ws.clear()
+        ws = with_retry(sh.worksheet, 'daily_report')
+        with_retry(ws.clear)
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet('daily_report', rows=500, cols=6)
+        ws = with_retry(sh.add_worksheet, 'daily_report', rows=500, cols=6)
 
-    ws.update(header + rows, 'A1')
+    with_retry(ws.update, header + rows, 'A1')
     print(f"[{now_str}] Report saved: {len(rows)} issues for {month_str}")
     for p in problems:
         sev  = p['severity']
@@ -1077,7 +1109,7 @@ def save_report(sh, problems, year, month):
 def main():
     print("Connecting to Google Sheets...")
     gc = get_client()
-    sh = gc.open_by_url(SPREADSHEET_URL)
+    sh = with_retry(gc.open_by_url, SPREADSHEET_URL)
 
     staff_df        = load_sheet(sh, 'staff')
     requests_df     = load_sheet(sh, 'requests')
