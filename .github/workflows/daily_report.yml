@@ -23,7 +23,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install gspread pandas google-auth
+        # Pinned to the versions the green runs use, so a surprise upstream
+        # release can't break the report.
+        run: pip install gspread==6.2.1 pandas==3.0.6 google-auth==2.58.0 requests==2.34.2
 
       - name: Run daily report
         env:
