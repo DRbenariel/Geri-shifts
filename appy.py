@@ -6164,6 +6164,30 @@ def _get_dept_managers(dept_name: str) -> list[str]:
     except Exception:
         return []
 
+def _gantt_dept_options(emp_row):
+    """Managers can be assigned only within their existing management scope."""
+    if str(emp_row.get('type', '')).strip() == 'מנהל מחלקה':
+        managed = {_norm_dept(d) for d in
+                   _parse_manage_depts(emp_row.get('manage_depts', ''))}
+        depts = [d for d in DAILY_DEPTS_ALL if d in managed]
+    else:
+        depts = list(DAILY_DEPTS_ALL)
+    return depts + ["— לא שובץ —"]
+
+
+def _gantt_assignment_errors(employee_rows, assignments, sides):
+    """Reject invalid choices without choosing a department or side for anyone."""
+    errors = []
+    for row in employee_rows:
+        name = str(row.get('name', '')).strip()
+        dept = assignments.get(name, "— לא שובץ —")
+        if dept not in _gantt_dept_options(row):
+            errors.append(f"{name}: בחר/י מחלקה מתוך המחלקות המותרות.")
+        if dept == PNIM_DEPT and sides.get(name, '') not in PNIM_SIDES:
+            errors.append(f"{name}: לשיוך בפנימית גריאטרית חובה לבחור צד ורוד או כחול.")
+    return errors
+
+
 _ROLE_ORDER = {'מנהל מחלקה': 0, 'רופא בכיר': 1, 'מתמחה': 2}
 
 def _sort_employees_by_role(emp_list: list[str]) -> list[str]:
@@ -7760,19 +7784,23 @@ elif role in ("מנהל/ת", "מנהל על"):
 
         # ── שיבוץ חודשי — flat layout, no sub-tabs ───────────────────
         st.markdown(f"#### שיוך עובדים למחלקות — {hebrew_months[view_month-1]} {view_year}")
-        st.caption("בחר לכל עובד את המחלקה היומית שלו לחודש זה. תורן חוץ ומנהלים אינם בטבלה.")
+        st.caption("בחר לכל עובד את המחלקה היומית שלו לחודש זה. מנהלי/ות מחלקה נכללים בכפוף לחריגים הקיימים, ורק במחלקות שבניהולם. בפנימית חובה לבחור צד. תורני חוץ ומנהלי/ות מערכת אינם בטבלה.")
 
         DAILY_DEPTS = list(DAILY_DEPTS_ALL) + ["— לא שובץ —"]
 
         staff = st.session_state.staff.copy()
         staff['name'] = staff['name'].astype(str).str.strip()
         staff['type'] = staff['type'].astype(str).str.strip()
-        eligible = staff[staff['type'].isin(['מתמחה', 'רופא בכיר'])]
+        eligible = staff[staff['type'].isin(['מתמחה', 'רופא בכיר', 'מנהל מחלקה'])]
+        eligible = eligible[~(
+            (eligible['type'] == 'מנהל מחלקה') &
+            eligible['name'].isin(_MANUAL_PLANT_ONLY_MANAGERS)
+        )]
         eligible = eligible[eligible['name'].str.len() > 0]
         eligible = eligible[eligible['name'] != '---']
 
         if eligible.empty:
-            st.warning("אין עובדים פעילים מסוג מתמחה או רופא/ה בכיר/ה.")
+            st.warning("אין עובדים פעילים מסוג מתמחה, רופא/ה בכיר/ה או מנהל/ת מחלקה.")
         else:
             dr = st.session_state.dept_rotation.copy()
             if 'employee' in dr.columns:
@@ -7804,9 +7832,17 @@ elif role in ("מנהל/ת", "מנהל על"):
                 for _, emp_row in eligible.iterrows():
                     emp_name = emp_row['name']
                     emp_type = emp_row['type']
+                    emp_depts = _gantt_dept_options(emp_row)
                     current = existing.get(emp_name, "— לא שובץ —")
-                    if current not in DAILY_DEPTS:
-                        current = "— לא שובץ —"
+                    if current not in emp_depts:
+                        c_warning = f"{emp_name}: השיוך הקיים אינו במחלקות הזמינות. בחר/י שיוך תקין לפני שמירה."
+                        st.warning(c_warning)
+                        current = None  # require an explicit replacement, never silently unassign
+                    _mso_raw = emp_row.get('manual_schedule_only', False)
+                    _manual_only = (_mso_raw if isinstance(_mso_raw, bool)
+                                    else str(_mso_raw).strip().lower() == 'true')
+                    if _manual_only:
+                        st.warning(f"{emp_name}: מוגדר/ת לשיבוץ ידני בלבד — שיוך בגאנט לא ייצור שתילה יומית אוטומטית.")
                     cur_side = existing_sides.get(emp_name, "")
                     if cur_side not in PNIM_SIDES: cur_side = ""
                     c1, c2, c3 = st.columns([2, 2, 1])
@@ -7815,8 +7851,8 @@ elif role in ("מנהל/ת", "מנהל על"):
                         f"{emp_name} <span style='color:#64748b;font-size:0.8rem'>({emp_type})</span></div>",
                         unsafe_allow_html=True)
                     new_assignments[emp_name] = c2.selectbox(
-                        "", DAILY_DEPTS,
-                        index=DAILY_DEPTS.index(current),
+                        "", emp_depts,
+                        index=emp_depts.index(current) if current in emp_depts else None,
                         key=f"rot_{emp_name}_{view_month}",
                         label_visibility="collapsed"
                     )
@@ -7834,6 +7870,14 @@ elif role in ("מנהל/ת", "מנהל על"):
                 submit = st.form_submit_button(f"💾 שמור שיבוץ לחודש {hebrew_months[view_month-1]}")
 
             if submit:
+                # Validate before any state change, DB write, or request migration.
+                _gantt_errors = _gantt_assignment_errors(
+                    eligible.to_dict('records'), new_assignments, new_sides)
+                if _gantt_errors:
+                    for _err in _gantt_errors:
+                        st.error(_err)
+                    st.stop()
+
                 # Detect all dept changes for this month
                 dept_changes = [
                     (emp_n, existing[emp_n], new_dept)
@@ -7857,7 +7901,16 @@ elif role in ("מנהל/ת", "מנהל על"):
                             'daily_dept': dept_n,
                             'side': side_val,
                         })
-                new_dr = _norm_dr(pd.concat([other_months, pd.DataFrame(new_rows)], ignore_index=True))
+                # Keep hidden/excluded people's existing rows intact. They are not
+                # editable in this form; saving someone else must not delete them.
+                _edited_names = set(new_assignments)
+                _preserved_rows = dr[
+                    (dr['year_month'] == view_year_month) &
+                    ~dr['employee'].isin(_edited_names)
+                ] if not dr.empty else pd.DataFrame(columns=other_months.columns)
+                new_dr = _norm_dr(pd.concat(
+                    [other_months, _preserved_rows, pd.DataFrame(new_rows)],
+                    ignore_index=True))
                 st.session_state.dept_rotation = new_dr
                 save_to_db("dept_rotation", new_dr)
 
