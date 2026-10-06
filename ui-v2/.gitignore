@@ -1,0 +1,9 @@
+node_modules/
+.next/
+out/
+.tmp/
+.npm-cache/
+.pw-browsers/
+review/
+*.tsbuildinfo
+next-env.d.ts
