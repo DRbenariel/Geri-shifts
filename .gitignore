@@ -58,3 +58,10 @@ typing_extensions.py
 .claude/settings.local.json
 .claude/skills/
 skills-lock.json
+
+# Local working docs and generated infographic output
+PLAN_current.md
+docs/
+infographics/screenshots/
+infographics/summary.json
+infographics/*.pdf
