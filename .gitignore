@@ -33,3 +33,28 @@ streamlit_out.log
 # OS
 .DS_Store
 Thumbs.db
+.gstack/
+
+# Python packages installed into repo root (pip --target .) — local runtime only, do not commit
+absl/
+bin/
+dateutil/
+google/
+immutabledict/
+numpy/
+numpy.libs/
+ortools/
+pandas/
+pandas.libs/
+pybind11_abseil/
+tzdata/
+*.dist-info/
+six.py
+typing_extensions.py
+
+# Local agent/Claude tooling
+.agents/
+.claude/launch.json
+.claude/settings.local.json
+.claude/skills/
+skills-lock.json
