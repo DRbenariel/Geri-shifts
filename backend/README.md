@@ -69,7 +69,7 @@ python -m pytest tests -q      # 49 tests, about 2 minutes
 
 ## Legacy bugs found during the port
 
-- **Data loss in `work_schedule_daily` (live today).** `appy.py` loads only rows whose date starts with `2026` (line 3783), but `_wsd_upsert` and the other write paths save the entire session table back over the sheet. The סידור עבודה month selector already reaches 2027. A 2027 edit (a manual cell, a transfer, an approved absence written to the grid) is saved once, then erased by the next write from any session that loaded after it. The port loads all years by default (difference 7). Fixing the live app is a one-line change at 3783; it hasn't been made because `appy.py` is out of scope for this PR.
+- **Data loss in `work_schedule_daily` (fixed).** `appy.py` loaded only rows whose date starts with `2026` (line 3783), but `_wsd_upsert` and the other write paths save the entire session table back over the sheet. The סידור עבודה month selector already reaches 2027. A 2027 edit (a manual cell, a transfer, an approved absence written to the grid) is saved once, then erased by the next write from any session that loaded after it. The port loads all years by default (difference 7). Fixed in the live app by PR #3 (merged).
 
 The rest are kept as-is in the port, not fixed:
 
