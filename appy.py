@@ -395,7 +395,6 @@ def _generate_work_schedule(year_month, view_month):
             st.session_state.absence_requests = _ar_fresh
         _wsd_fresh = get_db_data("work_schedule_daily")
         if not _wsd_fresh.empty and 'date' in _wsd_fresh.columns:
-            _wsd_fresh = _wsd_fresh[_wsd_fresh['date'].astype(str).str.startswith('2026')]
             st.session_state.work_schedule_daily = _wsd_fresh
             _rebuild_wsd_index()
         _dr_fresh = get_db_data("dept_rotation")
@@ -3778,9 +3777,9 @@ if 'work_schedule_daily' not in st.session_state:
     if df.empty or 'date' not in df.columns:
         df = pd.DataFrame(columns=[
             'date', 'employee', 'daily_dept', 'status', 'note', 'is_manual', 'side'])
-    else:
-        # Scope to 2026 only — prevents multi-year data from bloating session state
-        df = df[df['date'].astype(str).str.startswith('2026')]
+    # Keep ALL years: every write saves this whole frame back over the sheet,
+    # so filtering here (it used to keep only 2026) deleted other years' rows
+    # — e.g. 2027 edits from the rolling month selector — on the next write.
     if 'side' not in df.columns:
         df['side'] = ''
     st.session_state.work_schedule_daily = df
