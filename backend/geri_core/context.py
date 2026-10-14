@@ -22,7 +22,10 @@ class DataContext:
     FRAMES = ('staff', 'schedule', 'requests', 'special_days', 'swap_requests', 'konenut',
               'dept_rotation', 'absence_requests', 'work_schedule_daily', 'settings')
 
-    def __init__(self, store: SheetStore | None = None, mailer=None, wsd_year_prefix: str | None = '2026'):
+    # wsd_year_prefix: appy.py loads only '2026' WSD rows and then saves the whole
+    # session frame back — which silently deletes every other year's rows on the
+    # next write. Default None loads all years so a save never drops data.
+    def __init__(self, store: SheetStore | None = None, mailer=None, wsd_year_prefix: str | None = None):
         self.store = store
         self.mailer = mailer
         self.wsd_year_prefix = wsd_year_prefix

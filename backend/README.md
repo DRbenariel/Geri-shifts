@@ -5,7 +5,7 @@ The business logic of `appy.py`, extracted so it runs **without Streamlit**. Thi
 ```bash
 cd backend
 pip install -r requirements.txt
-python -m pytest tests -q      # 47 tests, about 2 minutes
+python -m pytest tests -q      # 49 tests, about 2 minutes
 ```
 
 ## How it works
@@ -50,7 +50,7 @@ python -m pytest tests -q      # 47 tests, about 2 minutes
     - WSD edits;
     - every Excel export, compared cell by cell including fills and page breaks;
     - the `WSD_` and `Schedule_Export` sheets.
-- **`tests/test_core.py`** (30 tests) covers logic that existed only inline in the UI code, so there is no legacy function to compare against. That includes login and the hash upgrade, the Gantt save and migration, swap approval, absence submission rules, CP-SAT hard constraints, on-call, settings, reports and tabs per role.
+- **`tests/test_core.py`** (32 tests) covers logic that existed only inline in the UI code, so there is no legacy function to compare against. That includes login and the hash upgrade, the Gantt save and migration, swap approval, absence submission rules, CP-SAT hard constraints, on-call, settings, reports and tabs per role.
 - `tests/fixtures.py` is a fictional dataset that includes the known data problems: a name with a trailing space, a geresh in `manage_depts`, `"True"`/`"False"` strings, legacy `dept_at_request` values, Friday-like and Saturday-like special days, transfers with sides, and managers planting themselves.
 - `.github/workflows/backend_tests.yml` runs both files on every PR that touches `backend/` or `appy.py`. A change to `appy.py` that isn't mirrored here fails the parity tests.
 
@@ -64,9 +64,15 @@ python -m pytest tests -q      # 47 tests, about 2 minutes
 4. **Staff table save** keeps each password by employee name. A renamed row sends `_original_name` to keep its password. The Streamlit version matched passwords by row index, which could give one person another person's hash after rows were deleted or reordered.
 5. **"Open in Sheets" export** no longer shares the whole spreadsheet as "anyone with the link can view" unless you pass `share_anyone=True`. Whether to keep that is still Ben's decision (DEPLOY_PLAN step 4).
 6. **Schedulers return their messages** (balancing report, CP-SAT summary, fallback warnings) instead of calling `st.info`. CP-SAT time limits and worker count are parameters; the defaults are the old 28 s / 10 s / 4 workers.
-7. **Role checks are not in the core.** The API layer must check the role on every route (DEPLOY_PLAN step 5). The core functions trust their caller, as the Streamlit tabs did.
+7. **All years of `work_schedule_daily` are loaded.** See the data-loss bug below. Pass `wsd_year_prefix='2026'` only to reproduce the old behaviour.
+8. **Role checks are not in the core.** The API layer must check the role on every route (DEPLOY_PLAN step 5). The core functions trust their caller, as the Streamlit tabs did.
 
-## Legacy bugs found during the port (kept as-is, not fixed)
+## Legacy bugs found during the port
+
+- **Data loss in `work_schedule_daily` (live today).** `appy.py` loads only rows whose date starts with `2026` (line 3783), but `_wsd_upsert` and the other write paths save the entire session table back over the sheet. The סידור עבודה month selector already reaches 2027. A 2027 edit (a manual cell, a transfer, an approved absence written to the grid) is saved once, then erased by the next write from any session that loaded after it. The port loads all years by default (difference 7). Fixing the live app is a one-line change at 3783; it hasn't been made because `appy.py` is out of scope for this PR.
+
+The rest are kept as-is in the port, not fixed:
+
 
 - **The 3-way chain swap (🔗 החלפה משולשת) never returns a result.** `find_swap_candidates` validates the intern for פנימית against a schedule that still contains their own שיקום shift that day, so the check always fails with "Already working this day". `test_find_swap_candidates_all_pnim` pins this behaviour. Fix: drop the intern's שיקום row before validating.
 - **The auto-approve path for מנהל מחלקה absences can't be reached.** The code in the `הגשת בקשות` tab exists, but the navbar never shows that tab to this role. The port keeps the logic (`submit_day_absences(role='מנהל מחלקה')`) so the new UI can decide whether to expose it.

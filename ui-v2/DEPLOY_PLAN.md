@@ -56,6 +56,8 @@ Gmail SMTP <── API (absence notifications)      (unchanged)
 
 ## Backend port (phase 2, before any real user sees the new UI)
 
+**Status (2026-10-14): logic extracted.** `backend/geri_core` holds the Streamlit-free port, with parity tests against the original functions (see `backend/README.md`). Remaining for this phase: the thin FastAPI layer (`backend/api/`), auth/session, and deployment config. The screen-by-screen plan, with the endpoint for each action, is in `SCREENS_PLAN.md`.
+
 The logic lives in `appy.py` and reads Streamlit's session state 534 times. Port it in this order. `daily_report.py` is already Streamlit-free and is the template.
 
 1. **Data layer.**

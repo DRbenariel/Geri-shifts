@@ -556,3 +556,33 @@ def month_schedule(ctx, year, month) -> list:
         return []
     m = s[s['date'].astype(str).str.startswith(f"{year}-{month:02d}")]
     return [{k: ('' if pd.isna(v) else v) for k, v in r.items()} for r in m.to_dict('records')]
+
+
+def night_calendar(ctx, year, month, viewer, is_admin) -> dict:
+    """Night calendar read model (draw_calendar_view). Non-admins see only their own
+    rows and unfilled ('---') slots; admins also get empty reasons, every
+    employee's blocks/wishes per day and, once everyone submitted, availability."""
+    prefix = f"{year}-{month:02d}"
+    s = ctx.schedule
+    m = s[s['date'].astype(str).str.startswith(prefix)] if not s.empty else s
+    me = str(viewer).strip()
+    days = {}
+    for _, r in m.iterrows():
+        emp = str(r['employee']).strip()
+        if not is_admin and emp != me and r['employee'] != '---':
+            continue
+        days.setdefault(str(r['date']), []).append({
+            'dept': r['dept'], 'employee': r['employee'],
+            'is_manual': str(r.get('is_manual', '')).strip().lower() == 'true',
+            'empty_reason': (str(r.get('empty_reason', '') or '') if is_admin and r['employee'] == '---' else '')})
+    out = {'year': year, 'month': month, 'slots': days,
+           'special_days': [{'date': str(r['date']), 'description': r['description'], 'day_type': r.get('day_type', '')}
+                            for _, r in ctx.special_days.iterrows() if str(r['date']).startswith(prefix)]}
+    if is_admin:
+        reqs = ctx.requests[ctx.requests['date'].astype(str).str.startswith(prefix)] if not ctx.requests.empty else ctx.requests
+        out['requests'] = {}
+        for _, r in reqs.iterrows():
+            out['requests'].setdefault(str(r['date']), []).append({'employee': r['employee'], 'status': r['status']})
+        show, avail, wished = admin_availability(ctx, year, month)
+        out['availability'] = {'shown': show, 'available': avail, 'wished': wished}
+    return out

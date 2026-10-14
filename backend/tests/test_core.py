@@ -373,3 +373,29 @@ def test_tabs_per_role():
     assert tabs_for_role('רופא בכיר') == ['הגדרות', 'הגשת בקשות', 'סידור עבודה']
     assert tabs_for_role('תורן חוץ') == ['הגדרות', 'סידור תורנויות', 'הגשת בקשות']
     assert default_tab_for_role('תורן חוץ') == 'הגשת בקשות'
+
+
+def test_night_calendar_privacy(ctx):
+    scheduling.run_smart_scheduling(ctx, YEAR, MONTH)
+    emp = night.night_calendar(ctx, YEAR, MONTH, INTERNS[1], is_admin=False)
+    names = {s['employee'] for v in emp['slots'].values() for s in v}
+    assert names <= {INTERNS[1], '---'}
+    assert 'requests' not in emp and all(not s['empty_reason'] for v in emp['slots'].values() for s in v)
+    adm = night.night_calendar(ctx, YEAR, MONTH, 'ענבל רז', is_admin=True)
+    assert len({s['employee'] for v in adm['slots'].values() for s in v}) > 5
+    assert adm['requests'] and 'availability' in adm and len(adm['special_days']) == 3
+
+
+def test_wsd_write_keeps_other_years(frames):
+    """appy.py drops non-2026 WSD rows on the next write; the port must not."""
+    from geri_core import DataContext, MemoryStore
+    frames['work_schedule_daily'] = pd.concat([frames['work_schedule_daily'], pd.DataFrame([
+        {'date': '2027-01-05', 'employee': INTERNS[1], 'daily_dept': "שיקום גריאטרי ב'", 'status': 'חופש',
+         'note': '', 'is_manual': 'True', 'side': ''}])], ignore_index=True)
+    store = MemoryStore(frames)
+    ctx = DataContext.load(store)
+    daily.wsd_upsert(ctx, f"{YM}-02", INTERNS[2], 'פנימית גריאטרית', 'אחר')
+    assert '2027-01-05' in store.sheets['work_schedule_daily']['date'].tolist()
+    legacy_like = DataContext.load(MemoryStore(frames), wsd_year_prefix='2026')
+    daily.wsd_upsert(legacy_like, f"{YM}-02", INTERNS[2], 'פנימית גריאטרית', 'אחר')
+    assert '2027-01-05' not in legacy_like.store.sheets['work_schedule_daily']['date'].tolist()   # the bug
