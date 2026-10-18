@@ -1,5 +1,5 @@
 // Records the review video for the superadmin mockup.
-// Usage: serve ./out on :3100 (python -m http.server 3100 --directory out), then `node scripts/record.mjs`.
+// Usage: once, `npm install --prefix scripts`; then serve ./out on :3100 (python -m http.server 3100 --directory out) and run `node scripts/record.mjs` from ui-v2/.
 // Output: review/version-b.mp4 (+ raw webm clips in review/raw). Uses the Chromium build cached by Playwright 1.58.
 import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
