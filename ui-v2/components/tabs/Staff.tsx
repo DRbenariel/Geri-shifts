@@ -1,10 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Check, CloudArrowDown, FloppyDisk, LockSimple, Plus, PushPin, Star, Trash, UserPlus, X } from '@phosphor-icons/react';
+import { Check, CloudArrowDown, FloppyDisk, LockSimple, Plus, PushPin, Star, Trash, UserMinus, UserPlus, X } from '@phosphor-icons/react';
 import { useStore } from '@/lib/store';
 import { DAILY_DEPTS, DAYS_IN_MONTH, DOW_FULL, HEB_MONTHS, MONTH, ROLES, STAFF_DEPTS, YEAR, dowOf, iso, type Role, type Staff } from '@/lib/mock';
 import { absenceConflicts, constraintCounters, fmtRange } from '@/lib/logic';
-import { Bezel, Cta, Expander, Field, Note, PageHead } from '../ui';
+import { Bezel, Cta, Expander, Field, Modal, Note, PageHead } from '../ui';
 
 export function ConstraintCalendar({ cons, onToggle, special }: { cons: Record<number, 'B' | 'R'>; onToggle: (d: number) => void; special: Record<number, string> }) {
   const c = constraintCounters(cons);
@@ -78,6 +78,22 @@ function StaffTable() {
   useEffect(() => { setRows(structuredClone(db.staff)); }, [db.staff]);
   const dirty = JSON.stringify(rows) !== JSON.stringify(db.staff);
   const upd = (i: number, p: Partial<Staff>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
+  const [del, setDel] = useState<string | null>(null);
+  // What still references the employee: shown before deleting, so open shifts can be reassigned first.
+  const refs = (name: string) => ({
+    shifts: db.schedule.filter((r) => r.employee === name).length,
+    cons: db.requests.filter((r) => r.employee === name).length,
+    abs: db.absences.filter((a) => a.employee === name && a.status !== 'rejected').length,
+  });
+  const askDelete = (i: number) => {
+    const r = rows[i];
+    if (!db.staff.some((s) => s.name === r.name)) return setRows(rows.filter((_, j) => j !== i)); // unsaved row: just drop it
+    setDel(r.name);
+  };
+  const doDelete = (name: string) => {
+    mutate((x) => { x.staff = x.staff.filter((s) => s.name !== name); x.requests = x.requests.filter((r) => r.employee !== name); });
+    toast(`${name} נמחק/ה מהצוות`, 'warn'); setDel(null);
+  };
   return (
     <Bezel>
       <div className="row" style={{ marginBottom: 14 }}>
@@ -86,9 +102,10 @@ function StaffTable() {
         <button className="btn" onClick={() => setRows([...rows, { name: '', type: 'מתמחה', dept: 'שיקום', monthly_quota: 6, weekend_quota: 1, only_home_dept: false, email: '', manage_depts: [], recurring_absent_days: '', manual_schedule_only: false }])}><Plus size={14} />שורה</button>
       </div>
       <div className="tbl-wrap"><table className="t">
-        <thead><tr><th>שם</th><th>תפקיד</th><th>מחלקה</th><th>מכסה</th><th>סופ״ש</th><th>אימייל</th><th>מחלקות בניהולו</th><th>ימי היעדרות קבועים</th><th>שיבוץ ידני בלבד</th><th /></tr></thead>
+        <thead><tr><th aria-label="מחיקה" /><th>שם</th><th>תפקיד</th><th>מחלקה</th><th>מכסה</th><th>סופ״ש</th><th>אימייל</th><th>מחלקות בניהולו</th><th>ימי היעדרות קבועים</th><th>שיבוץ ידני בלבד</th></tr></thead>
         <tbody>{rows.map((r, i) => (
           <tr key={i}>
+            <td><button className="iconbtn del" aria-label={`מחק את ${r.name || 'השורה'}`} title="מחק עובד/ת" onClick={() => askDelete(i)}><UserMinus size={16} /></button></td>
             <td><input className="input" value={r.name} onChange={(e) => upd(i, { name: e.target.value })} style={{ minWidth: 130 }} /></td>
             <td><select className="input" value={r.type} onChange={(e) => upd(i, { type: e.target.value as Role })}>{ROLES.map((x) => <option key={x}>{x}</option>)}</select></td>
             <td><select className="input" value={r.dept} onChange={(e) => upd(i, { dept: e.target.value })}>{STAFF_DEPTS.map((x) => <option key={x}>{x}</option>)}</select></td>
@@ -98,7 +115,6 @@ function StaffTable() {
             <td className="small">{r.manage_depts.join(', ') || <span className="muted">-</span>}</td>
             <td><input className="input" value={r.recurring_absent_days} placeholder="למשל ד,ה" onChange={(e) => upd(i, { recurring_absent_days: e.target.value })} style={{ width: 80 }} /></td>
             <td style={{ textAlign: 'center' }}><input type="checkbox" checked={r.manual_schedule_only} onChange={(e) => upd(i, { manual_schedule_only: e.target.checked })} style={{ width: 18, height: 18, accentColor: 'var(--accent)' }} /></td>
-            <td><button className="iconbtn" aria-label="מחק שורה" onClick={() => setRows(rows.filter((_, j) => j !== i))}><Trash size={14} /></button></td>
           </tr>
         ))}</tbody>
       </table></div>
@@ -106,6 +122,19 @@ function StaffTable() {
         <Cta icon={<FloppyDisk size={16} />} disabled={!dirty} onClick={() => { mutate((x) => { x.staff = rows.filter((r) => r.name.trim()); }); toast('השינויים בצוות נשמרו. עובדים חדשים קיבלו סיסמה 1234.'); }}>שמור שינויים בצוות</Cta>
         {dirty && <span className="muted small">יש שינויים שלא נשמרו</span>}
       </div>
+      <Modal open={!!del} onClose={() => setDel(null)}>
+        {del && (() => { const c = refs(del); return <>
+          <h2 className="sec"><UserMinus size={22} />למחוק את {del} מהצוות?</h2>
+          <p className="muted" style={{ marginBottom: 12 }}>העובד/ת לא יוכל/תוכל להתחבר ולא יופיע/תופיע בשיבוצים הבאים. האילוצים שלו/ה לחודש הפתוח יימחקו.</p>
+          {c.shifts + c.abs > 0
+            ? <Note kind="warn">עדיין רשומים על שמו/ה: {c.shifts > 0 && <b>{c.shifts} תורנויות</b>}{c.shifts > 0 && c.abs > 0 && ', '}{c.abs > 0 && <b>{c.abs} היעדרויות</b>}. הן נשארות בסידור ויש לשבץ מחליף ידנית.</Note>
+            : <Note kind="info">אין לו/ה תורנויות או היעדרויות רשומות.</Note>}
+          <div className="row" style={{ marginTop: 16 }}>
+            <Cta variant="danger" icon={<Trash size={16} />} onClick={() => doDelete(del)}>מחק עובד/ת</Cta>
+            <button className="btn" onClick={() => setDel(null)}>ביטול</button>
+          </div>
+        </>; })()}
+      </Modal>
     </Bezel>
   );
 }
