@@ -56,7 +56,7 @@ python -m pytest tests -q      # 49 tests, about 2 minutes
 
 ## Intentional differences from appy.py
 
-1. **Synchronous writes.** The background save queue (`_save_async`) is gone, because a Vercel function can't keep working after it responds. An approved absence that spans several days is now written in one batch instead of one write per day; the final sheet is the same.
+1. **Synchronous writes.** The background save queue (`_save_async`) is gone, because a serverless request (Cloud Run with request-based billing) loses its CPU once it responds. An approved absence that spans several days is now written in one batch instead of one write per day; the final sheet is the same.
 2. **Retries.** Writes retry on 429 and on 500/502/503/504. Previously only reads retried on 5xx.
 3. **Passwords.**
    - New hashes use bcrypt. Existing unsalted SHA-256 hashes still log in and are upgraded to bcrypt on the first successful login.
