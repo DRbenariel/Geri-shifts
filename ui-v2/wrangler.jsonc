@@ -1,0 +1,10 @@
+// Cloudflare Workers static-assets config for the ui-v2 site (Workers Builds runs `npx wrangler deploy` from ui-v2/).
+// Later the /api proxy to Cloud Run is added here as a Worker script ("main"), keeping UI and API on one origin.
+{
+  "name": "geri-shifts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./out",
+    "not_found_handling": "404-page"
+  }
+}

@@ -1,12 +1,12 @@
 # Geri-shifts: deploying the new UI
 
-Status: proposal, revised 2026-10-18. Route chosen by Ben: **Cloudflare Pages + Google Cloud Run**, aiming for about $0 a month. The mockup in this folder uses fictional data. Nothing here touches the live Streamlit app or the Google Sheet.
+Status: proposal, revised 2026-10-18. Route chosen by Ben: **Cloudflare (Workers static assets) + Google Cloud Run**, aiming for about $0 a month. The mockup in this folder uses fictional data. Nothing here touches the live Streamlit app or the Google Sheet.
 
 Earlier draft (2026-10-06) recommended Vercel Pro at $20/month. Dropped: Vercel Hobby is free but limited to non-commercial personal use, which a hospital department tool may not meet, and it gives the scheduler only 1 vCPU.
 
 ## Recommendation
 
-- **Frontend:** the static Next.js export from this folder on **Cloudflare Pages** (free plan, commercial use allowed, no bandwidth cap).
+- **Frontend:** the static Next.js export from this folder on **Cloudflare Workers with static assets** (free plan, commercial use allowed; static asset requests are free and unmetered). Cloudflare's dashboard no longer offers new Pages projects (checked 2026-10-18), so this replaces Pages; config is `ui-v2/wrangler.jsonc`.
 - **API:** a small FastAPI service that reuses the existing scheduling logic, in a Docker image on **Google Cloud Run, region `me-west1` (Tel Aviv)**.
 - **Data:** Google Sheets stays the database, same service account, same schema.
 - Streamlit Cloud keeps running in parallel until the new site has proven itself.
@@ -15,8 +15,8 @@ Figures to verify on the providers' pricing pages before signing up (from memory
 
 | Item | Free allowance | Geri-shifts need |
 |---|---|---|
-| Cloudflare Pages | 500 builds/month, unlimited static requests and bandwidth | a few builds a week |
-| Pages Functions (the `/api` proxy, below) | 100,000 requests/day on Workers free | far below |
+| Cloudflare Workers static assets | unlimited static requests; Workers Builds has a monthly free build allowance | a few builds a week |
+| Worker script (the `/api` proxy, below) | 100,000 requests/day on Workers free | far below |
 | Cloud Run (request-based billing) | about 2M requests, 180,000 vCPU-seconds, 360,000 GiB-seconds per month per billing account; confirm `me-west1` is covered | about 20 users; CP-SAT runs of up to 38 s × 4 vCPU |
 | Artifact Registry (the API image) | 0.5 GB storage | ortools + pandas image is likely 0.5 to 1 GB, so a few cents a month |
 
@@ -25,9 +25,9 @@ Expected cost: **about $0 to $1 a month, not exactly $0.** Cloud Run needs a GCP
 ## Architecture
 
 ```
-browser ──HTTPS──> Cloudflare Pages  (one origin: <project>.pages.dev or a custom domain)
+browser ──HTTPS──> Cloudflare Worker  (one origin: geri-shifts.<account>.workers.dev or a custom domain)
                     ├─ static UI (ui-v2/out)
-                    └─ /api/*  Pages Function ──proxy──> Cloud Run, me-west1
+                    └─ /api/*  Worker script  ──proxy──> Cloud Run, me-west1
                                                         FastAPI (Python)
                                                          ├─ auth: login → signed httpOnly session cookie
                                                          ├─ role check on every route (server side)
@@ -37,14 +37,14 @@ GitHub Actions ── daily_report.py ──> Sheets   (unchanged)
 Gmail SMTP <── API (absence notifications)      (unchanged)
 ```
 
-### Why `/api` goes through a Pages Function
+### Why `/api` goes through the Worker
 
-`*.pages.dev` and `*.run.app` are both on the Public Suffix List, so the UI and the API on their default URLs are different sites. A session cookie set by the API would be a third-party cookie, and Safari (every iPhone) blocks those: login would fail for most doctors.
+`*.workers.dev` and `*.run.app` are both on the Public Suffix List, so the UI and the API on their default URLs are different sites. A session cookie set by the API would be a third-party cookie, and Safari (every iPhone) blocks those: login would fail for most doctors.
 
-Fix: `ui-v2/functions/api/[[path]].ts`, a Pages Function that forwards every `/api/*` request to the Cloud Run URL (stored in a Pages environment variable) and passes the response, including `Set-Cookie`, back unchanged. The browser only ever talks to one origin.
+Fix: a Worker script (`main` in `wrangler.jsonc`, with `run_worker_first` for `/api/*`) that forwards every `/api/*` request to the Cloud Run URL (stored in a Worker environment variable) and passes the response, including `Set-Cookie`, back unchanged. The browser only ever talks to one origin.
 
 To verify before building:
-- Pages `_redirects` can't proxy to an external host (I believe it only redirects), which is why this needs a Function.
+- `_redirects` can't proxy to an external host (I believe it only redirects), which is why this needs a Worker script.
 - Cloud Run domain mapping isn't available in every region, and `me-west1` may not have it. The alternative, a global load balancer, costs about $18/month. The proxy avoids both.
 
 ### Cloud Run settings
@@ -62,7 +62,7 @@ Computing in `me-west1` keeps processing in Israel. The data at rest stays in Go
 
 ## Backend port (phase 2, before any real user sees the new UI)
 
-**Status (2026-10-14): logic extracted.** `backend/geri_core` holds the Streamlit-free port, with parity tests against the original functions (see `backend/README.md`). Remaining for this phase: the thin FastAPI layer (`backend/api/`), auth/session, and deployment config (Dockerfile for Cloud Run, the Pages `/api` proxy). The screen-by-screen plan, with the endpoint for each action, is in `SCREENS_PLAN.md`.
+**Status (2026-10-14): logic extracted.** `backend/geri_core` holds the Streamlit-free port, with parity tests against the original functions (see `backend/README.md`). Remaining for this phase: the thin FastAPI layer (`backend/api/`), auth/session, and deployment config (Dockerfile for Cloud Run, the Worker `/api` proxy). The screen-by-screen plan, with the endpoint for each action, is in `SCREENS_PLAN.md`.
 
 Unchanged by the hosting choice. The logic lives in `appy.py` and reads Streamlit's session state 534 times. Port it in this order. `daily_report.py` is already Streamlit-free and is the template.
 
@@ -96,8 +96,8 @@ The mockup already defines the data shapes (`lib/mock.ts` mirrors `init_db`) and
 
 | Step | What | Who | Exit criterion |
 |---|---|---|---|
-| 0 | Approve UI direction: mockup on a Pages preview link + the video | Ben | Go / changes |
-| 1 | Backend port + parity tests; API deployed to Cloud Run; every push to a branch gets a Pages preview URL | dev | All parity tests green |
+| 0 | Approve UI direction: mockup on the workers.dev link + the video | Ben | Go / changes |
+| 1 | Backend port + parity tests; API deployed to Cloud Run; every push to a branch gets a preview URL | dev | All parity tests green |
 | 2 | Superadmin screens on live data (read-only first, then writes), Streamlit still primary | Ben | Ben runs a full month cycle (open month, auto-schedule, approvals) in the new UI |
 | 3 | Other roles: מתמחה, תורן חוץ, רופא בכיר, מנהל מחלקה, מנהל/ת (each gets the tabs from `ui_components.render_navbar`) | dev | Role screens pass the parity checklist |
 | 4 | Pilot: 2 to 3 people per role use the new link for one month; both apps share the same Sheet | pilot group | No blocking bugs, feedback addressed |
@@ -107,31 +107,30 @@ Both apps write the same sheets, so during steps 2 to 4 don't edit the same mont
 
 ## What Ben needs to do
 
-### Now: the mockup on Cloudflare Pages (step 0)
+### Now: the mockup on Cloudflare Workers (step 0)
 
-1. Create a free Cloudflare account.
-2. Workers & Pages → Create → Pages → **Connect to Git** → `DRbenariel/Geri-shifts`. Use Git integration, not Direct Upload; as far as I know a Direct Upload project can't be switched to Git later.
+1. Create a free Cloudflare account (done 2026-10-18, signed in with GitHub).
+2. Workers & Pages → Create application → **Continue with GitHub** → `DRbenariel/Geri-shifts`.
 3. Build settings:
-   - Production branch: `ui-v2-mockup` (`main` has no `ui-v2/` folder yet, so a build from it would fail).
-   - Framework preset: **None** (not "Next.js", which expects a server build).
-   - Root directory: `ui-v2`
    - Build command: `npm run build`
-   - Build output directory: `out`
-   - Build watch paths: include `ui-v2/*`, so commits to `appy.py` don't trigger builds.
-4. The `*.pages.dev` link is **public by default**. The mockup holds only fictional data, but to restrict it, put **Cloudflare Access** in front (Zero Trust free plan, up to 50 users, email one-time PIN). Required before any real data goes through it.
+   - Deploy command: `npx wrangler deploy` (reads `ui-v2/wrangler.jsonc`)
+   - Path (root directory): `ui-v2`
+   - Branch: `ui-v2-mockup`. `main` has no `ui-v2/` folder yet, so a build from it fails. If setup offers no branch picker, change it afterwards in Settings → Build → Branch control.
+   - Build watch paths (Settings → Build, after the first build): include `ui-v2/*`, so commits to `appy.py` don't trigger builds.
+4. The `*.workers.dev` link is **public by default**. The mockup holds only fictional data, but to restrict it, put **Cloudflare Access** in front (Zero Trust free plan, up to 50 users, email one-time PIN). Required before any real data goes through it.
 
 ### Later: the API on Cloud Run (step 1)
 
 1. In Google Cloud, use the project that owns the `gerishifts` service account, enable billing, add a $1 budget alert.
 2. Enable Cloud Run, Artifact Registry and Secret Manager.
-3. Decide the address: free `*.pages.dev`, or a custom domain (about $1 to 2 a month for a `.co.il`) added in Pages.
+3. Decide the address: free `*.workers.dev`, or a custom domain (about $1 to 2 a month for a `.co.il`) added to the Worker.
 4. Confirm with hospital IT that the current Google Sheets storage is acceptable for the new app too (see Data residency).
 
 ## Cost (monthly, at current usage of about 20 users)
 
 | Item | Cost |
 |---|---|
-| Cloudflare Pages + Pages Functions + Access (≤50 users) | $0 |
+| Cloudflare Worker (static assets + `/api` proxy) + Access (≤50 users) | $0 |
 | Cloud Run inside the free tier, min-instances 0 | $0 |
 | Artifact Registry storage over 0.5 GB | a few cents |
 | Google Sheets API, Gmail SMTP, GitHub Actions | $0 |
@@ -148,4 +147,4 @@ npm install --prefix scripts                   # once: recording tools (playwrig
 node scripts/record.mjs                        # re-record review/version-b.mp4
 ```
 
-The recording tools live in `scripts/package.json`, outside the site build, so Pages builds don't download the 80 MB ffmpeg binary.
+The recording tools live in `scripts/package.json`, outside the site build, so Cloudflare builds don't download the 80 MB ffmpeg binary.
