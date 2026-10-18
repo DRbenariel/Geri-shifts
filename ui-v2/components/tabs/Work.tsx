@@ -1,9 +1,9 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { Bell, DownloadSimple, Moon, NotePencil, Plus, ShareNetwork, Sun, X } from '@phosphor-icons/react';
-import { useStore } from '@/lib/store';
+import { useMe, useStore } from '@/lib/store';
 import { DAILY_DEPTS, DOW_FULL, FRI_SLOTS, HEB_MONTHS, dowOf, daysIn, iso, type Role } from '@/lib/mock';
-import { STATUS, codeToHe, cycleFor, deriveStatus, first, setManual, type Code, type DB } from '@/lib/logic';
+import { STATUS, codeToHe, cycleFor, deptOf, deriveStatus, first, setManual, type Code, type DB } from '@/lib/logic';
 import { Bezel, Cta, Field, Modal, Note, PageHead, Person, PillSeg, StatusLegend } from '../ui';
 
 export const MONTHS12 = Array.from({ length: 12 }, (_, i) => { const m = ((9 + i) % 12) + 1; const y = 2026 + Math.floor((9 + i) / 12); return { y, m, v: `${y}-${String(m).padStart(2, '0')}`, l: `${HEB_MONTHS[m - 1]} ${y}` }; });
@@ -164,8 +164,9 @@ export function ExportButtons({ dept, label }: { dept: string; label: string }) 
   );
 }
 
-export default function Work() {
-  const [dept, setDept] = useState(DAILY_DEPTS[0]);
+function AdminWork({ depts }: { depts: string[] }) {
+  const me = useMe();
+  const [dept, setDept] = useState(depts[0]);
   const [ym, setYm] = useState('2026-11');
   const mo = MONTHS12.find((x) => x.v === ym)!;
   return (
@@ -175,13 +176,47 @@ export default function Work() {
           <select className="input" style={{ width: 170 }} value={ym} onChange={(e) => setYm(e.target.value)} aria-label="חודש">{MONTHS12.map((x) => <option key={x.v} value={x.v}>{x.l}</option>)}</select>
           <ExportButtons dept={dept} label={mo.l} />
         </>} />
-      <div className="row" style={{ marginBottom: 18 }}>
-        <PillSeg value={dept} onChange={setDept} options={DAILY_DEPTS.map((d) => ({ v: d, l: d }))} />
-      </div>
+      {depts.length > 1 && (
+        <div className="row" style={{ marginBottom: 18 }}>
+          <PillSeg value={dept} onChange={setDept} options={depts.map((d) => ({ v: d, l: d }))} />
+        </div>
+      )}
       {ym !== '2026-11' && <Note kind="info">לחודש זה עדיין אין שיבוץ מחלקות בגאנט. מוצגים ימי עבודה מחושבים בלבד.</Note>}
       <StatusLegend />
-      <DeptGrid dept={dept} y={mo.y} m={mo.m} editable />
+      <DeptGrid key={dept} dept={dept} y={mo.y} m={mo.m} editable meName={me.name} />
       <Transfers dept={dept} y={mo.y} m={mo.m} />
     </>
   );
+}
+
+/** מתמחה / רופא בכיר (SCREENS_PLAN 4.14): their department's grid, read-only, own row highlighted. */
+function MyWork() {
+  const { db, toast } = useStore();
+  const me = useMe();
+  const [ym, setYm] = useState('2026-11');
+  const mo = MONTHS12.find((x) => x.v === ym)!;
+  const dept = deptOf(db, me.name, ym)?.daily_dept;
+  return (
+    <>
+      <PageHead eyebrow={mo.l} title="סידור עבודה" sub={dept ? <>מחלקתך: <b>{dept}</b></> : 'טרם שובצת למחלקה בחודש זה'}
+        actions={<>
+          <select className="input" style={{ width: 170 }} value={ym} onChange={(e) => setYm(e.target.value)} aria-label="חודש">{MONTHS12.map((x) => <option key={x.v} value={x.v}>{x.l}</option>)}</select>
+          {dept && <Cta variant="light" icon={<DownloadSimple size={16} />} onClick={() => toast(`הורד: לוח העבודה שלך ל${mo.l} (Excel)`)}>הורד לוח עבודה שלי</Cta>}
+        </>} />
+      {dept ? <>
+        <StatusLegend />
+        <DeptGrid dept={dept} y={mo.y} m={mo.m} editable={false} meName={me.name} />
+      </> : <Note kind="info">טרם שובצת למחלקה ב{mo.l}. הסידור יופיע כאן אחרי שהמנהל/ת ישבץ את החודש בגאנט.</Note>}
+    </>
+  );
+}
+
+export default function Work() {
+  const me = useMe();
+  if (me.type === 'מנהל על' || me.type === 'מנהל/ת') return <AdminWork depts={DAILY_DEPTS} />;
+  if (me.type === 'מנהל מחלקה') {
+    const mine = DAILY_DEPTS.filter((d) => me.manage_depts.includes(d));
+    return mine.length ? <AdminWork depts={mine} /> : <><PageHead title="סידור עבודה" /><Note kind="warn">לא הוגדרו מחלקות בניהולך. פנה/י למנהל המערכת.</Note></>;
+  }
+  return <MyWork />;
 }

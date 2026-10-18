@@ -6,7 +6,8 @@ import { DAILY_DEPTS, DAYS_IN_MONTH, DOW_FULL, HEB_MONTHS, MONTH, ROLES, STAFF_D
 import { absenceConflicts, constraintCounters, fmtRange } from '@/lib/logic';
 import { Bezel, Cta, Expander, Field, Modal, Note, PageHead } from '../ui';
 
-export function ConstraintCalendar({ cons, onToggle, special }: { cons: Record<number, 'B' | 'R'>; onToggle: (d: number) => void; special: Record<number, string> }) {
+/** rules=false hides the Thursday/weekend counters (תורן חוץ, and the admin editor which saves without enforcing them). */
+export function ConstraintCalendar({ cons, onToggle, special, rules = true }: { cons: Record<number, 'B' | 'R'>; onToggle: (d: number) => void; special: Record<number, string>; rules?: boolean }) {
   const c = constraintCounters(cons);
   const ring = (val: number, max: number, ok: boolean) => {
     const r = 22, C = 2 * Math.PI * r, p = Math.min(val / max, 1);
@@ -32,9 +33,11 @@ export function ConstraintCalendar({ cons, onToggle, special }: { cons: Record<n
       <div className="cardlist">
         <div className="ring">{ring(c.blocks, 10, true)}<div><div className="t">חסימות</div><div className="v">{c.blocks}</div></div></div>
         <div className="ring">{ring(c.wishes, 2, c.okWish)}<div><div className="t">בקשות</div><div className="v">{c.wishes}<small> מתוך 2</small></div></div></div>
-        <div className="ring">{ring(c.thu, 2, c.okThu)}<div><div className="t">ימי חמישי פנויים</div><div className="v">{c.thu}<small> מינימום 2</small></div></div></div>
-        <div className="ring">{ring(c.wknd, 4, c.okWknd)}<div><div className="t">ימי סופ&quot;ש פנויים</div><div className="v">{c.wknd}<small> מינימום 4</small></div></div></div>
-        <p className="muted small">רגיל, חסימה, בקשה: כל לחיצה מחליפה מצב. מנהל/ת יכול/ה לשמור גם אם הכללים לא מתקיימים.</p>
+        {rules && <>
+          <div className="ring">{ring(c.thu, 2, c.okThu)}<div><div className="t">ימי חמישי פנויים</div><div className="v">{c.thu}<small> מינימום 2</small></div></div></div>
+          <div className="ring">{ring(c.wknd, 4, c.okWknd)}<div><div className="t">ימי סופ&quot;ש פנויים</div><div className="v">{c.wknd}<small> מינימום 4</small></div></div></div>
+        </>}
+        <p className="muted small">פנוי, חסימה, בקשה: כל לחיצה מחליפה מצב.</p>
       </div>
     </div>
   );

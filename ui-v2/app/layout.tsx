@@ -6,7 +6,7 @@ const heebo = Heebo({ subsets: ['hebrew', 'latin'], weight: ['300', '400', '500'
 
 export const metadata: Metadata = {
   title: 'מערכת סידור עבודה · המערך הגריאטרי',
-  description: 'Mockup (fictional data) of the new Geri-shifts UI, superadmin view.',
+  description: 'Mockup (fictional data) of the new Geri-shifts UI, all six roles.',
 };
 export const viewport: Viewport = { width: 'device-width', initialScale: 1, themeColor: '#E9ECEF' };
 

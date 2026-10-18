@@ -8,6 +8,10 @@ export function Bezel({ children, tight, className = '', id }: { children: React
   return <section className={`shell ${className}`} id={id}><div className={`core ${tight ? 'tight' : ''}`}>{children}</div></section>;
 }
 
+export function Kpi({ k, v, small, icon }: { k: string; v: string | number; small?: string; icon?: ReactNode }) {
+  return <Bezel tight><div className="kpi"><div className="k">{icon}{k}</div><div className="v">{v}{small && <small> {small}</small>}</div></div></Bezel>;
+}
+
 export function Expander({ title, icon, children, open: init = false, badge }: { title: string; icon?: ReactNode; children: ReactNode; open?: boolean; badge?: ReactNode }) {
   const [open, setOpen] = useState(init);
   return (

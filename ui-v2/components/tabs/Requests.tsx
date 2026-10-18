@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Check, EnvelopeSimple, Plus, Table, Trash, Tray, Warning, X } from '@phosphor-icons/react';
-import { useStore } from '@/lib/store';
+import { useMe, useStore } from '@/lib/store';
 import { DAILY_DEPTS, DOW_FULL, dowOf, daysIn, iso, type Absence } from '@/lib/mock';
 import { STATUS, absenceConflicts, deptOf, deriveStatus, fmtRange, type Code } from '@/lib/logic';
 import { Bezel, Cta, Expander, Field, Note, PageHead, Person, PillSeg } from '../ui';
@@ -9,11 +9,12 @@ import { MONTHS12 } from './Work';
 
 const TYPE_BADGE: Record<string, string> = { 'חופש': 'b-info', '202': 'b-warn', 'חופש עתידי': 'b-teal', 'היעדרות אחרת': 'b-mute' };
 
-function Pending({ filter }: { filter: string }) {
+function Pending({ filter, scope }: { filter: string; scope: string[] }) {
   const { db, mutate, toast } = useStore();
-  const list = db.absences.filter((a) => a.status === 'pending' && (filter === 'הכל' || a.dept_at_request === filter));
+  const me = useMe();
+  const list = db.absences.filter((a) => a.status === 'pending' && scope.includes(a.dept_at_request) && (filter === 'הכל' || a.dept_at_request === filter));
   const decide = (a: Absence, ok: boolean) => {
-    mutate((x) => { const r = x.absences.find((q) => q.id === a.id)!; r.status = ok ? 'approved' : 'rejected'; r.approved_by = 'ענבל רז'; });
+    mutate((x) => { const r = x.absences.find((q) => q.id === a.id)!; r.status = ok ? 'approved' : 'rejected'; r.approved_by = me.name; });
     toast(`${ok ? 'אושר' : 'נדחה'}: ${a.employee} ${fmtRange(a.start_date, a.end_date)}. נשלח מייל לעובד/ת.`, ok ? 'ok' : 'info');
   };
   if (list.length === 0) return <p className="muted">אין בקשות ממתינות{filter !== 'הכל' ? ` ב${filter}` : ''}.</p>;
@@ -41,14 +42,14 @@ function Pending({ filter }: { filter: string }) {
   );
 }
 
-function AbsenceGantt({ filter }: { filter: string }) {
+function AbsenceGantt({ filter, scope }: { filter: string; scope: string[] }) {
   const { db } = useStore();
   const [ym, setYm] = useState('2026-11');
   const mo = MONTHS12.find((x) => x.v === ym)!;
   const n = daysIn(mo.y, mo.m);
   const weeks: number[][] = []; let wk: number[] = [];
   for (let d = 1; d <= n; d++) { const w = dowOf(mo.y, mo.m, d); if (w <= 4) wk.push(d); if (w === 4 || d === n) { if (wk.length) weeks.push(wk); wk = []; } }
-  const depts = filter === 'הכל' ? DAILY_DEPTS : [filter];
+  const depts = filter === 'הכל' ? scope : [filter];
   const absent = (c: Code) => c === 'V' || c === 'S' || c === 'A' || c === 'O';
   return (
     <Bezel>
@@ -90,14 +91,17 @@ function AbsenceGantt({ filter }: { filter: string }) {
   );
 }
 
-function AddAbsence() {
+function AddAbsence({ scope, admin }: { scope: string[]; admin: boolean }) {
   const { db, mutate, toast } = useStore();
-  const emps = db.staff.filter((s) => ['מתמחה', 'רופא בכיר', 'מנהל מחלקה'].includes(s.type));
+  const me = useMe();
+  // Dept manager: the staff rotated into his departments, plus himself (SCREENS_PLAN 4.15).
+  const inScope = new Set(db.rotation.filter((r) => scope.includes(r.daily_dept)).map((r) => r.employee));
+  const emps = db.staff.filter((s) => ['מתמחה', 'רופא בכיר', 'מנהל מחלקה'].includes(s.type) && (admin || inScope.has(s.name) || s.name === me.name));
   const [f, setF] = useState({ employee: emps[0].name, start_date: '2026-11-25', end_date: '2026-11-26', type: 'חופש' as Absence['type'], notes: '' });
   const dept = deptOf(db, f.employee)?.daily_dept ?? '';
   const conf = absenceConflicts(db, { ...f, dept_at_request: dept });
   const add = () => {
-    mutate((x) => { x.absences.push({ id: 'n' + Date.now(), ...f, status: 'approved', dept_at_request: dept, approved_by: 'ענבל רז', created_at: '2026-10-06' }); });
+    mutate((x) => { x.absences.push({ id: 'n' + Date.now(), ...f, status: 'approved', dept_at_request: dept, approved_by: me.name, created_at: '2026-10-18' }); });
     toast(`נוספה היעדרות מאושרת: ${f.employee} ${fmtRange(f.start_date, f.end_date)}`);
   };
   return (
@@ -115,9 +119,9 @@ function AddAbsence() {
   );
 }
 
-function DeleteApproved() {
+function DeleteApproved({ scope }: { scope: string[] }) {
   const { db, mutate, toast } = useStore();
-  const appr = db.absences.filter((a) => a.status === 'approved');
+  const appr = db.absences.filter((a) => a.status === 'approved' && scope.includes(a.dept_at_request));
   const [id, setId] = useState(appr[0]?.id ?? '');
   const [sure, setSure] = useState(false);
   return (
@@ -129,9 +133,9 @@ function DeleteApproved() {
   );
 }
 
-function TableView() {
+function TableView({ scope }: { scope: string[] }) {
   const { db } = useStore();
-  const rows = db.absences.filter((a) => a.status === 'approved' && a.end_date >= '2026-10-06').sort((a, b) => a.start_date.localeCompare(b.start_date));
+  const rows = db.absences.filter((a) => a.status === 'approved' && scope.includes(a.dept_at_request) && a.end_date >= '2026-10-18').sort((a, b) => a.start_date.localeCompare(b.start_date));
   return (
     <Expander title="תצוגת טבלה" icon={<Table size={20} />}>
       <div className="tbl-wrap"><table className="t">
@@ -144,23 +148,31 @@ function TableView() {
 
 export default function Requests() {
   const { db } = useStore();
+  const me = useMe();
+  const admin = me.type === 'מנהל על' || me.type === 'מנהל/ת';
+  const scope = admin ? DAILY_DEPTS : DAILY_DEPTS.filter((d) => me.manage_depts.includes(d));
   const [filter, setFilter] = useState('הכל');
-  const n = db.absences.filter((a) => a.status === 'pending').length;
+  // Admins also see requests with no department yet (future vacation before the Gantt is set).
+  const reqScope = admin ? [...scope, ''] : scope;
+  const n = db.absences.filter((a) => a.status === 'pending' && reqScope.includes(a.dept_at_request)).length;
+  if (scope.length === 0) return <><PageHead title="ניהול בקשות" /><Note kind="warn">לא הוגדרו מחלקות בניהולך. פנה/י למנהל המערכת.</Note></>;
   return (
     <>
-      <PageHead eyebrow="היעדרויות מעבודה יומית" title="ניהול בקשות" sub={<span className="row"><EnvelopeSimple size={16} />כל אישור או דחייה שולחים מייל לעובד/ת</span>} />
-      <div className="row" style={{ marginBottom: 18 }}>
-        <span className="muted small">סינון לפי מחלקה</span>
-        <PillSeg value={filter} onChange={setFilter} options={['הכל', ...DAILY_DEPTS].map((d) => ({ v: d, l: d }))} />
-      </div>
+      <PageHead eyebrow={admin ? 'היעדרויות מעבודה יומית' : `המחלקות שלך: ${scope.join(', ')}`} title="ניהול בקשות" sub={<span className="row"><EnvelopeSimple size={16} />כל אישור או דחייה שולחים מייל לעובד/ת</span>} />
+      {scope.length > 1 && (
+        <div className="row" style={{ marginBottom: 18 }}>
+          <span className="muted small">סינון לפי מחלקה</span>
+          <PillSeg value={filter} onChange={setFilter} options={['הכל', ...scope].map((d) => ({ v: d, l: d }))} />
+        </div>
+      )}
       <Bezel>
         <h2 className="sec"><Tray size={22} />בקשות ממתינות <span className="badge b-warn">{n}</span></h2>
-        <Pending filter={filter} />
+        <Pending filter={filter} scope={reqScope} />
       </Bezel>
-      <AbsenceGantt filter={filter} />
-      <AddAbsence />
-      <DeleteApproved />
-      <TableView />
+      <AbsenceGantt filter={filter} scope={scope} />
+      <AddAbsence scope={scope} admin={admin} />
+      <DeleteApproved scope={reqScope} />
+      <TableView scope={reqScope} />
     </>
   );
 }

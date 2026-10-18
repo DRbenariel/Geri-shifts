@@ -1,22 +1,18 @@
 'use client';
-import { useMemo, useState } from 'react';
-import { ArrowsClockwise, Broom, Check, Coffee, FileArrowUp, Lightning, MagicWand, MagnifyingGlass, Prohibit, Question, Star, Trash, Warning, X } from '@phosphor-icons/react';
-import { useStore } from '@/lib/store';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowsClockwise, Broom, Moon, Sun, Check, Coffee, FileArrowUp, Lightning, MagicWand, MagnifyingGlass, Prohibit, Question, Star, Trash, Warning, X } from '@phosphor-icons/react';
+import { useMe, useStore } from '@/lib/store';
+import { handoff } from '@/lib/logic';
 import { DAYS_IN_MONTH, DOW_FULL, EXTERNALS, FRI_SLOTS, HEB_MONTHS, INTERNS, MONTH, NIGHT_DEPTS, YEAR, dowOf, iso, type ShiftRow } from '@/lib/mock';
-import { first, fmtDate, type DB } from '@/lib/logic';
-import { Bezel, Cta, Expander, Field, Modal, Note, PageHead, Person, PillSeg } from '../ui';
+import { NIGHT_POOL, blockedOn, canTake, first, fmtDate, isWeekendDay, wishedOn, type DB } from '@/lib/logic';
+import { Bezel, Cta, Expander, Field, Kpi, Modal, Note, PageHead, Person, PillSeg } from '../ui';
 
 const ALL_SLOTS = [...NIGHT_DEPTS, ...FRI_SLOTS];
-const POOL = [...INTERNS, ...EXTERNALS];
+const POOL = NIGHT_POOL;
 const dayOf = (s: string) => +s.slice(8);
-const isWeekend = (d: number) => [5, 6].includes(dowOf(YEAR, MONTH, d));
-
-const blocked = (db: DB, emp: string, d: number) => db.requests.some((r) => r.employee === emp && r.date === iso(YEAR, MONTH, d) && r.status === 'אילוץ');
-const wished = (db: DB, emp: string, d: number) => db.requests.some((r) => r.employee === emp && r.date === iso(YEAR, MONTH, d) && r.status === 'בקשה');
-const worksNear = (db: DB, emp: string, d: number, ignore?: ShiftRow) =>
-  db.schedule.some((r) => r !== ignore && r.employee === emp && !r.dept.startsWith('שישי') && Math.abs(dayOf(r.date) - d) <= 1);
-const canTake = (db: DB, emp: string, d: number, slot: string, ignore?: ShiftRow) =>
-  !blocked(db, emp, d) && !worksNear(db, emp, d, ignore) && !(EXTERNALS.includes(emp) && slot !== 'שיקום') && !(slot.startsWith('שישי') && EXTERNALS.includes(emp));
+const isWeekend = isWeekendDay;
+const blocked = blockedOn;
+const wished = wishedOn;
 
 function DayCell({ d, db, onPick }: { d: number; db: DB; onPick: (d: number) => void }) {
   const date = iso(YEAR, MONTH, d);
@@ -165,7 +161,7 @@ function SwapRequests() {
   );
 }
 
-export default function Night() {
+function AdminNight() {
   const { db, mutate, toast } = useStore();
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [busy, setBusy] = useState('');
@@ -318,4 +314,90 @@ export default function Night() {
       </Modal>
     </>
   );
+}
+
+const slotLabel = (dept: string) => (dept.startsWith('שישי') ? `שישי בוקר · ${dept.includes('שיקום') ? 'שיקום' : 'פנימית'}` : dept);
+
+/** Intern / external view (SCREENS_PLAN 4.4): only my shifts plus unfilled slots. Who blocked or asked stays admin-only. */
+function PersonalNight() {
+  const { db } = useStore();
+  const me = useMe();
+  const [view, setView] = useState<'grid' | 'list'>('grid');
+  useEffect(() => { if (window.matchMedia('(max-width: 767px)').matches) setView('list'); }, []);
+  const mine = db.schedule.filter((r) => r.employee === me.name).sort((a, b) => a.date.localeCompare(b.date) || a.dept.localeCompare(b.dept));
+  const nights = mine.filter((r) => !r.dept.startsWith('שישי'));
+  const fri = mine.filter((r) => r.dept.startsWith('שישי'));
+  const wkndNights = nights.filter((r) => isWeekend(dayOf(r.date)));
+  const next = mine[0];
+  const openSwap = (r: ShiftRow) => { handoff.swapShift = `${r.date}|${r.dept}`; window.location.hash = '/settings'; };
+  const weeks = useMemo(() => {
+    const out: (number | null)[][] = []; let wk: (number | null)[] = Array(dowOf(YEAR, MONTH, 1)).fill(null);
+    for (let d = 1; d <= DAYS_IN_MONTH; d++) { wk.push(d); if (wk.length === 7) { out.push(wk); wk = []; } }
+    if (wk.length) out.push([...wk, ...Array(7 - wk.length).fill(null)]); return out;
+  }, []);
+  return (
+    <>
+      <PageHead eyebrow={`${HEB_MONTHS[MONTH - 1]} ${YEAR}`} title="סידור תורנויות" sub="המשמרות שלך ומשמרות שעדיין לא אוישו" />
+      {db.schedule.length === 0 ? <Note kind="info">עדיין לא פורסם סידור לחודש זה.</Note> : <>
+        <div className="kpis">
+          <Kpi k="משמרות לילה החודש" v={nights.length} small={`מכסה ${me.monthly_quota}`} />
+          <Kpi k="מתוכן בסופ״ש" v={wkndNights.length} small={`מכסה ${me.weekend_quota}`} />
+          {me.type === 'מתמחה' && <Kpi k="שישי בוקר" v={fri.length} />}
+          <Kpi k="המשמרת הבאה" v={next ? `${DOW_FULL[dowOf(YEAR, MONTH, dayOf(next.date))]} ${fmtDate(next.date)}` : 'אין'} small={next ? slotLabel(next.dept) : ''} />
+        </div>
+        <Bezel>
+          <div className="row" style={{ marginBottom: 16 }}>
+            <h2 className="sec" style={{ margin: 0 }}>{view === 'grid' ? 'לוח החודש' : 'המשמרות הקרובות שלי'}</h2>
+            <span className="grow" />
+            <PillSeg value={view} onChange={setView} options={[{ v: 'list', l: 'הקרובות שלי' }, { v: 'grid', l: 'לוח' }]} />
+          </div>
+          {view === 'list' ? (
+            mine.length === 0 ? <p className="muted">לא שובצת למשמרות החודש.</p> : (
+              <div className="cardlist">
+                {mine.map((r) => (
+                  <div key={r.date + r.dept} className="rcard">
+                    <span className={`slot ${r.dept === 'שיקום' ? 'sh' : r.dept.startsWith('שישי') ? 'fr' : 'pn'}`}>{r.dept.startsWith('שישי') ? <Sun size={13} /> : <Moon size={13} />}</span>
+                    <div className="main"><b>{DOW_FULL[dowOf(YEAR, MONTH, dayOf(r.date))]} {fmtDate(r.date)}</b><div className="meta">{slotLabel(r.dept)}</div></div>
+                    <button className="btn" onClick={() => openSwap(r)}><ArrowsClockwise size={14} />חפש החלפה</button>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+            <>
+              <div className="row small muted" style={{ marginBottom: 12 }}>
+                <span className="slot sh">שיקום</span><span className="slot pn">פנימית</span><span className="slot fr">שישי בוקר</span><span className="slot empty">לא מאויש</span>
+                <span>לחיצה על משמרת שלך פותחת חיפוש החלפה</span>
+              </div>
+              <div className="cal">
+                {DOW_FULL.map((h, i) => <div key={h} className={`h ${i >= 5 ? 'we' : ''}`}>{h}</div>)}
+                {weeks.flat().map((d, i) => {
+                  if (!d) return <div key={i} className="day blank" />;
+                  const date = iso(YEAR, MONTH, d);
+                  const sp = db.specialDays.find((x) => x.date === date);
+                  const rows = db.schedule.filter((r) => r.date === date && (r.employee === me.name || r.employee === '---'));
+                  return (
+                    <div key={i} className={`day ${isWeekend(d) ? 'we' : ''}`}>
+                      <span className="num">{d}</span>
+                      {sp && <span className="sp" title={sp.day_type}>{sp.description}</span>}
+                      {rows.map((r) => r.employee === '---'
+                        ? <span key={r.dept} className="slot empty" title={`${r.dept}: לא מאויש`}><Question size={11} />{r.dept.startsWith('שישי') ? 'שישי' : r.dept === 'שיקום' ? 'ש' : 'פ'} חסר</span>
+                        : <button key={r.dept} className={`slot mine ${r.dept === 'שיקום' ? 'sh' : r.dept.startsWith('שישי') ? 'fr' : 'pn'}`} onClick={() => openSwap(r)} title={`${slotLabel(r.dept)}: חפש החלפה`}>
+                            {r.dept.startsWith('שישי') ? <Sun size={11} /> : <Moon size={11} />}{r.dept.startsWith('שישי') ? 'שישי' : r.dept === 'שיקום' ? 'שיקום' : 'פנימית'}
+                          </button>)}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </Bezel>
+      </>}
+    </>
+  );
+}
+
+export default function Night() {
+  const me = useMe();
+  return me.type === 'מנהל על' ? <AdminNight /> : <PersonalNight />;
 }

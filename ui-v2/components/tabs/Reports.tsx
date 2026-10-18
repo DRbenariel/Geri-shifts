@@ -3,11 +3,8 @@ import { useMemo, useState } from 'react';
 import { ArrowsClockwise, ChartLineUp, Info, Robot, Table, Warning, WarningOctagon } from '@phosphor-icons/react';
 import { useStore } from '@/lib/store';
 import { HEB_MONTHS, MONTH, YEAR, analytics, dailyReport, dowOf } from '@/lib/mock';
-import { Bezel, Expander, PageHead, PillSeg, useTip } from '../ui';
+import { Bezel, Expander, Kpi, PageHead, PillSeg, useTip } from '../ui';
 
-function Kpi({ k, v, small, icon }: { k: string; v: string | number; small?: string; icon?: React.ReactNode }) {
-  return <Bezel tight><div className="kpi"><div className="k">{icon}{k}</div><div className="v">{v}{small && <small> {small}</small>}</div></div></Bezel>;
-}
 
 /** Horizontal stacked bars, 2 series (validated palette: #0D9488 / #D97706). */
 function ShiftBars({ data }: { data: { name: string; reg: number; fri: number }[] }) {

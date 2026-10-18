@@ -276,3 +276,30 @@ table.t select.input { min-width: 118px; }
 .shell, .core { min-width: 0; max-width: 100%; }
 .input { min-width: 0; max-width: 100%; }
 main.page > * { max-width: 100%; }
+
+/* ---- Per-role shell (lib/roles.ts) */
+.statusbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; font-size: 13px; color: var(--muted); }
+.statusbar .who b { color: var(--ink); }
+.statusbar .pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 4px 12px; background: rgba(14,26,31,.05); }
+.statusbar .pill b { color: var(--ink); }
+.statusbar .pill.ok { background: var(--W); color: var(--Wt); } .statusbar .pill.lock { background: var(--B); color: var(--Bt); }
+.statusbar .pill.ok b, .statusbar .pill.lock b { color: inherit; }
+.statusbar .out-m { padding: 4px 10px; font-size: 12px; }
+.demo-users { margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--line); }
+.demo-users .chips { margin-top: 8px; }
+.demo-users .chip { border: 0; cursor: pointer; padding: 6px 12px; font-size: 13px; }
+.demo-users .chip b { font-weight: 700; color: var(--accent); }
+.demo-users .chip:hover { background: var(--accent-soft); }
+button.slot { border: 0; cursor: pointer; font-family: inherit; }
+.changes { margin: 14px 0; padding: 12px 14px; border-radius: 16px; background: rgba(14,26,31,.04); font-size: 14px; line-height: 1.7; }
+
+/* ---- Absence calendar (הגשת בקשות ☀️): fixed days vs. clickable picks */
+.abs-cal .day { min-height: 70px; }
+.abs-cal .day.fixed { cursor: default; opacity: .85; }
+.abs-cal .day.fixed.blank-we { background: transparent; box-shadow: inset 0 0 0 1px var(--line); opacity: .6; }
+.abs-cal .day.pick:disabled { cursor: not-allowed; opacity: .6; }
+.abs-cal .day .st { font-size: 12px; }
+@media (max-width: 767px) { .abs-cal .day { min-height: 54px; } .abs-cal .day .st { display: block; font-size: 9px; } }
+.abs-cal .day.V { background: var(--V); color: var(--Vt); } .abs-cal .day.S { background: var(--S); color: var(--St); }
+.abs-cal .day.T { background: var(--T); color: var(--Tt); } .abs-cal .day.A { background: var(--A); color: var(--At); }
+.abs-cal .day.V .num, .abs-cal .day.S .num, .abs-cal .day.T .num, .abs-cal .day.A .num { color: inherit; }

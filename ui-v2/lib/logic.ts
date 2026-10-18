@@ -1,5 +1,5 @@
 import {
-  Absence, DOW_LETTER, FRI_SLOTS, Konenut, MONTH, RequestRow, Role, Rotation, ShiftRow, SpecialDay, Staff, SwapReq, WsdRow, YEAR,
+  Absence, DOW_LETTER, EXTERNALS, FRI_SLOTS, INTERNS, Konenut, MONTH, RequestRow, Role, Rotation, ShiftRow, SpecialDay, Staff, SwapReq, WsdRow, YEAR,
   absences, dowOf, iso, konenut, requests, rotation, schedule, settings, specialDays, staff, swapRequests, wsdManual,
 } from './mock';
 
@@ -83,3 +83,17 @@ export function constraintCounters(cons: Record<number, 'B' | 'R'>, y = YEAR, m 
   }
   return { blocks, wishes, thu, wknd, okWish: wishes <= 2, okThu: thu >= 2, okWknd: wknd >= 4 };
 }
+
+// ---- Night-shift rules shared by the admin board, personal view and swap search (check_assignment_validity, appy.py:3460).
+export const NIGHT_POOL = [...INTERNS, ...EXTERNALS];
+const dayNum = (s: string) => +s.slice(8);
+export const blockedOn = (db: DB, emp: string, d: number) => db.requests.some((r) => r.employee === emp && r.date === iso(YEAR, MONTH, d) && r.status === 'אילוץ');
+export const wishedOn = (db: DB, emp: string, d: number) => db.requests.some((r) => r.employee === emp && r.date === iso(YEAR, MONTH, d) && r.status === 'בקשה');
+export const worksNear = (db: DB, emp: string, d: number, ignore?: ShiftRow) =>
+  db.schedule.some((r) => r !== ignore && r.employee === emp && !r.dept.startsWith('שישי') && Math.abs(dayNum(r.date) - d) <= 1);
+export const canTake = (db: DB, emp: string, d: number, slot: string, ignore?: ShiftRow) =>
+  !blockedOn(db, emp, d) && !worksNear(db, emp, d, ignore) && !(EXTERNALS.includes(emp) && slot !== 'שיקום') && !(slot.startsWith('שישי') && EXTERNALS.includes(emp));
+export const isWeekendDay = (d: number) => [5, 6].includes(dowOf(YEAR, MONTH, d));
+
+/** Cross-screen hand-off: the personal night calendar opens the swap search with a shift already chosen. */
+export const handoff = { swapShift: '' };
