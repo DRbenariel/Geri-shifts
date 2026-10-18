@@ -22,18 +22,31 @@ function DayCell({ d, db, onPick }: { d: number; db: DB; onPick: (d: number) => 
   const date = iso(YEAR, MONTH, d);
   const rows = db.schedule.filter((r) => r.date === date);
   const sp = db.specialDays.find((s) => s.date === date);
-  const nB = db.requests.filter((r) => r.date === date && r.status === 'אילוץ').length;
-  const nR = db.requests.filter((r) => r.date === date && r.status === 'בקשה').length;
+  const blockers = db.requests.filter((r) => r.date === date && r.status === 'אילוץ').map((r) => r.employee);
+  const wishers = db.requests.filter((r) => r.date === date && r.status === 'בקשה').map((r) => r.employee);
+  const nB = blockers.length, nR = wishers.length;
   const order = (r: ShiftRow) => ALL_SLOTS.indexOf(r.dept);
   return (
     <button className={`day ${isWeekend(d) ? 'we' : ''}`} onClick={() => onPick(d)} aria-label={`${d}/${MONTH}`}>
-      <span className="num">{d}<span className="mark hide-m" title={`${nB} חסימות, ${nR} בקשות`}>{nB > 0 && <><Prohibit size={11} />{nB}</>} {nR > 0 && <><Star size={11} weight="fill" />{nR}</>}</span></span>
+      <span className="num">{d}</span>
       {sp && <span className="sp" title={sp.day_type}>{sp.description}</span>}
       {[...rows].sort((a, b) => order(a) - order(b)).map((r) => (
         r.employee === '---'
           ? <span key={r.dept} className="slot empty" title={`${r.dept}: ${r.empty_reason ?? ''}`}><Question size={11} />{r.dept.startsWith('שישי') ? 'שישי' : r.dept === 'שיקום' ? 'ש' : 'פ'} חסר</span>
           : <span key={r.dept} className={`slot ${r.dept === 'שיקום' ? 'sh' : r.dept.startsWith('שישי') ? 'fr' : 'pn'}`} title={`${r.dept}: ${r.employee}${r.is_manual ? ' (ידני)' : ''}`}>{first(r.employee)}</span>
       ))}
+      {(nB > 0 || nR > 0) && (
+        <span className="who hide-m">
+          {blockers.map((e) => <span key={'b' + e} className="b" title={`${e} חסמ/ה את היום`}><Prohibit size={10} weight="bold" />{e}</span>)}
+          {wishers.map((e) => <span key={'r' + e} className="r" title={`${e} ביקש/ה את היום`}><Star size={10} weight="fill" />{e}</span>)}
+        </span>
+      )}
+      {(nB > 0 || nR > 0) && (
+        <span className="who-m mob-only" title={`${nB} חסימות, ${nR} בקשות`}>
+          {nB > 0 && <span className="b"><Prohibit size={9} weight="bold" />{nB}</span>}
+          {nR > 0 && <span className="r"><Star size={9} weight="fill" />{nR}</span>}
+        </span>
+      )}
     </button>
   );
 }

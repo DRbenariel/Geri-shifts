@@ -160,6 +160,13 @@ button.day:hover { background: #EDF0F3; transform: translateY(-2px); }
 .slot.mine { outline: 2px solid var(--ink); }
 .av-row { display: flex; gap: 6px; font-size: 11px; color: var(--muted); }
 .mark { font-size: 11px; display: inline-flex; gap: 2px; align-items: center; }
+/* Night calendar: who blocked (אילוץ) / asked for (בקשה) the day, under the slots, as in the Streamlit grid. */
+.day .who { margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--line); display: flex; flex-direction: column; gap: 1px; font-size: 11px; line-height: 1.35; }
+.day .who > span { display: flex; gap: 3px; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.day .who .b { color: var(--Bt); } .day .who .r { color: var(--Wt); }
+.day .who svg { flex: none; }
+.day .who-m { margin-top: auto; font-size: 10px; line-height: 1; } .day .who-m > span { display: inline-flex; align-items: center; gap: 1px; margin-inline-end: 4px; }
+.day .who-m .b { color: var(--Bt); } .day .who-m .r { color: var(--Wt); }
 
 /* gantt */
 .gantt { display: grid; grid-template-columns: 180px repeat(5, minmax(0,1fr)); gap: 4px; align-items: center; }
