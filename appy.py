@@ -30,6 +30,22 @@ PNIM_ICONS  = {"ורוד": "🌸", "כחול": "🔵"}
 
 import ui_components # Modular UI components
 
+
+def _year_for_month(month, today=None):
+    """Year of a 1-12 month picked relative to today (same rule as daily_report.year_for_month).
+
+    Settings store only the month number, so the year is inferred from a window
+    of 5 months back to 6 months ahead: in Dec 2026 month 1 is Jan 2027, in
+    Jan 2027 month 12 is Dec 2026.
+    """
+    today = today or date.today()
+    m = int(month)
+    if m < today.month - 5:
+        return today.year + 1
+    if m > today.month + 6:
+        return today.year - 1
+    return today.year
+
 # --- 1. עיצוב ו-CSS ---
 st.set_page_config(page_title="מערכת סידור עבודה", layout="wide")
 ui_components.setup_style()
@@ -387,7 +403,7 @@ def _generate_work_schedule(year_month, view_month):
     Returns: {'written': N, 'kept_manual': K, 'employees': E, 'absences_applied': A, 'post_shifts': P, 'error': err}
     """
     try:
-        year = 2026
+        year = int(str(year_month)[:4])
         # Always reload absence_requests, work_schedule_daily, AND dept_rotation fresh from Sheets
         # so data edited directly in Google Sheets is picked up immediately.
         _ar_fresh = get_db_data("absence_requests")
@@ -583,15 +599,16 @@ def _generate_work_schedule(year_month, view_month):
     except Exception as e:
         return {'error': f"שגיאה ביצירת הסידור: {e}"}
 
-def _export_schedule_wide(view_month):
+def _export_schedule_wide(view_month, year=None):
     """
     Export the schedule sheet (night shifts) to 'Schedule_Export' in wide format.
     One row per date, columns: תאריך, יום, פנימית גריאטרית, שיקום, שישי בוקר *4.
     Returns (ok, error_msg).
     """
     try:
-        days_in_month = calendar.monthrange(2026, view_month)[1]
-        dates_list = [date(2026, view_month, d) for d in range(1, days_in_month + 1)]
+        year = year or _year_for_month(view_month)
+        days_in_month = calendar.monthrange(year, view_month)[1]
+        dates_list = [date(year, view_month, d) for d in range(1, days_in_month + 1)]
         export_rows = []
         schedule_data = st.session_state.schedule
 
@@ -644,12 +661,12 @@ def _export_dept_grid(dept_name, year_month, view_month, year=None):
     Saturday: only תורן (workers + absences hidden).
     """
     try:
-        # Feature 4: derive year from caller (or year_month prefix), defaulting to 2026.
+        # Feature 4: derive year from caller (or year_month prefix), falling back to the month's inferred year.
         if year is None:
             try:
                 year = int(str(year_month).split('-')[0])
             except Exception:
-                year = 2026
+                year = _year_for_month(view_month)
         num_days = calendar.monthrange(year, view_month)[1]
         days = list(range(1, num_days + 1))
         WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
@@ -770,7 +787,7 @@ def _export_dept_grid_excel(dept_name, year_month, view_month):
     try:
         import openpyxl
         from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-        year = 2026
+        year = int(str(year_month)[:4])
         num_days = calendar.monthrange(year, view_month)[1]
         days = list(range(1, num_days + 1))
         WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
@@ -843,7 +860,7 @@ def _export_dept_grid_excel(dept_name, year_month, view_month):
     except Exception:
         return None, None
 
-def _export_personal_schedule_excel(user_name, view_month, daily_dept=None):
+def _export_personal_schedule_excel(user_name, view_month, daily_dept=None, year=None):
     """
     Build an Excel file with the personal day schedule for one employee.
     Returns (bytes, filename) or (None, None).
@@ -851,7 +868,7 @@ def _export_personal_schedule_excel(user_name, view_month, daily_dept=None):
     try:
         import openpyxl
         from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-        year = 2026
+        year = year or _year_for_month(view_month)
         num_days = calendar.monthrange(year, view_month)[1]
         WD_FULL = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
 
@@ -985,12 +1002,12 @@ def _build_batched_day_data(dept_name, year_month, view_month, year=None):
       - absent      : employees with ABSENT status
       - day-specific transfers (Feature 3): folded into that day's workers only
     """
-    # Feature 4: derive year from caller (or year_month prefix), defaulting to 2026.
+    # Feature 4: derive year from caller (or year_month prefix), falling back to the month's inferred year.
     if year is None:
         try:
             year = int(str(year_month).split('-')[0])
         except Exception:
-            year = 2026
+            year = _year_for_month(view_month)
     num_days = calendar.monthrange(year, view_month)[1]
     days = list(range(1, num_days + 1))
     is_pnim = (dept_name == PNIM_DEPT)
@@ -1103,12 +1120,12 @@ def _write_batched_sheet(ws, dept_name, year_month, view_month,
     import openpyxl
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
-    # Feature 4: derive year from caller (or year_month prefix), defaulting to 2026.
+    # Feature 4: derive year from caller (or year_month prefix), falling back to the month's inferred year.
     if year is None:
         try:
             year = int(str(year_month).split('-')[0])
         except Exception:
-            year = 2026
+            year = _year_for_month(view_month)
     num_days = calendar.monthrange(year, view_month)[1]
     days = list(range(1, num_days + 1))
     WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
@@ -2098,12 +2115,12 @@ def _render_dept_grid(dept_name, year_month, view_month, key_ns,
                 f"padding:4px 8px;background:white;border-radius:6px;"
                 f"border:1px solid #e2e8f0;text-align:right'>{emp}</div>")
 
-    # Feature 4: derive year from caller (or year_month prefix), defaulting to 2026.
+    # Feature 4: derive year from caller (or year_month prefix), falling back to the month's inferred year.
     if year is None:
         try:
             year = int(str(year_month).split('-')[0])
         except Exception:
-            year = 2026
+            year = _year_for_month(view_month)
     num_days = calendar.monthrange(year, view_month)[1]
     seg1 = list(range(1, 11))
     seg2 = list(range(11, 21))
@@ -3540,7 +3557,7 @@ def check_assignment_validity(schedule_data, person_name, check_date, target_dep
 
     return True, "Valid"
 
-def find_swap_candidates(schedule_df, requests_df, staff_df, user_name, swap_date, swap_dept, sel_month, year=2026):
+def find_swap_candidates(schedule_df, requests_df, staff_df, user_name, swap_date, swap_dept, sel_month, year=None):
     """
     For an employee wanting to swap their shift on (swap_date, swap_dept), find:
     - 'full': candidates who can cover the user's shift AND have a shift the user can take in return
@@ -3789,7 +3806,7 @@ elif 'wsd_index' not in st.session_state:
 
 # כלי שיבוץ ידני
 if 'manual_date' not in st.session_state:
-    st.session_state.manual_date = date(2026, 1, 1)
+    st.session_state.manual_date = date.today()
 if 'manual_dept' not in st.session_state:
     st.session_state.manual_dept = "שיקום"
 if 'manual_emp' not in st.session_state:
@@ -4946,7 +4963,6 @@ def run_smart_scheduling_cp(year, month, only_weekends=False):
 # --- כוננויות ---
 def _render_konenut_tab(active_month_int):
     import calendar as _cal
-    year = 2026
     _FREE_TEXT_OPT = "✏️ הקלד שם..."
 
     if st.button("🔄 רענן רשימת רופאים", key="konenut_refresh_staff"):
@@ -4957,8 +4973,9 @@ def _render_konenut_tab(active_month_int):
     sel_month = st.selectbox(
         "חודש:", range(1, 13), index=active_month_int - 1,
         key="konenut_month_sel",
-        format_func=lambda m: f"{m:02d}/{year}"
+        format_func=lambda m: f"{m:02d}/{_year_for_month(m)}"
     )
+    year = _year_for_month(sel_month)
     year_month = f"{year}-{sel_month:02d}"
 
     # Include ALL doctor types (רופא בכיר + מנהל מחלקה) — exclude interns and external
@@ -5481,8 +5498,8 @@ def draw_calendar_view(year, month, role, user_name=None):
             default_d = date(year, month, 1)
             max_d = date(year, month, calendar.monthrange(year, month)[1])
         except:
-             default_d = date(2026, 1, 1)
-             max_d = date(2026, 12, 31)
+             default_d = date(date.today().year, 1, 1)
+             max_d = date(date.today().year + 1, 12, 31)
 
         target_date_swap = c1.date_input("תאריך לבדיקה", value=default_d, min_value=default_d, max_value=max_d)
         target_dept_swap = c2.selectbox("מחלקה/משמרת", ["שיקום", "פנימית גריאטרית", "שישי בוקר - שיקום (1)", "שישי בוקר - שיקום (2)", "שישי בוקר - פנימית (1)", "שישי בוקר - פנימית (2)"])
@@ -6126,6 +6143,8 @@ try:
     active_month_int = int(active_month_setting)
 except:
     active_month_int = date.today().month
+# Settings hold only the month number; the year follows from today (Dec → Jan is next year).
+active_year = _year_for_month(active_month_int)
 
 # ── Daily-schedule settings (Phase 2+) ──
 def _parse_manage_depts(raw):
@@ -6271,6 +6290,7 @@ try:
     daily_active_month_int = int(_get_setting('daily_active_month', active_month_int))
 except Exception:
     daily_active_month_int = active_month_int
+daily_active_year = _year_for_month(daily_active_month_int)
 
 daily_requests_open = str(_get_setting('daily_requests_open', 'True')).strip().lower() == 'true'
 
@@ -6295,6 +6315,7 @@ if selected_nav != _prev_tab:
 # Month Selection Logic - MOVED TO SCHEDULE TAB ONLY (as requested)
 # sel_month defaults to active month, but admins can override it LOCALLY in the schedule tab
 sel_month = active_month_int 
+sel_year = active_year
 
 # Admin Global control (Hidden here, moved logic down)
 # We keep the "active_month_setter" logic but it needs to be where the selector is.
@@ -6532,6 +6553,7 @@ elif role in ("מנהל/ת", "מנהל על"):
             c_m1, c_m2 = st.columns(2)
             # Use a specialized key to avoid conflicts if previously used
             sel_month = c_m1.selectbox("חודש לצפייה/עריכה", range(1, 13), index=active_month_int - 1, key="sched_month_select")
+            sel_year = _year_for_month(sel_month)
             
             # Admin Global Control
             new_active_month = c_m2.selectbox(
@@ -6553,7 +6575,7 @@ elif role in ("מנהל/ת", "מנהל על"):
         with col_exp:
             if st.button("📤 עדכן את הגיליון Schedule_Export",
                          key="export_schedule_top", use_container_width=True):
-                ok, err = _export_schedule_wide(sel_month)
+                ok, err = _export_schedule_wide(sel_month, sel_year)
                 if ok:
                     st.success("✅ הנתונים יוצאו לגיליון 'Schedule_Export'!")
                 else:
@@ -6565,7 +6587,7 @@ elif role in ("מנהל/ת", "מנהל על"):
             
             # עדכון ערך ברירת מחדל לתאריך רק אם החודש השתנה בסרגל הצד
             # זה מאפשר לשמור על בחירת המשתמש בתוך אותו חודש
-            default_date = date(2026, sel_month, 1)
+            default_date = date(sel_year, sel_month, 1)
             if 'manual_date' in st.session_state:
                 if st.session_state.manual_date.month != sel_month:
                      st.session_state.manual_date = default_date
@@ -6617,12 +6639,12 @@ elif role in ("מנהל/ת", "מנהל על"):
                 st.rerun()
         # ---------------------------
         c1, c2, c3 = st.columns(3)
-        if c1.button("🪄 שיבוץ אוטומטי מלא"): run_smart_scheduling_cp(2026, sel_month, only_weekends=False); st.rerun()
-        if c2.button("☕ שיבוץ סופ\"שים בלבד"): run_smart_scheduling_cp(2026, sel_month, only_weekends=True); st.rerun()
+        if c1.button("🪄 שיבוץ אוטומטי מלא"): run_smart_scheduling_cp(sel_year, sel_month, only_weekends=False); st.rerun()
+        if c2.button("☕ שיבוץ סופ\"שים בלבד"): run_smart_scheduling_cp(sel_year, sel_month, only_weekends=True); st.rerun()
         with c3:
             with st.expander("🗑️ ניקוי"):
                 if st.button("🧹 נקה אוטומטי (חודש זה)", help="מוחק שיבוצים אוטומטיים בחודש הנוכחי בלבד"):
-                    current_prefix = f"2026-{sel_month:02d}"
+                    current_prefix = f"{sel_year}-{sel_month:02d}"
                     
                     # Ensure is_manual column exists
                     if 'is_manual' not in st.session_state.schedule.columns:
@@ -6640,18 +6662,18 @@ elif role in ("מנהל/ת", "מנהל על"):
                     st.session_state.schedule = st.session_state.schedule[~mask_to_delete]
                     
                     save_to_db("schedule", st.session_state.schedule)
-                    st.success(f"שיבוצים אוטומטיים לחודש {sel_month}/2026 נמחקו (חודשים אחרים וידניים נשמרו).")
+                    st.success(f"שיבוצים אוטומטיים לחודש {sel_month}/{sel_year} נמחקו (חודשים אחרים וידניים נשמרו).")
                     st.rerun()
                 
                 if st.button("💥 נקה הכל (חודש זה)", help="מוחק את כל הלוח לחודש זה"): 
-                    current_prefix = f"2026-{sel_month:02d}"
+                    current_prefix = f"{sel_year}-{sel_month:02d}"
                     
                     # Logic: Delete if Date matches prefix
                     mask_to_delete = st.session_state.schedule['date'].astype(str).str.startswith(current_prefix)
                     
                     st.session_state.schedule = st.session_state.schedule[~mask_to_delete]
                     save_to_db("schedule", st.session_state.schedule)
-                    st.success(f"כל השיבוצים לחודש {sel_month}/2026 נמחקו.")
+                    st.success(f"כל השיבוצים לחודש {sel_month}/{sel_year} נמחקו.")
                     st.rerun()
         
         # --- התראה על משמרות שלא שובצו ---
@@ -6751,7 +6773,7 @@ elif role in ("מנהל/ת", "מנהל על"):
                              st.caption("כדי לראות כפתורי החלפה, יש להריץ 'שיבוץ אוטומטי' מחדש.")
         # ---------------------------------
 
-        draw_calendar_view(2026, sel_month, "מנהל/ת")
+        draw_calendar_view(sel_year, sel_month, "מנהל/ת")
 
         # --- Swap Requests Panel ---
         if st.session_state.pop('show_swap_approved', False):
@@ -7102,7 +7124,7 @@ elif role in ("מנהל/ת", "מנהל על"):
             st.write(f"עריכת אילוצים עבור: **{selected_emp_mgr}**")
             
             # --- טעינת נתונים קיימים ---
-            current_month_prefix = f"2026-{sel_month:02d}"
+            current_month_prefix = f"{sel_year}-{sel_month:02d}"
             
             # נרמול עמודת התאריך למחרוזת
             requests_df = st.session_state.requests.copy()
@@ -7130,14 +7152,14 @@ elif role in ("מנהל/ת", "מנהל על"):
 
             st.divider()
             new_const_day_nums, new_wish_day_nums = render_modern_calendar(
-                2026, sel_month,
+                sel_year, sel_month,
                 mgr_const_days, mgr_wish_days,
                 special_days_df=mgr_cal_sd,
                 key_prefix=mgr_key_prefix,
                 show_validation=False
             )
-            new_constraints = [f"2026-{sel_month:02d}-{d:02d}" for d in new_const_day_nums]
-            new_wishes       = [f"2026-{sel_month:02d}-{d:02d}" for d in new_wish_day_nums]
+            new_constraints = [f"{sel_year}-{sel_month:02d}-{d:02d}" for d in new_const_day_nums]
+            new_wishes       = [f"{sel_year}-{sel_month:02d}-{d:02d}" for d in new_wish_day_nums]
             
             st.divider()
             
@@ -7247,7 +7269,7 @@ elif role in ("מנהל/ת", "מנהל על"):
         st.markdown("### 📊 לוח בקרה - סיכום חודשי")
         
         # --- 1. חישוב נתונים למדדים ---
-        current_month_prefix = f"2026-{sel_month:02d}"
+        current_month_prefix = f"{sel_year}-{sel_month:02d}"
         relevant_staff = st.session_state.staff[st.session_state.staff['type'].isin(['מתמחה', 'תורן חוץ'])]
         n_total = len(relevant_staff)
         submitted_count = 0
@@ -7458,14 +7480,14 @@ elif role in ("מנהל/ת", "מנהל על"):
                         _requests = st.session_state.requests.copy()
                         _month    = sel_month
 
-                        _problems = _dr.analyze_month(2026, _month, _staff, _requests)
+                        _problems = _dr.analyze_month(sel_year, _month, _staff, _requests)
                         if not _problems:
                             _problems = [{'severity': 'תקין', 'problem_type': 'ללא בעיות',
-                                          'description': f'לא נמצאו בעיות צפויות לחודש {_month}/2026', 'day': 0}]
+                                          'description': f'לא נמצאו בעיות צפויות לחודש {_month}/{sel_year}', 'day': 0}]
 
                         # Save to Google Sheets via gspread
                         _now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
-                        _month_str = f"2026-{_month:02d}"
+                        _month_str = f"{sel_year}-{_month:02d}"
                         _gc = get_gspread_client()
                         _sh = _gc.open_by_url(st.secrets["connections"]["gsheets"]["spreadsheet"])
                         _header = [['generated_at', 'month', 'severity', 'problem_type', 'description']]
@@ -7577,8 +7599,8 @@ elif role in ("מנהל/ת", "מנהל על"):
                 st.markdown("#### C. שיעור חסימה לעובד (חודש פעיל)")
                 _reqs_df = get_db_data("requests")
                 if not _reqs_df.empty:
-                    _month_prefix_a = f"2026-{sel_month:02d}"
-                    _days_in_month = calendar.monthrange(2026, sel_month)[1]
+                    _month_prefix_a = f"{sel_year}-{sel_month:02d}"
+                    _days_in_month = calendar.monthrange(sel_year, sel_month)[1]
                     _blocks = _reqs_df[
                         (_reqs_df['status'] == 'אילוץ') &
                         (_reqs_df['date'].astype(str).str.startswith(_month_prefix_a))
@@ -8155,13 +8177,13 @@ elif role in ("מנהל/ת", "מנהל על"):
         with nb_adm_col1:
             adm_nb_start = st.date_input("מתאריך:", key="nb_adm_start",
                                          value=date.today(),
-                                         min_value=date(2026, 1, 1),
-                                         max_value=date(2026, 12, 31))
+                                         min_value=date(date.today().year - 1, 1, 1),
+                                         max_value=date(date.today().year + 1, 12, 31))
         with nb_adm_col2:
             adm_nb_end = st.date_input("עד תאריך:", key="nb_adm_end",
                                        value=date.today(),
-                                       min_value=date(2026, 1, 1),
-                                       max_value=date(2026, 12, 31))
+                                       min_value=date(date.today().year - 1, 1, 1),
+                                       max_value=date(date.today().year + 1, 12, 31))
         adm_nb_type = st.selectbox("סוג היעדרות:", ["חופש", "202", "היעדרות אחרת"], key="nb_adm_type")
         adm_nb_note = st.text_input("הערה (אופציונלי):", key="nb_adm_note")
 
@@ -8237,7 +8259,7 @@ else:
             for _, row in st.session_state.special_days.iterrows():
                 try:
                     d_obj = datetime.strptime(row['date'], '%Y-%m-%d').date()
-                    if d_obj.month == sel_month and d_obj.year == 2026:
+                    if d_obj.month == sel_month and d_obj.year == sel_year:
                         special_days_month.append(f"{d_obj.strftime('%d/%m/%Y')} - {row['description']}")
                 except: pass
             
@@ -8245,7 +8267,7 @@ else:
                 st.warning("⚠️ **שים לב לימים מיוחדים בחודש זה:**\n\n" + "\n".join([f"- {sd}" for sd in special_days_month]))
         
         # --- Pre-initialize Chip States for the entire month ---
-        cal = calendar.monthcalendar(2026, sel_month)
+        cal = calendar.monthcalendar(sel_year, sel_month)
         
         # Function to safely parse day from various date formats
         def get_day_nums(df, status_type):
@@ -8262,7 +8284,7 @@ else:
             # sel_month is integer (e.g., 2)
             valid_dates = user_rehab[
                 (user_rehab['date_dt'].dt.month == sel_month) & 
-                (user_rehab['date_dt'].dt.year == 2026)
+                (user_rehab['date_dt'].dt.year == sel_year)
             ]
             
             return valid_dates['date_dt'].dt.day.tolist()
@@ -8270,8 +8292,8 @@ else:
         default_day_nums = get_day_nums(st.session_state.requests, "אילוץ")
         default_wish_nums = get_day_nums(st.session_state.requests, "בקשה")
         
-        default_dates  = [date(2026, sel_month, d) for d in default_day_nums]
-        default_wishes = [date(2026, sel_month, d) for d in default_wish_nums]
+        default_dates  = [date(sel_year, sel_month, d) for d in default_day_nums]
+        default_wishes = [date(sel_year, sel_month, d) for d in default_wish_nums]
 
         # --- הצגת אילוצים ובקשות קיימים ---
         existing_constraints = st.session_state.requests[(st.session_state.requests['employee'] == user_name) & (st.session_state.requests['status'] == "אילוץ")].copy()
@@ -8280,11 +8302,11 @@ else:
         # סינון להצגה רק של החודש הפעיל הנבחר ב-UI (sel_month)
         if not existing_constraints.empty:
             existing_constraints['date_dt'] = pd.to_datetime(existing_constraints['date'], errors='coerce')
-            existing_constraints = existing_constraints[(existing_constraints['date_dt'].dt.month == sel_month) & (existing_constraints['date_dt'].dt.year == 2026)]
+            existing_constraints = existing_constraints[(existing_constraints['date_dt'].dt.month == sel_month) & (existing_constraints['date_dt'].dt.year == sel_year)]
 
         if not existing_wishes_all.empty:
             existing_wishes_all['date_dt'] = pd.to_datetime(existing_wishes_all['date'], errors='coerce')
-            existing_wishes_all = existing_wishes_all[(existing_wishes_all['date_dt'].dt.month == sel_month) & (existing_wishes_all['date_dt'].dt.year == 2026)]
+            existing_wishes_all = existing_wishes_all[(existing_wishes_all['date_dt'].dt.month == sel_month) & (existing_wishes_all['date_dt'].dt.year == sel_year)]
         
         if not existing_constraints.empty or not existing_wishes_all.empty:
             msg = ""
@@ -8302,14 +8324,14 @@ else:
         if isinstance(cal_sd, pd.DataFrame) and cal_sd.empty:
             cal_sd = None
         constraint_days, wish_days = render_modern_calendar(
-            2026, sel_month,
+            sel_year, sel_month,
             default_day_nums, default_wish_nums,
             special_days_df=cal_sd,
             key_prefix='user_cal',
             show_validation=(st.session_state.user_role == 'מתמחה')
         )
-        selected_from_grid = [date(2026, sel_month, d) for d in constraint_days]
-        selected_wishes    = [date(2026, sel_month, d) for d in wish_days]
+        selected_from_grid = [date(sel_year, sel_month, d) for d in constraint_days]
+        selected_wishes    = [date(sel_year, sel_month, d) for d in wish_days]
         
         # -----------------------------------
         st.divider()
@@ -8357,8 +8379,8 @@ else:
             if overlap:
                 errors.append(f"שגיאה: בחרת באותו יום ({list(overlap)[0].strftime('%d/%m')}) גם אילוץ וגם בקשה. נא בחר רק אחד.")
             if st.session_state.user_role == 'מתמחה':
-                num_days = calendar.monthrange(2026, sel_month)[1]
-                month_days = [date(2026, sel_month, d) for d in range(1, num_days+1)]
+                num_days = calendar.monthrange(sel_year, sel_month)[1]
+                month_days = [date(sel_year, sel_month, d) for d in range(1, num_days+1)]
                 total_thursdays = len([d for d in month_days if d.weekday() == 3])
                 total_weekends  = len([d for d in month_days if d.weekday() in [4, 5]])
                 blocked_thursdays = len([d for d in selected_from_grid if d.weekday() == 3])
@@ -8380,7 +8402,7 @@ else:
                 base = live if not live.empty else st.session_state.requests
 
                 # הסרת כל האילוצים והבקשות הקודמים של המשתמש לחודש זה
-                current_month_prefix = f"2026-{sel_month:02d}"
+                current_month_prefix = f"{sel_year}-{sel_month:02d}"
                 mask_keep = ~((base['employee'].astype(str).str.strip() == str(user_name).strip()) &
                               (base['date'].astype(str).str.startswith(current_month_prefix)))
                 base = base[mask_keep]
@@ -8428,9 +8450,9 @@ else:
             st.warning(f"🔒 הגשות לחודש {hebrew_months_da[daily_active_month_int - 1]} נסגרו על ידי המנהל.")
 
         # Use the daily_active_month for this section (separate from sel_month/active_month)
-        da_year_month = f"2026-{daily_active_month_int:02d}"
-        da_num_days = calendar.monthrange(2026, daily_active_month_int)[1]
-        da_first_wd = (date(2026, daily_active_month_int, 1).weekday() + 1) % 7  # Sun=0
+        da_year_month = f"{daily_active_year}-{daily_active_month_int:02d}"
+        da_num_days = calendar.monthrange(daily_active_year, daily_active_month_int)[1]
+        da_first_wd = (date(daily_active_year, daily_active_month_int, 1).weekday() + 1) % 7  # Sun=0
 
         # Selection state — namespaced per month
         sel_start_key = f"dayabs_sel_start_{daily_active_month_int}"
@@ -8454,7 +8476,7 @@ else:
                 # Only include days that fall within the displayed month
                 d_iter = sd
                 while d_iter <= ed:
-                    if d_iter.month == daily_active_month_int and d_iter.year == 2026:
+                    if d_iter.month == daily_active_month_int and d_iter.year == daily_active_year:
                         status = str(r.get('status', '')).strip().lower()
                         atype = str(r.get('type', '')).strip()
                         if status == 'approved':
@@ -8484,11 +8506,11 @@ else:
                     sd = datetime.strptime(sr['date'], '%Y-%m-%d').date()
                 except Exception:
                     continue
-                if sd.month == daily_active_month_int and sd.year == 2026:
+                if sd.month == daily_active_month_int and sd.year == daily_active_year:
                     night_shift_days.add(sd.day)
                 # Post-shift = day AFTER the shift
                 next_d = sd + timedelta(days=1)
-                if next_d.month == daily_active_month_int and next_d.year == 2026:
+                if next_d.month == daily_active_month_int and next_d.year == daily_active_year:
                     post_shift_days.add(next_d.day)
 
         # ── Click-cycle state: 0=free  1=חופש request (light green)  2=202 request (light yellow)
@@ -8514,7 +8536,7 @@ else:
                     _val   = 2 if _atype == '202' else 1
                     _di    = _sd
                     while _di <= _ed:
-                        if _di.month == daily_active_month_int and _di.year == 2026:
+                        if _di.month == daily_active_month_int and _di.year == daily_active_year:
                             _cyc_init[_di.day] = _val
                         _di += timedelta(days=1)
             st.session_state[_cycle_ns] = _cyc_init
@@ -8525,7 +8547,7 @@ else:
         # ── Calendar grid — RTL: col 0=Saturday (ש), col 6=Sunday (א) ──
         HEB_WEEK = ["ש", "ו", "ה", "ד", "ג", "ב", "א"]
         _cal_da = [list(reversed(w)) for w in
-                   calendar.Calendar(firstweekday=6).monthdayscalendar(2026, daily_active_month_int)]
+                   calendar.Calendar(firstweekday=6).monthdayscalendar(daily_active_year, daily_active_month_int)]
 
         with st.container(border=True):
             # Header row
@@ -8618,9 +8640,9 @@ else:
             # ── Conflict warning (Feature 2) — show same-dept overlap with already-approved
             # absences BEFORE the user clicks "שמור". Soft warning, doesn't block submission.
             _ea_first_day = (_vac_sel + _202_sel)[0]
-            _ea_first_date = date(2026, daily_active_month_int, _ea_first_day)
+            _ea_first_date = date(daily_active_year, daily_active_month_int, _ea_first_day)
             _ea_last_day = (_vac_sel + _202_sel)[-1]
-            _ea_last_date = date(2026, daily_active_month_int, _ea_last_day)
+            _ea_last_date = date(daily_active_year, daily_active_month_int, _ea_last_day)
             _ea_dept_preview = _emp_dept_for_date(user_name, _ea_first_date)
             _ea_conflicts = _absence_conflicts(
                 user_name, _ea_dept_preview, _ea_first_date, _ea_last_date)
@@ -8654,7 +8676,7 @@ else:
                     # placed on the Gantt for that month.
                     _ea_first_d = (_vac_sel + _202_sel)[0]
                     _dept_at_req = _emp_dept_for_date(
-                        user_name, date(2026, daily_active_month_int, _ea_first_d))
+                        user_name, date(daily_active_year, daily_active_month_int, _ea_first_d))
                     _mgr_email   = ""
                     if _dept_at_req:
                         for _, _sr in st.session_state.staff.iterrows():
@@ -8677,14 +8699,14 @@ else:
                             (_ar_base['employee'].astype(str).str.strip() == str(user_name).strip()) &
                             (_ar_base['status'].astype(str).str.lower() == 'pending') &
                             (_ar_base['start_date'].astype(str).str.startswith(
-                                f"2026-{daily_active_month_int:02d}"))
+                                f"{daily_active_year}-{daily_active_month_int:02d}"))
                         )
                         _ar_base = _ar_base[_keep]
 
                     # ── Add one row per selected day ──────────────────
                     _new_rows = []
                     for _d in _vac_sel:
-                        _ds = f"2026-{daily_active_month_int:02d}-{_d:02d}"
+                        _ds = f"{daily_active_year}-{daily_active_month_int:02d}-{_d:02d}"
                         _new_rows.append({
                             'id': str(uuid.uuid4()), 'employee': str(user_name).strip(),
                             'start_date': _ds, 'end_date': _ds, 'type': 'חופש',
@@ -8693,7 +8715,7 @@ else:
                             'notes': '', 'created_at': _now, 'responded_at': _resp,
                         })
                     for _d in _202_sel:
-                        _ds = f"2026-{daily_active_month_int:02d}-{_d:02d}"
+                        _ds = f"{daily_active_year}-{daily_active_month_int:02d}-{_d:02d}"
                         _new_rows.append({
                             'id': str(uuid.uuid4()), 'employee': str(user_name).strip(),
                             'start_date': _ds, 'end_date': _ds, 'type': '202',
@@ -8718,11 +8740,11 @@ else:
                                 _mgr_dept2 = _mdl2[0] if _mdl2 else ''
                         if _mgr_dept2:
                             for _d in _vac_sel:
-                                _wsd_upsert(f"2026-{daily_active_month_int:02d}-{_d:02d}",
+                                _wsd_upsert(f"{daily_active_year}-{daily_active_month_int:02d}-{_d:02d}",
                                             str(user_name).strip(), _mgr_dept2,
                                             'חופש', is_manual=True, note='')
                             for _d in _202_sel:
-                                _wsd_upsert(f"2026-{daily_active_month_int:02d}-{_d:02d}",
+                                _wsd_upsert(f"{daily_active_year}-{daily_active_month_int:02d}-{_d:02d}",
                                             str(user_name).strip(), _mgr_dept2,
                                             '202', is_manual=True, note='')
                         _build_approved_map()
@@ -8867,7 +8889,7 @@ else:
                     st.rerun()
 
     if selected_nav == 'סידור תורנויות':
-        draw_calendar_view(2026, sel_month, "עובד/ת", user_name)
+        draw_calendar_view(sel_year, sel_month, "עובד/ת", user_name)
 
     # ── סידור עבודה (עובדים / מנהלי מחלקה) ────────────────────────
     if selected_nav == 'סידור עבודה':
@@ -9118,7 +9140,7 @@ else:
             st.caption("בחר עובד/ת מהמחלקה לרישום היעדרות מאושרת ישירות.")
 
             # Build employee list: managed dept rotation members + manager themselves
-            _nb_mgr_da_ym = f"2026-{daily_active_month_int:02d}"
+            _nb_mgr_da_ym = f"{daily_active_year}-{daily_active_month_int:02d}"
             _nb_mgr_emps_list = list(_mgr_emps_set)
             if str(user_name).strip() not in _nb_mgr_emps_list:
                 _nb_mgr_emps_list.append(str(user_name).strip())
@@ -9129,13 +9151,13 @@ else:
             with _nb_mgr_c1:
                 _nb_mgr_start = st.date_input("מתאריך:", key="nb_mgr_start",
                                                value=date.today(),
-                                               min_value=date(2026, 1, 1),
-                                               max_value=date(2026, 12, 31))
+                                               min_value=date(date.today().year - 1, 1, 1),
+                                               max_value=date(date.today().year + 1, 12, 31))
             with _nb_mgr_c2:
                 _nb_mgr_end = st.date_input("עד תאריך:", key="nb_mgr_end",
                                              value=date.today(),
-                                             min_value=date(2026, 1, 1),
-                                             max_value=date(2026, 12, 31))
+                                             min_value=date(date.today().year - 1, 1, 1),
+                                             max_value=date(date.today().year + 1, 12, 31))
             _nb_mgr_type = st.selectbox("סוג היעדרות:", ["חופש", "202", "היעדרות אחרת"],
                                          key="nb_mgr_type")
             _nb_mgr_note = st.text_input("הערה (אופציונלי):", key="nb_mgr_note")
@@ -9243,7 +9265,7 @@ else:
         st.markdown("---")
         _pers_bytes, _pers_fname = _export_personal_schedule_excel(
             user_name, view_m,
-            daily_dept=my_dept if my_dept != "—" else None)
+            daily_dept=my_dept if my_dept != "—" else None, year=emp_year)
         if _pers_bytes:
             st.download_button(
                 "📥 הורד לוח עבודה שלי (Excel)",
