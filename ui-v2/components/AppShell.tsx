@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useState, type ComponentType } from 'react';
+import { useEffect, useRef, useState, type ComponentType } from 'react';
 import {
-  CalendarCheck, CalendarDots, ChartBar, DotsThreeOutline, GearSix, LockSimple, LockSimpleOpen, MoonStars, ShieldCheck, SignOut, SquaresFour, Tray, UsersThree, type IconProps,
+  CalendarCheck, CalendarDots, ChartBar, GearSix, LockSimple, LockSimpleOpen, MoonStars, ShieldCheck, SignOut, SquaresFour, Tray, UsersThree, type IconProps,
 } from '@phosphor-icons/react';
 import { useStore } from '@/lib/store';
 import { HEB_MONTHS } from '@/lib/mock';
@@ -36,12 +36,13 @@ const readHash = () => (typeof window === 'undefined' ? '' : window.location.has
 export default function AppShell() {
   const { toasts, me, db, logout } = useStore();
   const [hash, setHash] = useState('');
-  const [more, setMore] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
   useEffect(() => {
-    const on = () => { setHash(readHash()); setMore(false); window.scrollTo({ top: 0 }); };
+    const on = () => { setHash(readHash()); window.scrollTo({ top: 0 }); };
     on(); window.addEventListener('hashchange', on); return () => window.removeEventListener('hashchange', on);
   }, []);
   const go = (k: string) => { window.location.hash = `/${k}`; };
+  useEffect(() => { navRef.current?.querySelector('.on')?.scrollIntoView({ inline: 'center', block: 'nearest' }); }, [hash, me]);
 
   const toastLayer = (
     <div className="toasts" aria-live="polite">
@@ -58,7 +59,7 @@ export default function AppShell() {
   const tab = TABS.find((t) => t.k === route)!;
   const Page = tab.C;
   const primary = MOBILE_PRIMARY[me.type];
-  const hasMore = tabs.length > primary.length;
+  const mobileTabs = [...primary.map((k) => tabs.find((t) => t.k === k)!), ...tabs.filter((t) => !primary.includes(t.k))];
   const out = () => { logout(); go('login'); };
   const s = db.settings;
 
@@ -90,17 +91,11 @@ export default function AppShell() {
         <Page />
       </main>
 
-      {more && (
-        <div className="more-sheet"><div className="shell"><div className="core">
-          {tabs.map((t) => <a key={t.k} href={`#/${t.k}`} className={t.k === route ? 'on' : ''}><t.I size={22} />{t.he}</a>)}
-          <a href="#/login" onClick={(e) => { e.preventDefault(); out(); }}><SignOut size={22} />התנתק</a>
-        </div></div></div>
-      )}
-      <nav className="mob-nav" aria-label="ניווט">
-        {primary.map((k) => { const t = TABS.find((x) => x.k === k)!; return (
-          <a key={k} href={`#/${k}`} className={k === route ? 'on' : ''}><t.I size={20} weight={k === route ? 'fill' : 'light'} />{t.short}</a>
-        ); })}
-        {hasMore && <button className={more || !primary.includes(route) ? 'on' : ''} onClick={() => setMore(!more)}><DotsThreeOutline size={20} />עוד</button>}
+      {/* Mobile: one swipeable strip with every tab of the role, the bar's usual four first. */}
+      <nav className="mob-nav" aria-label="ניווט" ref={navRef}>
+        {mobileTabs.map((t) => (
+          <a key={t.k} href={`#/${t.k}`} className={t.k === route ? 'on' : ''} data-tab={t.k}><t.I size={20} weight={t.k === route ? 'fill' : 'light'} />{t.short}</a>
+        ))}
       </nav>
       {toastLayer}
     </div>

@@ -253,9 +253,11 @@ button.day:hover { background: #EDF0F3; transform: translateY(-2px); }
   .bar-row { grid-template-columns: 90px 1fr 34px; }
   .login { grid-template-columns: 1fr; } .login .art { padding: 32px 24px; min-height: 220px; } .login .art h1 { font-size: 38px; }
   .toasts { left: 12px; right: 12px; bottom: 96px; }
-  .mob-nav { display: flex; position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); gap: 2px; padding: 6px; border-radius: 999px;
+  .mob-nav { display: flex; position: fixed; bottom: 14px; left: 12px; right: 12px; width: max-content; max-width: calc(100% - 24px); margin-inline: auto; gap: 2px; padding: 6px; border-radius: 999px;
+    overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-width: none; -webkit-overflow-scrolling: touch;
     background: rgba(255,255,255,.82); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: 0 20px 40px -16px rgba(14,26,31,.35); z-index: 60; }
-  .mob-nav a, .mob-nav button { width: 62px; height: 52px; border-radius: 999px; border: 0; background: none; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; color: var(--muted); gap: 1px; }
+  .mob-nav::-webkit-scrollbar { display: none; }
+  .mob-nav a, .mob-nav button { flex: none; scroll-snap-align: center; width: 62px; height: 52px; border-radius: 999px; border: 0; background: none; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; color: var(--muted); gap: 1px; }
   .mob-nav .on { background: var(--ink); color: #fff; }
   .more-sheet { display: block; position: fixed; inset: auto 12px 84px 12px; z-index: 65; }
   .more-sheet .core { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
