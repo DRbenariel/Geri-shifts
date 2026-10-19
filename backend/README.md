@@ -37,6 +37,19 @@ python -m pytest tests -q      # 49 tests, about 2 minutes
 | `exports` | Excel bytes, `Schedule_Export`, `WSD_` sheets | 587-945, 972-1356 |
 | `reports` | Dashboard, fairness, problem scan, analytics A–I | 3007-3045, 7244-7694 |
 
+## API (`api/`)
+
+A thin FastAPI layer over `geri_core` (SCREENS_PLAN §3). Status 2026-10-19: login, session and the **read** endpoints; writes come next.
+
+- **Session:** `POST /api/auth/login` sets an httpOnly cookie signed with `SESSION_SECRET`. It holds only the user name; the role is read from the staff sheet on every request, so permissions can't be claimed by the client.
+- **Permissions** are checked per route from that role (tabs per role as in `constants.tabs_for_role`; department managers only their `manage_depts`; interns and seniors only their own department; night-shift rows of others and who blocked/wished stay admin-only).
+- **Read-only by default.** `API_READ_ONLY=1` wraps the store so any write raises before it reaches the Sheet. Turn it off only when the write endpoints are ready and signed off (DEPLOY_PLAN rollout step 2).
+- **No password-hash upgrade** on login while Streamlit runs in parallel: Streamlit only reads SHA-256, so a bcrypt upgrade would lock that user out of the old app.
+- Env vars: see `api/config.py`. Local run: `uvicorn api.main:app --reload` from `backend/` with `COOKIE_SECURE=0`.
+- Deploy: `Dockerfile` (Cloud Run, me-west1). The Cloudflare Worker proxies `/api/*` to it so the cookie stays first-party.
+- Tests: `tests/test_api.py` (login, tabs per role, 403s, privacy of the night calendar, read-only guard, JSON for every read route).
+- Known cost: each request loads all 10 sheets. Fine for the pilot; add a short per-instance cache before the whole department uses it (Sheets API read quota).
+
 ## Tests
 
 - **`tests/test_parity.py`** (17 tests) runs the original `appy.py` functions next to `geri_core` on the same data and requires identical output.
