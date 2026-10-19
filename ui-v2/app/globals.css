@@ -6,7 +6,7 @@
   --W: #D8F0E3; --Wt: #14633F; --V: #DCE8FB; --Vt: #1D4E9E; --S: #FBF0C9; --St: #8A6100;
   --A: #FDE3CF; --At: #A2470E; --O: #E7EAEE; --Ot: #56616B; --T: #E4E0F8; --Tt: #4B3A9C; --B: #FBE0E0; --Bt: #A1272B;
   --pink: #FCE7F3; --pinkt: #9D174D; --blue: #DBEAFE; --bluet: #1E40AF;
-  --chart1: #0D9488; --chart2: #D97706;
+  --chart1: #0D9488; --chart2: #D97706; --chart3: #6D5BD0;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { min-height: 100dvh; }

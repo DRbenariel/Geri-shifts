@@ -6,32 +6,37 @@ import { HEB_MONTHS, MONTH, YEAR, analytics, dailyReport, dowOf } from '@/lib/mo
 import { Bezel, Expander, Kpi, PageHead, PillSeg, useTip } from '../ui';
 
 
-/** Horizontal stacked bars, 2 series (validated palette: #0D9488 / #D97706). */
-function ShiftBars({ data }: { data: { name: string; reg: number; fri: number }[] }) {
+/** Horizontal stacked bars, 3 series: שיקום night, פנג״ר night, שישי בוקר (any dept). Colors match the night calendar slots. */
+const SERIES = [
+  { k: 'sh', l: 'תורנות שיקום', c: 'var(--chart1)' },
+  { k: 'pn', l: 'תורנות פנג״ר', c: 'var(--chart3)' },
+  { k: 'fri', l: 'שישי בוקר', c: 'var(--chart2)' },
+] as const;
+type ShiftCount = { name: string; sh: number; pn: number; fri: number };
+const total = (d: ShiftCount) => d.sh + d.pn + d.fri;
+function ShiftBars({ data }: { data: ShiftCount[] }) {
   const { bind, node } = useTip();
   const [asTable, setAsTable] = useState(false);
-  const max = Math.max(...data.map((d) => d.reg + d.fri), 1);
+  const max = Math.max(...data.map(total), 1);
   return (
     <>
       <div className="row" style={{ marginBottom: 12 }}>
-        <span className="row small"><span style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--chart1)' }} />משמרות לילה</span>
-        <span className="row small"><span style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--chart2)' }} />שישי בוקר</span>
+        {SERIES.map((x) => <span key={x.k} className="row small"><span style={{ width: 12, height: 12, borderRadius: 3, background: x.c }} />{x.l}</span>)}
         <span className="grow" />
         <button className="btn" onClick={() => setAsTable(!asTable)}><Table size={14} />{asTable ? 'תרשים' : 'טבלה'}</button>
       </div>
       {asTable ? (
-        <table className="t"><thead><tr><th>עובד/ת</th><th>לילה</th><th>שישי בוקר</th><th>סה״כ</th></tr></thead>
-          <tbody>{data.map((d) => <tr key={d.name}><td>{d.name}</td><td className="num">{d.reg}</td><td className="num">{d.fri}</td><td className="num">{d.reg + d.fri}</td></tr>)}</tbody></table>
+        <table className="t"><thead><tr><th>עובד/ת</th>{SERIES.map((x) => <th key={x.k}>{x.l}</th>)}<th>סה״כ</th></tr></thead>
+          <tbody>{data.map((d) => <tr key={d.name}><td>{d.name}</td>{SERIES.map((x) => <td key={x.k} className="num">{d[x.k]}</td>)}<td className="num">{total(d)}</td></tr>)}</tbody></table>
       ) : (
         <div className="bars">
           {data.map((d) => (
             <div key={d.name} className="bar-row">
               <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span>
               <div className="bar-track">
-                {d.reg > 0 && <div className="bar-seg" style={{ width: `${(d.reg / max) * 100}%`, background: 'var(--chart1)' }} {...bind(`${d.name}: ${d.reg} משמרות לילה`)} />}
-                {d.fri > 0 && <div className="bar-seg" style={{ width: `${(d.fri / max) * 100}%`, background: 'var(--chart2)' }} {...bind(`${d.name}: ${d.fri} שישי בוקר`)} />}
+                {SERIES.map((x) => d[x.k] > 0 && <div key={x.k} className="bar-seg" style={{ width: `${(d[x.k] / max) * 100}%`, background: x.c }} {...bind(`${d.name}: ${d[x.k]} ${x.l}`)} />)}
               </div>
-              <span className="num" style={{ fontWeight: 700 }}>{d.reg + d.fri}</span>
+              <span className="num" style={{ fontWeight: 700 }}>{total(d)}</span>
             </div>
           ))}
         </div>
@@ -79,9 +84,10 @@ export default function Reports() {
   const submitted = pool.filter((p) => db.requests.some((r) => r.employee === p.name));
   const shiftData = useMemo(() => pool.map((p) => ({
     name: p.name,
-    reg: db.schedule.filter((r) => r.employee === p.name && !r.dept.startsWith('שישי')).length,
+    sh: db.schedule.filter((r) => r.employee === p.name && r.dept === 'שיקום').length,
+    pn: db.schedule.filter((r) => r.employee === p.name && r.dept === 'פנימית גריאטרית').length,
     fri: db.schedule.filter((r) => r.employee === p.name && r.dept.startsWith('שישי')).length,
-  })).sort((a, b) => b.reg + b.fri - (a.reg + a.fri)), [db, pool]);
+  })).sort((a, b) => total(b) - total(a)), [db, pool]);
   const fairness = pool.filter((p) => p.type === 'מתמחה').map((p) => {
     const mine = db.schedule.filter((r) => r.employee === p.name);
     const wd = (w: number) => mine.filter((r) => !r.dept.startsWith('שישי') && dowOf(YEAR, MONTH, +r.date.slice(8)) === w).length;
