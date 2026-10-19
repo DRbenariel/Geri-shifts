@@ -2,13 +2,14 @@
 import { useEffect, useState } from 'react';
 import { Check, CloudArrowDown, FloppyDisk, LockSimple, Plus, PushPin, Star, Trash, UserMinus, UserPlus, X } from '@phosphor-icons/react';
 import { useStore } from '@/lib/store';
-import { DAILY_DEPTS, DAYS_IN_MONTH, DOW_FULL, HEB_MONTHS, MONTH, ROLES, STAFF_DEPTS, YEAR, dowOf, iso, type Role, type Staff } from '@/lib/mock';
+import { DAILY_DEPTS, DOW_FULL, HEB_MONTHS, MONTH, ROLES, STAFF_DEPTS, YEAR, dowOf, iso, type Role, type Staff } from '@/lib/mock';
 import { absenceConflicts, constraintCounters, fmtRange } from '@/lib/logic';
 import { Bezel, Cta, Expander, Field, Modal, Note, PageHead } from '../ui';
 
 /** rules=false hides the Thursday/weekend counters (תורן חוץ, and the admin editor which saves without enforcing them). */
-export function ConstraintCalendar({ cons, onToggle, special, rules = true }: { cons: Record<number, 'B' | 'R'>; onToggle: (d: number) => void; special: Record<number, string>; rules?: boolean }) {
-  const c = constraintCounters(cons);
+export function ConstraintCalendar({ cons, onToggle, special, rules = true, y = YEAR, m = MONTH }: { cons: Record<number, 'B' | 'R'>; onToggle: (d: number) => void; special: Record<number, string>; rules?: boolean; y?: number; m?: number }) {
+  const c = constraintCounters(cons, y, m);
+  const nDays = new Date(y, m, 0).getDate();
   const ring = (val: number, max: number, ok: boolean) => {
     const r = 22, C = 2 * Math.PI * r, p = Math.min(val / max, 1);
     return <svg width="54" height="54" viewBox="0 0 54 54" aria-hidden><circle cx="27" cy="27" r={r} fill="none" stroke="#EEF1F3" strokeWidth="6" />
@@ -18,11 +19,11 @@ export function ConstraintCalendar({ cons, onToggle, special, rules = true }: { 
     <div className="split">
       <div className="cal">
         {DOW_FULL.map((h, i) => <div key={h} className={`h ${i >= 5 ? 'we' : ''}`}>{h}</div>)}
-        {Array.from({ length: dowOf(YEAR, MONTH, 1) }, (_, i) => <div key={'b' + i} className="day blank" />)}
-        {Array.from({ length: DAYS_IN_MONTH }, (_, i) => i + 1).map((d) => {
-          const v = cons[d]; const we = dowOf(YEAR, MONTH, d) >= 5;
+        {Array.from({ length: dowOf(y, m, 1) }, (_, i) => <div key={'b' + i} className="day blank" />)}
+        {Array.from({ length: nDays }, (_, i) => i + 1).map((d) => {
+          const v = cons[d]; const we = dowOf(y, m, d) >= 5;
           return (
-            <button key={d} className={`day ${v ?? ''} ${we ? 'we' : ''}`} onClick={() => onToggle(d)} aria-label={`${d}/${MONTH} ${v === 'B' ? 'חסימה' : v === 'R' ? 'בקשה' : 'רגיל'}`}>
+            <button key={d} className={`day ${v ?? ''} ${we ? 'we' : ''}`} onClick={() => onToggle(d)} aria-label={`${d}/${m} ${v === 'B' ? 'חסימה' : v === 'R' ? 'בקשה' : 'רגיל'}`}>
               <span className="num">{d}{special[d] && <PushPin size={12} weight="fill" />}</span>
               {special[d] && <span className="sp">{special[d]}</span>}
               <span className="st">{v === 'B' && <><LockSimple size={13} weight="bold" /><span>חסימה</span></>}{v === 'R' && <><Star size={13} weight="fill" /><span>בקשה</span></>}</span>

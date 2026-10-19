@@ -6,7 +6,7 @@ import {
 import { useStore } from '@/lib/store';
 import { HEB_MONTHS } from '@/lib/mock';
 import { initials } from '@/lib/logic';
-import { MOBILE_PRIMARY, homeTab, tabsForRole, type TabKey } from '@/lib/roles';
+import { MOBILE_PRIMARY, type TabKey } from '@/lib/roles';
 import Login from './Login';
 import Settings from './tabs/Settings';
 import Night from './tabs/Night';
@@ -17,24 +17,31 @@ import OnCall from './tabs/OnCall';
 import Gantt from './tabs/Gantt';
 import Work from './tabs/Work';
 import Requests from './tabs/Requests';
+import LiveNight from './live/Night';
+import LiveWork from './live/Work';
+import LiveRequests from './live/Requests';
+import LiveSubmit from './live/Submit';
+import LiveSettings from './live/Settings';
+import { LiveGantt, LiveOnCall, LiveReports, LiveStaff } from './live/Admin';
 
 // Tab order from ui_components.render_navbar; which tabs a role gets comes from lib/roles.ts.
-const TABS: { k: TabKey; he: string; short: string; I: ComponentType<IconProps>; C: ComponentType }[] = [
-  { k: 'settings', he: 'הגדרות', short: 'הגדרות', I: GearSix, C: Settings },
-  { k: 'night', he: 'סידור תורנויות', short: 'תורנויות', I: MoonStars, C: Night },
-  { k: 'submit', he: 'הגשת בקשות', short: 'הגשה', I: CalendarCheck, C: Submit },
-  { k: 'staff', he: 'צוות', short: 'צוות', I: UsersThree, C: StaffTab },
-  { k: 'reports', he: 'דוחות וניהול', short: 'דוחות', I: ChartBar, C: Reports },
-  { k: 'oncall', he: 'סידור כוננויות', short: 'כוננויות', I: ShieldCheck, C: OnCall },
-  { k: 'gantt', he: 'גאנט חודשי', short: 'גאנט', I: SquaresFour, C: Gantt },
-  { k: 'work', he: 'סידור עבודה', short: 'עבודה', I: CalendarDots, C: Work },
-  { k: 'requests', he: 'ניהול בקשות', short: 'בקשות', I: Tray, C: Requests },
+// C: demo screen on mock data; L: the same screen on the real API (live mode).
+const TABS: { k: TabKey; he: string; short: string; I: ComponentType<IconProps>; C: ComponentType; L: ComponentType }[] = [
+  { k: 'settings', he: 'הגדרות', short: 'הגדרות', I: GearSix, C: Settings, L: LiveSettings },
+  { k: 'night', he: 'סידור תורנויות', short: 'תורנויות', I: MoonStars, C: Night, L: LiveNight },
+  { k: 'submit', he: 'הגשת בקשות', short: 'הגשה', I: CalendarCheck, C: Submit, L: LiveSubmit },
+  { k: 'staff', he: 'צוות', short: 'צוות', I: UsersThree, C: StaffTab, L: LiveStaff },
+  { k: 'reports', he: 'דוחות וניהול', short: 'דוחות', I: ChartBar, C: Reports, L: LiveReports },
+  { k: 'oncall', he: 'סידור כוננויות', short: 'כוננויות', I: ShieldCheck, C: OnCall, L: LiveOnCall },
+  { k: 'gantt', he: 'גאנט חודשי', short: 'גאנט', I: SquaresFour, C: Gantt, L: LiveGantt },
+  { k: 'work', he: 'סידור עבודה', short: 'עבודה', I: CalendarDots, C: Work, L: LiveWork },
+  { k: 'requests', he: 'ניהול בקשות', short: 'בקשות', I: Tray, C: Requests, L: LiveRequests },
 ];
 
 const readHash = () => (typeof window === 'undefined' ? '' : window.location.hash.replace('#/', '').replace('#', ''));
 
 export default function AppShell() {
-  const { toasts, me, db, logout } = useStore();
+  const { toasts, me, live, logout } = useStore();
   const [hash, setHash] = useState('');
   const navRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -43,25 +50,28 @@ export default function AppShell() {
   }, []);
   const go = (k: string) => { window.location.hash = `/${k}`; };
   useEffect(() => { navRef.current?.querySelector('.on')?.scrollIntoView({ inline: 'center', block: 'nearest' }); }, [hash, me]);
+  // Keep the address bar on the tab actually shown (landing tab after login, fallback for tabs outside the role).
+  useEffect(() => { if (me && !me.tabs.includes(hash as TabKey)) window.history.replaceState(null, '', `#/${me.home}`); }, [hash, me]);
 
   const toastLayer = (
     <div className="toasts" aria-live="polite">
       {toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.msg}</div>)}
     </div>
   );
+  if (live === null) return <div className="boot" aria-busy="true" />;
   // No session: every address shows the login screen.
-  if (!me) return <><Login onLogin={(n) => { const u = db.staff.find((s) => s.name === n)!; go(homeTab(u.type)); }} />{toastLayer}</>;
+  if (!me) return <><Login onLogin={() => go('')} />{toastLayer}</>;
 
-  const allowed = tabsForRole(me.type);
+  const allowed = me.tabs;
   const tabs = TABS.filter((t) => allowed.includes(t.k));
   // A tab outside the role (deep link, old bookmark) falls back to the role's home tab.
-  const route: TabKey = allowed.includes(hash as TabKey) ? (hash as TabKey) : homeTab(me.type);
+  const route: TabKey = allowed.includes(hash as TabKey) ? (hash as TabKey) : me.home;
   const tab = TABS.find((t) => t.k === route)!;
-  const Page = tab.C;
-  const primary = MOBILE_PRIMARY[me.type];
+  const Page = live ? tab.L : tab.C;
+  const primary = MOBILE_PRIMARY[me.type].filter((k) => allowed.includes(k));
   const mobileTabs = [...primary.map((k) => tabs.find((t) => t.k === k)!), ...tabs.filter((t) => !primary.includes(t.k))];
   const out = () => { logout(); go('login'); };
-  const s = db.settings;
+  const s = me.settings;
 
   return (
     <div className="layout">
@@ -88,6 +98,7 @@ export default function AppShell() {
           )}
           <button className="btn mob-only out-m" onClick={out}><SignOut size={14} />התנתק</button>
         </div>
+        {me.readOnly && <div className="ro-banner">המערכת החדשה פתוחה כרגע לצפייה בלבד, על הנתונים האמיתיים. שינויים נעשים עדיין באפליקציה הקיימת.</div>}
         <Page />
       </main>
 
