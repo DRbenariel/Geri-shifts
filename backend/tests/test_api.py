@@ -161,9 +161,29 @@ def test_read_only_store_blocks_writes(store):
     ('רופא בכיר', "/api/absences/me/2026-11"),
     ('תורן חוץ', "/api/night/2026-11"),
     ('מתמחה', "/api/night/2027-01"),          # a month with no data yet
+    ('מתמחה', "/api/swaps/mine"),
+    ('מנהל מחלקה', "/api/people"),
 ])
 def test_read_endpoints_serialize(client, role, path):
     login(client, USERS[role])
     r = client.get(path)
     assert r.status_code == 200, r.text
     assert r.headers['content-type'].startswith('application/json')
+
+
+def test_people_scoped_for_manager(client):
+    login(client, USERS['מנהל על'])
+    everyone = {r['name'] for r in client.get("/api/people").json()}
+    client.post("/api/auth/logout")
+    login(client, USERS['מנהל מחלקה'])
+    mine = {r['name'] for r in client.get("/api/people").json()}
+    assert mine and mine < everyone and USERS['מנהל מחלקה'] in mine
+    client.post("/api/auth/logout")
+    login(client, USERS['מתמחה'])
+    assert client.get("/api/people").status_code == 403
+
+
+def test_report_shift_split(client):
+    login(client, USERS['מנהל על'])
+    rows = client.get("/api/reports/2026-11").json()['shift_counts']
+    assert rows and set(rows[0]) == {'employee', 'sh', 'pn', 'fri'}

@@ -73,6 +73,21 @@ def _gantt_json(g: dict) -> dict:
             'conflicts': [{'dept': d, 'day': day, 'employees': es} for (d, day), es in g['conflicts'].items()]}
 
 
+def _shift_split(ctx, y: int, m: int) -> list:
+    """Per employee: שיקום nights, פנימית nights, שישי בוקר (any dept); busiest first."""
+    s = ctx.schedule
+    if s.empty:
+        return []
+    mon = s[s['date'].astype(str).str.startswith(f"{y}-{m:02d}") & (s['employee'].astype(str).str.strip() != '---')]
+    out = {}
+    for _, r in mon.iterrows():
+        e = str(r['employee']).strip()
+        dept = str(r['dept'])
+        k = 'fri' if 'שישי בוקר' in dept else 'sh' if dept == 'שיקום' else 'pn'
+        out.setdefault(e, {'employee': e, 'sh': 0, 'pn': 0, 'fri': 0})[k] += 1
+    return sorted(out.values(), key=lambda d: -(d['sh'] + d['pn'] + d['fri']))
+
+
 def _ym(ym: str) -> tuple[int, int]:
     m = YM.match(ym)
     if not m:
@@ -251,8 +266,23 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
     def report(ym: str, _: Me = Depends(require('מנהל על')), ctx: DataContext = Depends(get_ctx)):
         y, m = _ym(ym)
         return {"submissions": reports.submission_status(ctx, y, m),
-                "shift_counts": reports.shift_counts(ctx, y, m),
+                "shift_counts": _shift_split(ctx, y, m),
                 "problems": reports.problem_report(ctx)}
+
+    @app.get("/api/swaps/mine")
+    def my_upcoming(me: Me = Depends(current_user), ctx: DataContext = Depends(get_ctx)):
+        return night.upcoming_shifts(ctx, me.name)
+
+    @app.get("/api/people")
+    def people_list(me: Me = Depends(require(*ADMINS, 'מנהל מחלקה')), ctx: DataContext = Depends(get_ctx)):
+        """Names and roles for pickers (no emails or passwords). Department managers get their own staff."""
+        sf = ctx.staff
+        rows = [{'name': str(r['name']).strip(), 'type': str(r.get('type', '')).strip()} for _, r in sf.iterrows()
+                if str(r.get('name', '')).strip() and str(r['name']).strip() != '---']
+        if me.role == 'מנהל מחלקה':
+            _, _, emps = absences.manager_scope(ctx, me.name)
+            rows = [r for r in rows if r['name'] in emps or r['name'] == me.name]
+        return rows
 
     from .writes import register_writes
     register_writes(app, settings, get_ctx, current_user, require)
