@@ -25,7 +25,7 @@ All reads/writes go through `get_db_data()` / `save_to_db()` — never access Sh
 ## Key conventions
 - All user-visible strings are Hebrew. Keep `direction: rtl` in any new HTML/CSS.
 - Dates are stored as `YYYY-MM-DD` strings in Sheets, parsed with `datetime.strptime`.
-- Year is hardcoded to 2026 throughout — do not generalize unless explicitly asked.
+- The year is not stored: settings hold only month numbers (`active_month`, `daily_active_month`). `_year_for_month(m)` in `appy.py` (same rule as `daily_report.year_for_month`) infers it from today, 5 months back to 6 ahead. Use `active_year` / `daily_active_year` / `sel_year` alongside the month; never hard-code a year. Tests: `tests/test_year_rollover.py`.
 - `sel_month` is always an integer (1–12) read from session state.
 - Staff roles: `מתמחה` (intern), `תורן חוץ` (external), `מנהל/ת` (admin), **`רופא בכיר`** (senior doctor — daily schedule only), **`מנהל מחלקה`** (department head — manages day-schedule for own dept(s)).
 - Request statuses: `אילוץ` (block/can't work), `בקשה` (wish/prefer to work).

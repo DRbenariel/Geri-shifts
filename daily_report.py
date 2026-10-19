@@ -21,7 +21,24 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1fmjfqA04VMfbBYHw2OXqoY08X7heazlx0Cr2Uaa2LkY/edit?usp=sharing"
-YEAR = 2026
+
+
+def year_for_month(month, today=None):
+    """Year of a 1-12 month picked relative to today.
+
+    Settings store only the month number, so the year is inferred from a window
+    of 5 months back to 6 months ahead: in Dec 2026 month 1 is Jan 2027, in
+    Jan 2027 month 12 is Dec 2026.
+    """
+    today = today or date.today()
+    m = int(month)
+    if m < today.month - 5:
+        return today.year + 1
+    if m > today.month + 6:
+        return today.year - 1
+    return today.year
+
+
 DEPTS = ['פנימית גריאטרית', 'שיקום']
 
 
@@ -1119,19 +1136,20 @@ def main():
 
     month = get_active_month(settings_df)
     today = date.today()
-    print(f"Active month: {YEAR}-{month:02d} | Today: {today} | Simulation: {'YES' if 3 <= today.day <= 8 else 'no'}")
+    year = year_for_month(month, today)
+    print(f"Active month: {year}-{month:02d} | Today: {today} | Simulation: {'YES' if 3 <= today.day <= 8 else 'no'}")
 
-    problems = analyze_month(YEAR, month, staff_df, requests_df, schedule_df, special_days_df)
+    problems = analyze_month(year, month, staff_df, requests_df, schedule_df, special_days_df)
 
     if not problems:
         problems = [{
             'severity': 'תקין',
             'problem_type': 'ללא בעיות',
-            'description': f'לא נמצאו בעיות צפויות לחודש {month}/{YEAR}',
+            'description': f'לא נמצאו בעיות צפויות לחודש {month}/{year}',
             'day': 0
         }]
 
-    save_report(sh, problems, YEAR, month)
+    save_report(sh, problems, year, month)
 
 
 if __name__ == '__main__':
