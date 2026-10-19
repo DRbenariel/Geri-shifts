@@ -14,19 +14,19 @@ from .constants import (BATCHED_ABSENT_STATUSES, DAILY_DEPTS_ALL, GRID_STATUS_LA
                         PNIM_ICONS, PNIM_SIDES, XL_STATUS_FILL)
 from .daily import (derive_auto_status, get_fri_shift_workers, get_night_duty, incoming_transfers,
                     night_shift_dept_label, personal_status, wsd_get_note, wsd_get_status)
-from .days import is_functional_friday, is_functional_saturday
+from .days import is_functional_friday, is_functional_saturday, year_for_month
 from .people import get_dept_managers, sort_employees_by_role
 
 WD = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
 
 
-def _year_of(year_month, year=None):
+def _year_of(year_month, year=None, month=None):
     if year is not None:
         return year
     try:
         return int(str(year_month).split('-')[0])
     except Exception:
-        return 2026
+        return year_for_month(month or date.today().month)
 
 
 def _safe(dept_name, n):
@@ -38,7 +38,8 @@ def wsd_sheet_name(dept_name, year_month):
 
 
 # ── night schedule → Schedule_Export ─────────────────────────────────────────
-def schedule_wide_df(ctx, month, year=2026) -> pd.DataFrame:
+def schedule_wide_df(ctx, month, year=None) -> pd.DataFrame:
+    year = year or year_for_month(month)
     rows = []
     sched = ctx.schedule
     for d in range(1, calendar.monthrange(year, month)[1] + 1):
@@ -59,7 +60,7 @@ def schedule_wide_df(ctx, month, year=2026) -> pd.DataFrame:
                                'שישי בוקר - שיקום (1)', 'שישי בוקר - שיקום (2)']]
 
 
-def export_schedule_wide(ctx, month, year=2026):
+def export_schedule_wide(ctx, month, year=None):
     ctx.save("Schedule_Export", schedule_wide_df(ctx, month, year), is_rtl=True)
 
 
@@ -377,10 +378,11 @@ def all_depts_batched_excel(ctx, year_month, view_month, year=None):
         return None, None
 
 
-def dept_grid_excel(ctx, dept_name, year_month, view_month, year=2026):
+def dept_grid_excel(ctx, dept_name, year_month, view_month, year=None):
     """Colour-coded employee × day grid (appy._export_dept_grid_excel)."""
     import openpyxl
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    year = _year_of(year_month, year, view_month)
     try:
         days = list(range(1, calendar.monthrange(year, view_month)[1] + 1))
         dr = ctx.dept_rotation
@@ -427,10 +429,11 @@ def dept_grid_excel(ctx, dept_name, year_month, view_month, year=2026):
         return None, None
 
 
-def personal_excel(ctx, user_name, view_month, daily_dept=None, year=2026):
+def personal_excel(ctx, user_name, view_month, daily_dept=None, year=None):
     """One employee's month, one row per day (appy._export_personal_schedule_excel)."""
     import openpyxl
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    year = year or year_for_month(view_month)
     try:
         WD_FULL = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
         wb = openpyxl.Workbook()

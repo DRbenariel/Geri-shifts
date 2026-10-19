@@ -73,7 +73,7 @@ def check_assignment_validity(ctx, schedule_data, person_name, check_date, targe
 
 # ── employee swap search (הגדרות → חיפוש החלפות) ─────────────────────────────
 def find_swap_candidates(ctx, schedule_df, requests_df, staff_df, user_name, swap_date, swap_dept,
-                         sel_month=None, year=2026, today=None):
+                         sel_month=None, year=None, today=None):
     user_n = str(user_name).strip()
     sched_minus_user = schedule_df[
         ~((schedule_df['date'].astype(str) == swap_date) &

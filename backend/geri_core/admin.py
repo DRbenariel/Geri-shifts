@@ -10,6 +10,7 @@ import pandas as pd
 from .absences import migrate_requests_on_dept_change
 from .constants import (HEB_MONTHS, KONENUT_ELIGIBLE_TYPES, MANUAL_PLANT_ONLY_MANAGERS, PNIM_DEPT,
                         PNIM_SIDES, SHEET_COLUMNS, SPECIAL_DAY_TYPES, UNASSIGNED)
+from .days import year_for_month
 from .normalize import is_true, norm_dr
 from .people import gantt_assignment_errors, gantt_dept_options
 
@@ -46,6 +47,7 @@ def active_months(ctx) -> dict:
     except Exception:
         dam = am
     return {'active_month': am, 'daily_active_month': dam,
+            'active_year': year_for_month(am), 'daily_active_year': year_for_month(dam),
             'daily_requests_open': str(get_setting(ctx, 'daily_requests_open', 'True')).strip().lower() == 'true'}
 
 

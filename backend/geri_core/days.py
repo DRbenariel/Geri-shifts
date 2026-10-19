@@ -6,6 +6,21 @@ import pandas as pd
 from .constants import LIKE_FRIDAY, LIKE_SATURDAY
 
 
+def year_for_month(month, today=None) -> int:
+    """Year of a 1-12 month picked relative to today (same rule as appy._year_for_month).
+
+    Settings store only month numbers, so the year is inferred from a window of
+    5 months back to 6 months ahead: in Dec 2026 month 1 is Jan 2027.
+    """
+    today = today or date.today()
+    m = int(month)
+    if m < today.month - 5:
+        return today.year + 1
+    if m > today.month + 6:
+        return today.year - 1
+    return today.year
+
+
 def to_date(v) -> date:
     if isinstance(v, datetime):
         return v.date()

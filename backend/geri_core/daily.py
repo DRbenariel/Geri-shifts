@@ -13,7 +13,7 @@ import pandas as pd
 from .constants import (ABSENCE_TYPE_TO_STATUS, DAILY_DEPT_TO_FRIDAY_SHIFTS, DAILY_DEPT_TO_NIGHT_DEPT,
                         FRIDAY_SHIFT_DEPTS, GRID_STATUS_LABEL_SHORT, HEB_DAY_TO_IDX, KONENUT_DEPTS,
                         PNIM_DEPT, PNIM_SIDES)
-from .days import is_functional_friday, is_functional_saturday
+from .days import is_functional_friday, is_functional_saturday, year_for_month
 from .normalize import make_initials, parse_manage_depts
 from .people import cycle_for_role, manual_statuses_for_role, staff_row
 
@@ -365,7 +365,7 @@ def dept_grid(ctx, dept_name, year_month, month, employees, year=None) -> dict:
         try:
             year = int(str(year_month).split('-')[0])
         except Exception:
-            year = 2026
+            year = year_for_month(month)
     num_days = calendar.monthrange(year, month)[1]
 
     side_groups = None
