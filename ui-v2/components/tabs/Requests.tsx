@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Check, EnvelopeSimple, Plus, Table, Trash, Tray, Warning, X } from '@phosphor-icons/react';
+import { Check, Plus, Table, Trash, Tray, Warning, X } from '@phosphor-icons/react';
 import { useMe, useStore } from '@/lib/store';
 import { DAILY_DEPTS, DOW_FULL, dowOf, daysIn, iso, type Absence } from '@/lib/mock';
 import { STATUS, absenceConflicts, deptOf, deriveStatus, fmtRange, type Code } from '@/lib/logic';
@@ -15,7 +15,7 @@ function Pending({ filter, scope }: { filter: string; scope: string[] }) {
   const list = db.absences.filter((a) => a.status === 'pending' && scope.includes(a.dept_at_request) && (filter === 'הכל' || a.dept_at_request === filter));
   const decide = (a: Absence, ok: boolean) => {
     mutate((x) => { const r = x.absences.find((q) => q.id === a.id)!; r.status = ok ? 'approved' : 'rejected'; r.approved_by = me.name; });
-    toast(`${ok ? 'אושר' : 'נדחה'}: ${a.employee} ${fmtRange(a.start_date, a.end_date)}. נשלח מייל לעובד/ת.`, ok ? 'ok' : 'info');
+    toast(`${ok ? 'אושר' : 'נדחה'}: ${a.employee} ${fmtRange(a.start_date, a.end_date)}`, ok ? 'ok' : 'info');
   };
   if (list.length === 0) return <p className="muted">אין בקשות ממתינות{filter !== 'הכל' ? ` ב${filter}` : ''}.</p>;
   return (
@@ -158,7 +158,7 @@ export default function Requests() {
   if (scope.length === 0) return <><PageHead title="ניהול בקשות" /><Note kind="warn">לא הוגדרו מחלקות בניהולך. פנה/י למנהל המערכת.</Note></>;
   return (
     <>
-      <PageHead eyebrow={admin ? 'היעדרויות מעבודה יומית' : `המחלקות שלך: ${scope.join(', ')}`} title="ניהול בקשות" sub={<span className="row"><EnvelopeSimple size={16} />כל אישור או דחייה שולחים מייל לעובד/ת</span>} />
+      <PageHead eyebrow={admin ? 'היעדרויות מעבודה יומית' : `המחלקות שלך: ${scope.join(', ')}`} title="ניהול בקשות" />
       {scope.length > 1 && (
         <div className="row" style={{ marginBottom: 18 }}>
           <span className="muted small">סינון לפי מחלקה</span>
