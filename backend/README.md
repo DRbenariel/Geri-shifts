@@ -39,15 +39,17 @@ python -m pytest tests -q      # 49 tests, about 2 minutes
 
 ## API (`api/`)
 
-A thin FastAPI layer over `geri_core` (SCREENS_PLAN §3). Status 2026-10-19: login, session and the **read** endpoints; writes come next.
+A thin FastAPI layer over `geri_core` (SCREENS_PLAN §3). Status 2026-10-19: login, session, the read endpoints and the write endpoints (`api/writes.py`), all behind the read-only switch.
 
 - **Session:** `POST /api/auth/login` sets an httpOnly cookie signed with `SESSION_SECRET`. It holds only the user name; the role is read from the staff sheet on every request, so permissions can't be claimed by the client.
 - **Permissions** are checked per route from that role (tabs per role as in `constants.tabs_for_role`; department managers only their `manage_depts`; interns and seniors only their own department; night-shift rows of others and who blocked/wished stay admin-only).
-- **Read-only by default.** `API_READ_ONLY=1` wraps the store so any write raises before it reaches the Sheet. Turn it off only when the write endpoints are ready and signed off (DEPLOY_PLAN rollout step 2).
-- **No password-hash upgrade** on login while Streamlit runs in parallel: Streamlit only reads SHA-256, so a bcrypt upgrade would lock that user out of the old app.
+- **Read-only by default.** With `API_READ_ONLY=1` every POST/PUT/DELETE (except login/logout) is refused up front, and the store refuses writes as a second line of defence. Turn it off only after the write phase is signed off (DEPLOY_PLAN rollout step 2).
+- **Passwords stay SHA-256 while Streamlit runs** (`STREAMLIT_PARALLEL=1`, default): no bcrypt upgrade on login, and changed or new passwords are SHA-256, because Streamlit can only read that format. Set `STREAMLIT_PARALLEL=0` when Streamlit is retired.
+- **Write rules enforced on the server:** employees submit constraints only for the open night month and absences only for the daily active month; department managers approve, reject, delete and edit only within their departments; approving or adding an absence that overlaps returns `409` with the Streamlit question until it is sent again with `force`; a swap request is accepted only if the server's own search finds that option.
+- **Email:** `SMTP_USER` / `SMTP_PASSWORD` (Gmail, as in Streamlit) send the absence notifications synchronously inside the request; without them mail is skipped.
 - Env vars: see `api/config.py`. Local run: `uvicorn api.main:app --reload` from `backend/` with `COOKIE_SECURE=0`.
 - Deploy: `Dockerfile` (Cloud Run, me-west1). The Cloudflare Worker proxies `/api/*` to it so the cookie stays first-party.
-- Tests: `tests/test_api.py` (login, tabs per role, 403s, privacy of the night calendar, read-only guard, JSON for every read route).
+- Tests: `tests/test_api.py` (login, tabs per role, 403s, privacy of the night calendar, read-only guard, JSON for every read route) and `tests/test_api_writes.py` (read-only gate, SHA-256 kept, month and department scope, conflict confirmation, swap validation).
 - Known cost: each request loads all 10 sheets. Fine for the pilot; add a short per-instance cache before the whole department uses it (Sheets API read quota).
 
 ## Tests

@@ -24,7 +24,8 @@ from geri_core.constants import DAILY_DEPTS_ALL, default_tab_for_role, tabs_for_
 
 from . import session
 from .config import Settings
-from .store import ReadOnlyError, ReadOnlyStore
+from .mailer import SmtpMailer
+from .store import READ_ONLY_MSG, ReadOnlyError, ReadOnlyStore
 
 # Hebrew tab names (geri_core.constants) → keys the ui-v2 frontend routes by (ui-v2/lib/roles.ts).
 TAB_KEYS = {'הגדרות': 'settings', 'סידור תורנויות': 'night', 'הגשת בקשות': 'submit', 'צוות': 'staff',
@@ -85,10 +86,12 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
         def store_factory():
             return GSheetStore(settings.credentials, settings.spreadsheet_url)
     app = FastAPI(title="Geri-shifts API", default_response_class=Plain, docs_url=None, redoc_url=None)
+    staff.use_legacy_hashes(settings.streamlit_parallel)
+    mailer = SmtpMailer(settings.smtp_user, settings.smtp_password) if settings.smtp_user else None
 
     def get_ctx() -> DataContext:
         store = store_factory()
-        return DataContext.load(ReadOnlyStore(store) if settings.read_only else store)
+        return DataContext.load(ReadOnlyStore(store) if settings.read_only else store, mailer=mailer)
 
     def current_user(request: Request, ctx: DataContext = Depends(get_ctx)) -> Me:
         name = session.verify(settings.session_secret, request.cookies.get(session.COOKIE))
@@ -105,6 +108,15 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
                 raise HTTPException(403, "אין הרשאה")
             return me
         return dep
+
+    # Read-only phase: refuse writes up front (the ReadOnlyStore below is the second line of defence),
+    # so e.g. a 38-second auto-schedule doesn't run only to fail at the save.
+    @app.middleware("http")
+    async def _read_only_gate(request: Request, call_next):
+        if (settings.read_only and request.method in ("POST", "PUT", "DELETE")
+                and request.url.path not in ("/api/auth/login", "/api/auth/logout")):
+            return Plain({"detail": READ_ONLY_MSG}, status_code=403)
+        return await call_next(request)
 
     @app.exception_handler(ReadOnlyError)
     async def _ro(_, exc):
@@ -123,7 +135,7 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
     def login(body: LoginBody, response: Response, ctx: DataContext = Depends(get_ctx)):
         try:
             # No SHA-256 → bcrypt upgrade while Streamlit runs in parallel: it can only read SHA-256.
-            who = staff.login(ctx, body.username, body.password, upgrade_hash=False)
+            who = staff.login(ctx, body.username, body.password, upgrade_hash=not settings.streamlit_parallel)
         except staff.AuthError as e:
             raise HTTPException(401, str(e))
         response.set_cookie(session.COOKIE, session.sign(settings.session_secret, who['name']),
@@ -241,6 +253,9 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
         return {"submissions": reports.submission_status(ctx, y, m),
                 "shift_counts": reports.shift_counts(ctx, y, m),
                 "problems": reports.problem_report(ctx)}
+
+    from .writes import register_writes
+    register_writes(app, settings, get_ctx, current_user, require)
 
     @app.get("/api/health")
     def health():

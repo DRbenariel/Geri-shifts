@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 
+READ_ONLY_MSG = "המערכת החדשה פתוחה כרגע לצפייה בלבד. שינויים נעשים עדיין באפליקציה הקיימת."
+
+
 class ReadOnlyError(PermissionError):
     pass
 
@@ -22,6 +25,6 @@ class ReadOnlyStore:
         return self._inner.titles()
 
     def _refuse(self, *a, **k):
-        raise ReadOnlyError("המערכת החדשה פתוחה כרגע לצפייה בלבד. שינויים נעשים עדיין באפליקציה הקיימת.")
+        raise ReadOnlyError(READ_ONLY_MSG)
 
     write = append_row = set_rtl = _refuse

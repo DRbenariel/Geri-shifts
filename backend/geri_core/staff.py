@@ -19,9 +19,19 @@ def sha256_hex(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
 
 
+# While the Streamlit app runs next to the API it can only read SHA-256, so the API
+# switches this on: new and changed passwords stay SHA-256 until Streamlit is retired.
+LEGACY_HASHES = False
+
+
+def use_legacy_hashes(flag: bool = True):
+    global LEGACY_HASHES
+    LEGACY_HASHES = bool(flag)
+
+
 def hash_password(pw: str) -> str:
     """New hashes are bcrypt when available; legacy readers keep accepting SHA-256."""
-    if bcrypt is None:
+    if bcrypt is None or LEGACY_HASHES:
         return sha256_hex(pw)
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
 
@@ -34,7 +44,7 @@ def verify_password(pw: str, stored: str) -> bool:
 
 
 def needs_upgrade(stored: str) -> bool:
-    return bcrypt is not None and not str(stored or '').startswith('$2')
+    return bcrypt is not None and not LEGACY_HASHES and not str(stored or '').startswith('$2')
 
 
 class AuthError(Exception):
