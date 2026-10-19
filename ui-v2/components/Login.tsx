@@ -20,7 +20,6 @@ export default function Login({ onLogin }: { onLogin: (name: string) => void }) 
     <div className="login">
       <div className="art">
         <h1>מערכת סידור עבודה<br />המערך הגריאטרי</h1>
-        <p>תורנויות, סידור עבודה יומי, היעדרויות וכוננויות. במקום אחד.</p>
       </div>
       <div className="form">
         <section className="shell"><div className="core">
