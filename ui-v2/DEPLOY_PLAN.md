@@ -1,6 +1,8 @@
 # Geri-shifts: deploying the new UI
 
-Status: proposal, revised 2026-10-18. Route chosen by Ben: **Cloudflare (Workers static assets) + Google Cloud Run**, aiming for about $0 a month. The mockup in this folder uses fictional data. Nothing here touches the live Streamlit app or the Google Sheet.
+Status (2026-10-19): **built, not yet deployed.** The UI is live on Cloudflare in demo mode; the API (`backend/api`) is complete (reads + writes, read-only by default) and the UI switches to it automatically once `/api` answers. Next step: **deploy the API to Cloud Run** (section "Next session: deploy checklist" below). Ben asked to hold this until the next session.
+
+Route chosen by Ben: **Cloudflare (Workers static assets) + Google Cloud Run**, aiming for about $0 a month.
 
 Earlier draft (2026-10-06) recommended Vercel Pro at $20/month. Dropped: Vercel Hobby is free but limited to non-commercial personal use, which a hospital department tool may not meet, and it gives the scheduler only 1 vCPU.
 
@@ -104,6 +106,27 @@ The mockup already defines the data shapes (`lib/mock.ts` mirrors `init_db`) and
 | 5 | Switch: send everyone the new link; Streamlit stays up as fallback for one month, then is retired | Ben | One quiet month |
 
 Both apps write the same sheets, so during steps 2 to 4 don't edit the same month from both at the same time. Streamlit's 10-minute read cache can show stale data.
+
+## Next session: deploy checklist
+
+Done so far (2026-10-19):
+- Year no longer hard-coded in the live app (on `main`, verified in production by Ben).
+- `backend/api`: login/session, read and write endpoints, server-side permissions, read-only gate, SHA-256 kept while Streamlit runs, Gmail mailer. 96+ tests pass.
+- UI: every tab has a live version on the API; demo mode stays when no backend answers.
+- Worker `worker/index.js` proxies `/api/*` to `API_ORIGIN`; unset today, so the site is still the demo.
+- Google Cloud: project **`gerishifts`** (same project as the Sheets service account) is linked to a billing account; Ben set a budget alert of ₪5.
+
+Steps, in order (nothing written to the Sheet; `API_READ_ONLY=1` throughout):
+1. Install the gcloud CLI on D: (C: is full), e.g. `D:\Program Files\google-cloud-sdk`, config dir on D: too.
+2. Ben runs `gcloud auth login` once (browser → Allow) with the Google account that owns `gerishifts`; `gcloud config set project gerishifts`.
+3. Enable APIs: Cloud Run, Cloud Build, Artifact Registry, Secret Manager.
+4. Secrets in Secret Manager: `SESSION_SECRET` (random 48 chars), `GSHEETS_CREDENTIALS` (the service-account JSON already used by the app), `SPREADSHEET_URL`; optional `SMTP_USER` / `SMTP_PASSWORD` (same Gmail as Streamlit's `[email]` secrets).
+5. `gcloud run deploy geri-api --source backend --region me-west1 --cpu 4 --memory 2Gi --min-instances 0 --max-instances 2 --timeout 300 --set-env-vars API_READ_ONLY=1,STREAMLIT_PARALLEL=1 --set-secrets ...` (Cloud Build builds `backend/Dockerfile`; no local Docker needed). Check: `/api/health`.
+6. Point the Worker at it: `npx wrangler secret put API_ORIGIN` (the run.app URL), redeploy. The site switches to live mode by itself.
+7. Ben logs in with his normal name and password and reviews every tab on real data (read-only). Watch: response time from Israel, Sheets read quota (each request loads all sheets: add a short cache if slow), cost after a few days.
+8. Only after Ben approves: turn writes on screen by screen (`API_READ_ONLY=0`), Streamlit stays primary until the pilot ends (Rollout steps 2–5).
+
+Open questions for Ben before step 8: hospital IT on the new server reading the same Sheet; whether to keep "open in Sheets" link sharing; forcing a password change from 1234.
 
 ## What Ben needs to do
 
