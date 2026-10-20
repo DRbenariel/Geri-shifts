@@ -5,7 +5,7 @@ import { useApi, type NightCal, type NightSlot } from '@/lib/api';
 import { DOW_FULL, HEB_MONTHS, dowOf } from '@/lib/mock';
 import { handoff } from '@/lib/logic';
 import { monthDays, useMe, ymOf } from '@/lib/store';
-import { Bezel, Cta, Kpi, Note, PageHead, PillSeg } from '../ui';
+import { Bezel, Cta, Kpi, Modal, Note, PageHead, PillSeg } from '../ui';
 import { Load, MonthPick, dmy, useAction } from './common';
 
 const ORDER = ['שיקום', 'פנימית גריאטרית', 'שישי בוקר - שיקום (1)', 'שישי בוקר - שיקום (2)', 'שישי בוקר - פנימית (1)', 'שישי בוקר - פנימית (2)'];
@@ -32,7 +32,9 @@ function AdminNight() {
   const swaps = useApi<{ index: number; requester: string; requester_date: string; requester_dept: string; candidate: string; candidate_date: string; candidate_dept: string; swap_type: string }[]>('/swaps/pending');
   const { run, busy } = useAction();
   const [summary, setSummary] = useState<string[]>([]);
+  const [askAuto, setAskAuto] = useState<null | boolean>(null);
   const auto = async (weekends: boolean) => {
+    setAskAuto(null);
     try {
       const r = await run<{ filled: number; total: number; messages: { text: string }[] }>(`/night/${ym}/auto`, 'POST', { only_weekends: weekends });
       if (r) { setSummary([`שובצו ${r.filled}/${r.total} משמרות`, ...r.messages.map((x) => x.text)]); q.reload(); }
@@ -116,12 +118,25 @@ function AdminNight() {
               <Bezel>
                 <h2 className="sec">שיבוץ אוטומטי</h2>
                 <div className="cardlist">
-                  <Cta variant="teal" icon={<MagicWand size={16} />} disabled={busy} onClick={() => auto(false)}>{busy ? 'משבץ... (עד דקה)' : 'שיבוץ אוטומטי מלא'}</Cta>
-                  <Cta variant="light" icon={<Coffee size={16} />} disabled={busy} onClick={() => auto(true)}>שיבוץ סופ&quot;שים בלבד</Cta>
+                  <Cta variant="teal" icon={<MagicWand size={16} />} disabled={busy} onClick={() => setAskAuto(false)}>{busy ? 'משבץ... (עד דקה)' : 'שיבוץ אוטומטי מלא'}</Cta>
+                  <Cta variant="light" icon={<Coffee size={16} />} disabled={busy} onClick={() => setAskAuto(true)}>שיבוץ סופ&quot;שים בלבד</Cta>
                 </div>
                 {summary.length > 0 && <div style={{ marginTop: 14 }}><Note kind="ok">{summary.map((t) => <div key={t}>{t}</div>)}</Note></div>}
               </Bezel>
             </div>
+            <Modal open={askAuto !== null} onClose={() => setAskAuto(null)}>
+              <h2 className="sec"><MagicWand size={22} />{askAuto ? 'לשבץ אוטומטית את הסופ"שים?' : `לשבץ אוטומטית את ${HEB_MONTHS[m - 1]}?`}</h2>
+              <ul className="confirm-list">
+                <li><b>{Object.values(cal.slots).flat().filter((r) => r.is_manual && r.employee !== '---').length}</b> שיבוצים ידניים יישארו כמו שהם.</li>
+                <li><b>{Object.values(cal.slots).flat().filter((r) => !r.is_manual && r.employee !== '---').length}</b> שיבוצים אוטומטיים קיימים {askAuto ? 'בסופ"שים ' : ''}יחושבו מחדש.</li>
+                <li><b>{empty.length}</b> משמרות חסרות ינסו להתמלא.</li>
+                <li>ההרצה לוקחת עד דקה. בשלב הזה אין עדיין ביטול אחרי הרצה מול הגיליון.</li>
+              </ul>
+              <div className="row">
+                <Cta variant="teal" icon={<MagicWand size={16} />} onClick={() => auto(!!askAuto)}>הרץ שיבוץ</Cta>
+                <button className="btn" onClick={() => setAskAuto(null)}>ביטול</button>
+              </div>
+            </Modal>
           </div>
         );
       }}</Load>

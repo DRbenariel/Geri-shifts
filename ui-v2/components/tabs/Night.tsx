@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowsClockwise, Broom, Moon, Sun, Check, Coffee, FileArrowUp, Lightning, MagicWand, MagnifyingGlass, Prohibit, Question, Star, Trash, Warning, X } from '@phosphor-icons/react';
+import { ArrowCounterClockwise, ArrowsClockwise, Broom, Moon, Sun, Check, Coffee, FileArrowUp, Lightning, MagicWand, MagnifyingGlass, Prohibit, Question, Star, Trash, Warning, X } from '@phosphor-icons/react';
 import { useMe, useStore } from '@/lib/store';
 import { handoff } from '@/lib/logic';
 import { DAYS_IN_MONTH, DOW_FULL, EXTERNALS, FRI_SLOTS, HEB_MONTHS, INTERNS, MONTH, NIGHT_DEPTS, YEAR, dowOf, iso, type ShiftRow } from '@/lib/mock';
@@ -181,13 +181,22 @@ function AdminNight() {
     if (wk.length) out.push([...wk, ...Array(7 - wk.length).fill(null)]); return out;
   }, []);
 
+  // Auto-scheduling rewrites the month, so it asks first and keeps the previous schedule for one undo.
+  const [askAuto, setAskAuto] = useState<null | boolean>(null);
+  const [undo, setUndo] = useState<ShiftRow[] | null>(null);
+  const manualCount = db.schedule.filter((r) => r.is_manual && r.employee !== '---').length;
+  const autoCount = filled.length - manualCount;
+  const restore = (snap: ShiftRow[]) => { mutate((x) => { x.schedule = snap; }); setUndo(null); setSummary(''); toast('השיבוץ בוטל. הסידור חזר למצב שלפני ההרצה.', 'info'); };
   const run = (weekendsOnly: boolean) => {
+    setAskAuto(null);
+    const snap = structuredClone(db.schedule);
     setBusy(weekendsOnly ? 'we' : 'all'); setSummary('');
     setTimeout(() => {
       setBusy('');
       const n = filled.filter((r) => !r.dept.startsWith('שישי')).length, f = filled.filter((r) => r.dept.startsWith('שישי')).length;
-      setSummary(`שיבוץ הושלם (CP-SAT, ${weekendsOnly ? 'סופ"שים בלבד' : 'חודש מלא'}): ${n}/${nightTotal} משמרות לילה, ${f}/${friTotal} שישי בוקר שובצו`);
-      toast('השיבוץ האוטומטי הסתיים');
+      setSummary(`השיבוץ הושלם (${weekendsOnly ? 'סופ"שים בלבד' : 'חודש מלא'}): ${n}/${nightTotal} משמרות לילה ו-${f}/${friTotal} שישי בוקר משובצים. ${manualCount} שיבוצים ידניים נשמרו.`);
+      setUndo(snap);
+      toast('השיבוץ האוטומטי הסתיים', 'ok', { label: 'בטל', fn: () => restore(snap) });
     }, 1600);
   };
   const fixes = (r: ShiftRow) => {
@@ -268,10 +277,11 @@ function AdminNight() {
           <Bezel>
             <h2 className="sec">שיבוץ אוטומטי</h2>
             <div className="cardlist">
-              <Cta variant="teal" icon={<MagicWand size={16} />} onClick={() => run(false)} disabled={!!busy}>{busy === 'all' ? 'משבץ...' : 'שיבוץ אוטומטי מלא'}</Cta>
-              <Cta variant="light" icon={<Coffee size={16} />} onClick={() => run(true)} disabled={!!busy}>{busy === 'we' ? 'משבץ...' : 'שיבוץ סופ"שים בלבד'}</Cta>
+              <Cta variant="teal" icon={<MagicWand size={16} />} onClick={() => setAskAuto(false)} disabled={!!busy}>{busy === 'all' ? 'משבץ...' : 'שיבוץ אוטומטי מלא'}</Cta>
+              <Cta variant="light" icon={<Coffee size={16} />} onClick={() => setAskAuto(true)} disabled={!!busy}>{busy === 'we' ? 'משבץ...' : 'שיבוץ סופ"שים בלבד'}</Cta>
             </div>
-            {summary && <div style={{ marginTop: 14 }}><Note kind="ok">{summary}</Note></div>}
+            {summary && <div style={{ marginTop: 14 }}><Note kind="ok">{summary}</Note>
+              {undo && <button className="btn" style={{ marginTop: 8 }} onClick={() => restore(undo)}><ArrowCounterClockwise size={14} />בטל את השיבוץ</button>}</div>}
           </Bezel>
           <Bezel>
             <h2 className="sec">הגדרות חודש</h2>
@@ -304,6 +314,19 @@ function AdminNight() {
         </div>
       </div>
 
+      <Modal open={askAuto !== null} onClose={() => setAskAuto(null)}>
+        <h2 className="sec"><MagicWand size={22} />{askAuto ? 'לשבץ אוטומטית את הסופ"שים?' : `לשבץ אוטומטית את ${HEB_MONTHS[MONTH - 1]}?`}</h2>
+        <ul className="confirm-list">
+          <li><b>{manualCount}</b> שיבוצים ידניים יישארו כמו שהם.</li>
+          <li><b>{autoCount}</b> שיבוצים אוטומטיים קיימים {askAuto ? 'בסופ"שים ' : ''}יחושבו מחדש.</li>
+          <li><b>{empty.length}</b> משמרות חסרות ינסו להתמלא.</li>
+          <li>אחרי ההרצה אפשר לבטל ולחזור לסידור הנוכחי.</li>
+        </ul>
+        <div className="row">
+          <Cta variant="teal" icon={<MagicWand size={16} />} onClick={() => run(!!askAuto)}>הרץ שיבוץ</Cta>
+          <button className="btn" onClick={() => setAskAuto(null)}>ביטול</button>
+        </div>
+      </Modal>
       <Modal open={!!confirm} onClose={() => setConfirm('')}>
         <h2 className="sec">{confirm === 'all' ? 'למחוק את כל המשמרות של החודש?' : 'למחוק את המשמרות שנקבעו אוטומטית?'}</h2>
         <p className="muted" style={{ marginBottom: 16 }}>{confirm === 'all' ? 'כולל שיבוצים ידניים. אי אפשר לבטל.' : 'שיבוצים ידניים יישארו.'}</p>

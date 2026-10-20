@@ -7,7 +7,8 @@ import { homeTab, tabsForRole, type TabKey } from './roles';
 import { daysIn } from './mock';
 
 type ToastKind = 'ok' | 'warn' | 'err' | 'info';
-interface Toast { id: number; msg: string; kind: ToastKind }
+export interface ToastAction { label: string; fn: () => void }
+interface Toast { id: number; msg: string; kind: ToastKind; action?: ToastAction }
 
 /** The logged-in user, the same shape in demo and live mode. */
 export interface Me {
@@ -18,7 +19,8 @@ export interface Me {
 interface Store {
   db: DB;
   mutate: (fn: (draft: DB) => void) => void;
-  toast: (msg: string, kind?: ToastKind) => void;
+  toast: (msg: string, kind?: ToastKind, action?: ToastAction) => void;
+  dismiss: (id: number) => void;
   toasts: Toast[];
   /** null while checking for a backend; true = real data via /api, false = demo data. */
   live: boolean | null;
@@ -53,10 +55,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const mutate = useCallback((fn: (d: DB) => void) => {
     setDb((prev) => { const next = structuredClone(prev); fn(next); return next; });
   }, []);
-  const toast = useCallback((msg: string, kind: ToastKind = 'ok') => {
+  const dismiss = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
+  // A toast with an action (e.g. undo) stays longer so there is time to use it.
+  const toast = useCallback((msg: string, kind: ToastKind = 'ok', action?: ToastAction) => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, msg, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3600);
+    setToasts((t) => [...t, { id, msg, kind, action }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 8000 : 3600);
   }, []);
 
   /** Returns an error message, or null on success. */
@@ -83,7 +87,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       settings: { ...st, active_year: yearOf(st.active_month), daily_active_year: yearOf(st.daily_active_month) },
     } : null;
   }
-  return <Ctx.Provider value={{ db, mutate, toast, toasts, live, me, login, logout, refreshMe }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ db, mutate, toast, dismiss, toasts, live, me, login, logout, refreshMe }}>{children}</Ctx.Provider>;
 }
 export function useStore() {
   const s = useContext(Ctx);

@@ -48,7 +48,13 @@ export function DeptGrid({ dept, y, m, editable, meName }: { dept: string; y: nu
     if (fullEdit) return setEdit({ name: row.name, d, code: st.code, note: st.note });
     const cyc = cycleFor(row.role); const i = cyc.indexOf(st.code);
     const next = cyc[(i + 1) % cyc.length];
-    mutate((x) => setManual(x, iso(y, m, d), row.name, dept, next));
+    const date = iso(y, m, d);
+    const prev = db.wsd.find((r) => r.date === date && r.employee === row.name);     // undefined = was automatic
+    mutate((x) => setManual(x, date, row.name, dept, next));
+    toast(`${first(row.name)} · ${d}/${m}: ${STATUS[st.code].he} ← ${STATUS[next].he}`, 'info', {
+      label: 'בטל',
+      fn: () => mutate((x) => { x.wsd = x.wsd.filter((r) => !(r.date === date && r.employee === row.name)); if (prev) x.wsd.push(prev); }),
+    });
   };
 
   return (

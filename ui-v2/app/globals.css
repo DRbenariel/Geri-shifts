@@ -343,3 +343,8 @@ tr.we-row td { background: rgba(14,26,31,.025); }
   .abs-cal .day .st { font-size: 11px; line-height: 1.15; }
   .ctr { font-size: 12px; padding: 5px 10px; }
 }
+
+/* ---- Undo in toasts, confirm lists */
+.toast-act { margin-inline-start: auto; border: 0; border-radius: 999px; padding: 5px 12px; background: rgba(255,255,255,.16); color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; }
+.toast-act:hover { background: rgba(255,255,255,.26); }
+.confirm-list { margin: 0 0 18px; padding-inline-start: 20px; display: grid; gap: 6px; font-size: 15px; }

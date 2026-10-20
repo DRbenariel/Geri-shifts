@@ -182,3 +182,19 @@ def test_manual_night_assign_refuses_blocked_employee(rw, store):
     r = rw.put("/api/night/slot", json={"date": blk['date'], "dept": "שיקום", "employee": blk['employee']})
     assert r.status_code == 400 and "אילוץ" in r.json()['detail']
     assert rw.put("/api/night/slot", json={"date": "2026-11-03", "dept": "לא קיים", "employee": INTERNS[0]}).status_code == 400
+
+
+def test_cell_undo_restores_computed_status(rw):
+    as_(rw, MGR_A)
+    dept = "שיקום גריאטרי א'"
+    grid = rw.get(f"/api/work/{dept}/2026-11").json()
+    row = next(r for r in grid['rows'] if r['employee'] != MGR_A)
+    cell = next(c for c in row['cells'] if not c['manual'] and not c['locked'] and c['status'] not in ('תורנות', None))
+    body = {"dept": dept, "date": f"2026-11-{cell['day']:02d}", "employee": row['employee']}
+    assert rw.post("/api/work/cell/cycle", json=body).status_code == 200
+    assert rw.request("DELETE", "/api/work/cell", json=body).status_code == 200
+    after = rw.get(f"/api/work/{dept}/2026-11").json()
+    c2 = next(r for r in after['rows'] if r['employee'] == row['employee'])['cells'][cell['day'] - 1]
+    assert c2['status'] == cell['status'] and not c2['manual']
+    as_(rw, SENIORS[0])
+    assert rw.request("DELETE", "/api/work/cell", json=body).status_code == 403

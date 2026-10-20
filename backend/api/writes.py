@@ -323,6 +323,13 @@ def register_writes(app, settings, get_ctx, current_user, require):
         daily.set_cell(ctx, _iso(body.date), body.employee.strip(), body.dept, body.status or "", body.note)
         return {"ok": True}
 
+    @app.delete("/api/work/cell")
+    def clear_cell(body: CellBody, me: Me = edit_roles, ctx: DataContext = ctx_dep):
+        """Undo for a cell edit: drop the manual override so the day returns to its computed status."""
+        _cell_target(ctx, me, body.dept, body.date, body.employee)
+        daily.wsd_delete(ctx, _iso(body.date), body.employee.strip())
+        return {"ok": True}
+
     @app.post("/api/work/transfer")
     def add_transfer(body: TransferBody, me: Me = edit_roles, ctx: DataContext = ctx_dep):
         _can_edit_dept(ctx, me, body.dept)

@@ -41,7 +41,7 @@ const TABS: { k: TabKey; he: string; short: string; I: ComponentType<IconProps>;
 const readHash = () => (typeof window === 'undefined' ? '' : window.location.hash.replace('#/', '').replace('#', ''));
 
 export default function AppShell() {
-  const { toasts, me, live, logout } = useStore();
+  const { toasts, dismiss, me, live, logout } = useStore();
   const [hash, setHash] = useState('');
   const navRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -55,7 +55,12 @@ export default function AppShell() {
 
   const toastLayer = (
     <div className="toasts" aria-live="polite">
-      {toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.msg}</div>)}
+      {toasts.map((t) => (
+        <div key={t.id} className={`toast ${t.kind}`}>
+          <span>{t.msg}</span>
+          {t.action && <button className="toast-act" onClick={() => { t.action!.fn(); dismiss(t.id); }}>{t.action.label}</button>}
+        </div>
+      ))}
     </div>
   );
   if (live === null) return <div className="boot" aria-busy="true" />;

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Bell, Moon, Sun } from '@phosphor-icons/react';
 import { useApi, type Grid, type GridRow } from '@/lib/api';
 import { DAILY_DEPTS, DOW_FULL, HEB_MONTHS } from '@/lib/mock';
-import { useMe, ymOf } from '@/lib/store';
+import { useMe, useStore, ymOf } from '@/lib/store';
 import { Bezel, Note, PageHead, Person, PillSeg, StatusLegend } from '../ui';
 import { Load, MonthPick, STATUS_CLASS, enc, useAction } from './common';
 
@@ -43,7 +43,8 @@ function GridView({ g, me, onCycle }: { g: Grid; me: string; onCycle: (r: GridRo
                     if (c.locked) return <button key={r.employee + i} className="cell locked" disabled title="מחוץ לימי ההעברה">-</button>;
                     const cls = c.blank_weekend ? 'E' : STATUS_CLASS[c.status ?? ''] ?? 'O';
                     return (
-                      <button key={r.employee + i} className={`cell ${cls}`} disabled={!g.editable || c.status === 'תורנות'}
+                      <button key={r.employee + i} className={`cell ${cls}`} data-k={`${r.employee}|${d}`}
+                        disabled={!g.editable || c.status === 'תורנות' || c.blank_weekend || i === 6}
                         onClick={() => onCycle(r, d)} title={`${r.employee} · ${d}/${g.month} · ${c.status || 'לא הוגדר'}${c.note ? ' · ' + c.note : ''}${c.manual ? ' (ידני)' : ''}`}>
                         {c.blank_weekend ? '' : c.label}{c.note && <span className="nt" />}
                       </button>
@@ -69,8 +70,18 @@ function GridView({ g, me, onCycle }: { g: Grid; me: string; onCycle: (r: GridRo
 function DeptGridLive({ dept, ym, me }: { dept: string; ym: string; me: string }) {
   const q = useApi<Grid>(`/work/${enc(dept)}/${ym}`);
   const { run } = useAction();
+  const { toast } = useStore();
   const cycle = (r: GridRow, d: number) => {
-    run('/work/cell/cycle', 'POST', { dept, date: `${ym}-${String(d).padStart(2, '0')}`, employee: r.employee }).then(q.reload).catch(() => {});
+    const body = { dept, date: `${ym}-${String(d).padStart(2, '0')}`, employee: r.employee };
+    const prev = r.cells[d - 1];
+    run<{ status: string }>('/work/cell/cycle', 'POST', body).then((res) => {
+      q.reload();
+      // Undo: put back a previous manual value, or drop the override so the day is computed again.
+      const restore = prev.manual && prev.status && r.allowed_statuses.includes(prev.status)
+        ? () => run('/work/cell', 'PUT', { ...body, status: prev.status, note: prev.note }).then(q.reload).catch(() => {})
+        : () => run('/work/cell', 'DELETE', body).then(q.reload).catch(() => {});
+      toast(`${first(r.employee)} · ${d}/${q.data?.month ?? ''}: ${prev.status || 'לא הוגדר'} ← ${res?.status || 'לא הוגדר'}`, 'info', { label: 'בטל', fn: restore });
+    }).catch(() => {});
   };
   return <Load q={q}>{(g) => <GridView g={g} me={me} onCycle={cycle} />}</Load>;
 }
