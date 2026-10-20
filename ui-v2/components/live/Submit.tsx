@@ -5,7 +5,7 @@ import { useApi } from '@/lib/api';
 import { DOW_FULL, HEB_MONTHS, dowOf } from '@/lib/mock';
 import { constraintCounters } from '@/lib/logic';
 import { monthDays, useMe, ymOf } from '@/lib/store';
-import { Bezel, Cta, Expander, Field, Note, PageHead } from '../ui';
+import { Bezel, Cta, Expander, Field, Note, PageHead, SaveBar } from '../ui';
 import { ConstraintCalendar } from '../tabs/Staff';
 import { Load, range, useAction } from './common';
 
@@ -26,7 +26,7 @@ function NightLive() {
   const c = constraintCounters(cons, y, m);
   const errors = [!c.okWish && 'ניתן לבחור עד 2 בקשות (⭐) בלבד.', intern && !c.okThu && `יש להשאיר לפחות 2 ימי חמישי פנויים (כרגע ${c.thu}).`,
     intern && !c.okWknd && `יש להשאיר לפחות 4 ימי סופ״ש פנויים (כרגע ${c.wknd}).`].filter(Boolean) as string[];
-  const dirty = JSON.stringify(listDays(cons, 'B')) + JSON.stringify(listDays(cons, 'R')) !== JSON.stringify(listDays(saved, 'B')) + JSON.stringify(listDays(saved, 'R'));
+  const nChanged = new Set([...Object.keys(cons), ...Object.keys(saved)].filter((d) => cons[+d] !== saved[+d])).size;
   const special = Object.fromEntries((sd.data ?? []).filter((s) => s.date.startsWith(ym)).map((s) => [+s.date.slice(8), s.description]));
   const toggle = (d: number) => setCons((x) => { const n = { ...x }; const v = n[d]; if (!v) n[d] = 'B'; else if (v === 'B') n[d] = 'R'; else delete n[d]; return n; });
   return (
@@ -36,11 +36,8 @@ function NightLive() {
         <>
           <ConstraintCalendar cons={cons} onToggle={toggle} special={special} rules={intern} y={y} m={m} />
           {errors.length > 0 && <Note kind="err">{errors.map((e) => <div key={e}>{e}</div>)}</Note>}
-          <div className="row" style={{ marginTop: 14 }}>
-            <Cta icon={<FloppyDisk size={16} />} disabled={!dirty || busy || errors.length > 0}
-              onClick={() => run(`/constraints/${ym}`, 'PUT', { blocked: listDays(cons, 'B'), wishes: listDays(cons, 'R') }, 'האילוצים נשמרו').then(q.reload).catch(() => {})}>שמור אילוצים ובקשות</Cta>
-            {!dirty && <span className="muted small">אין שינויים לשמירה</span>}
-          </div>
+          <SaveBar changes={nChanged} label="שמור אילוצים ובקשות" busy={busy} disabled={errors.length > 0}
+            onSave={() => run(`/constraints/${ym}`, 'PUT', { blocked: listDays(cons, 'B'), wishes: listDays(cons, 'R') }, 'האילוצים נשמרו').then(q.reload).catch(() => {})} />
         </>
       )}</Load>
     </Bezel>
@@ -80,7 +77,7 @@ function DailyLive() {
             if (c.approved_vac.includes(d) || c.approved_future.includes(d)) return ['חופש מאושר', 'V'];
             return null;
           };
-          const dirty = JSON.stringify(picks) !== JSON.stringify(saved);
+          const nDirty = new Set([...Object.keys(picks), ...Object.keys(saved)].filter((d) => picks[+d] !== saved[+d])).size;
           const save = () => run(`/absences/me/${ym}`, 'POST', {
             vacation: Object.keys(picks).map(Number).filter((d) => picks[d] === 'V'),
             days_202: Object.keys(picks).map(Number).filter((d) => picks[d] === 'S'),
@@ -99,7 +96,7 @@ function DailyLive() {
                 })}
               </div>
               <p className="muted small" style={{ margin: '10px 0' }}>לחיצה על יום: {senior ? 'עבודה → חופש → עבודה' : 'עבודה → חופש → 202 → עבודה'}.</p>
-              <Cta icon={<FloppyDisk size={16} />} disabled={!open || !dirty || busy} onClick={save}>שמור</Cta>
+              <SaveBar changes={nDirty} label="שמור בקשות היעדרות" onSave={save} disabled={!open} busy={busy} />
             </>
           );
         }}</Load>
@@ -132,7 +129,7 @@ export default function LiveSubmit() {
   const daily = me.type === 'מתמחה' || me.type === 'רופא בכיר';
   return (
     <>
-      <PageHead eyebrow={me.name} title="הגשת בקשות" />
+      <PageHead title="הגשת בקשות" />
       {night && <NightLive />}
       {daily && <DailyLive />}
     </>

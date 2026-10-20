@@ -4,7 +4,7 @@ import { CalendarPlus, ClockCounterClockwise, FloppyDisk, LockSimple, Moon, Push
 import { useMe, useStore } from '@/lib/store';
 import { DOW_FULL, HEB_MONTHS, YEAR, daysIn, dowOf, iso, type Absence } from '@/lib/mock';
 import { STATUS, absenceConflicts, constraintCounters, deptOf, deriveStatus, fmtDate, fmtRange } from '@/lib/logic';
-import { Bezel, Cta, Expander, Field, Note, PageHead } from '../ui';
+import { Bezel, Cta, Expander, Field, Note, PageHead, SaveBar } from '../ui';
 import { ConstraintCalendar } from './Staff';
 
 type Cons = Record<number, 'B' | 'R'>;
@@ -37,6 +37,7 @@ function NightConstraints() {
     diff(nR, sR).length > 0 && `➕ נוספו לבקשה: ${list(diff(nR, sR), m)}`,
     diff(sR, nR).length > 0 && `➖ הוסרו מבקשה: ${list(diff(sR, nR), m)}`,
   ].filter(Boolean) as string[];
+  const nChanged = diff(nB, sB).length + diff(sB, nB).length + diff(nR, sR).length + diff(sR, nR).length;
   const save = () => {
     if (errors.length) return toast('השמירה נחסמה: יש לתקן את השגיאות', 'err');
     mutate((x) => {
@@ -52,16 +53,13 @@ function NightConstraints() {
         <Note kind="info"><PushPin size={14} weight="fill" /> ימים מיוחדים החודש: {Object.entries(special).map(([d, t]) => `${d}/${m} ${t}`).join(' · ')}</Note>
       )}
       <p className="muted small" style={{ marginBottom: 14 }}>
-        מה שמור עכשיו: {sB.length ? <>🔒 חסימות: {list(sB, m)}</> : 'אין חסימות'}{sR.length > 0 && <> · ⭐ בקשות: {list(sR, m)}</>}
+        מה שמור עכשיו: {sB.length ? <>חסימות: {list(sB, m)}</> : 'אין חסימות'}{sR.length > 0 && <> · בקשות: {list(sR, m)}</>}
       </p>
       <ConstraintCalendar cons={cons} onToggle={toggle} special={special} rules={intern} />
       {changes.length > 0 && <div className="changes">{changes.map((t) => <div key={t}>{t}</div>)}</div>}
       {sB.length > 0 && nB.length === 0 && <Note kind="warn">הסרת את כל החסימות. ודא/י שזה מכוון.</Note>}
       {errors.length > 0 && <Note kind="err">{errors.map((e) => <div key={e}>{e}</div>)}</Note>}
-      <div className="row" style={{ marginTop: 14 }}>
-        <Cta icon={<FloppyDisk size={16} />} disabled={changes.length === 0} onClick={save}>שמור אילוצים ובקשות</Cta>
-        {changes.length === 0 && <span className="muted small">אין שינויים לשמירה</span>}
-      </div>
+      <SaveBar changes={nChanged} label="שמור אילוצים ובקשות" onSave={save} />
     </Bezel>
   );
 }
@@ -85,7 +83,7 @@ function DailyAbsence() {
     return out;
   }, [db.absences]); // eslint-disable-line react-hooks/exhaustive-deps
   const [picks, setPicks] = useState<Record<number, Pick>>(savedPicks);
-  const dirty = JSON.stringify(picks) !== JSON.stringify(savedPicks);
+  const nDirty = new Set([...Object.keys(picks), ...Object.keys(savedPicks)].filter((d) => picks[+d] !== savedPicks[+d])).size;
 
   // Fixed days: night shift, post-night, approved absence. Fri/Sat aren't requestable.
   const fixed = (d: number) => {
@@ -148,10 +146,7 @@ function DailyAbsence() {
         </div>
         <p className="muted small" style={{ margin: '10px 0' }}>לחיצה על יום: {senior ? 'עבודה → חופש → עבודה' : 'עבודה → חופש → 202 → עבודה'}. ימים קבועים לא ניתנים לשינוי.</p>
         {overlaps.length > 0 && <Note kind="warn"><Warning size={14} /> כבר מאושרים בחופש מ{dept}: {[...new Set(overlaps.map((o) => `${o.employee} (${fmtRange(o.start_date, o.end_date)})`))].join(', ')}. אפשר לשמור, וההחלטה אצל המנהל/ת.</Note>}
-        <div className="row">
-          <Cta icon={<FloppyDisk size={16} />} disabled={!open || !dirty} onClick={save}>שמור</Cta>
-          {dirty && <span className="muted small">יש שינויים שלא נשמרו</span>}
-        </div>
+        <SaveBar changes={nDirty} label="שמור בקשות היעדרות" onSave={save} disabled={!open} />
       </Bezel>
       <FutureVacation />
       <Bezel>
@@ -197,7 +192,7 @@ export default function Submit() {
   const daily = me.type === 'מתמחה' || me.type === 'רופא בכיר';
   return (
     <>
-      <PageHead eyebrow={me.name} title="הגשת בקשות"
+      <PageHead title="הגשת בקשות"
         sub={night ? `לחודש: ${HEB_MONTHS[db.settings.active_month - 1]} ${YEAR}` : `היעדרות מעבודה יומית: ${HEB_MONTHS[db.settings.daily_active_month - 1]} ${YEAR}`} />
       {night && <NightConstraints />}
       {daily && <DailyAbsence />}

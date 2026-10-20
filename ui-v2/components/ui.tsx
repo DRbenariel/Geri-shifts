@@ -1,11 +1,22 @@
 'use client';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowUpLeft, CaretDown, CheckCircle, Info, Warning, XCircle } from '@phosphor-icons/react';
+import { ArrowUpLeft, CaretDown, CheckCircle, FloppyDisk, Info, Warning, XCircle } from '@phosphor-icons/react';
 import { STATUS, type Code, initials } from '@/lib/logic';
 import type { Role } from '@/lib/mock';
 
 export function Bezel({ children, tight, className = '', id }: { children: ReactNode; tight?: boolean; className?: string; id?: string }) {
   return <section className={`shell ${className}`} id={id}><div className={`core ${tight ? 'tight' : ''}`}>{children}</div></section>;
+}
+
+/** Save row for a form of day toggles. While there are unsaved changes it sticks to the bottom of the
+ *  viewport (above the mobile tab bar), so the primary action stays reachable on a phone. */
+export function SaveBar({ changes, label, onSave, disabled, busy }: { changes: number; label: string; onSave: () => void; disabled?: boolean; busy?: boolean }) {
+  return (
+    <div className={`savebar ${changes > 0 ? 'dirty' : ''}`}>
+      <span className="savebar-msg">{changes > 0 ? (changes === 1 ? 'שינוי אחד לא נשמר' : `${changes} שינויים לא נשמרו`) : 'אין שינויים לשמירה'}</span>
+      <Cta icon={<FloppyDisk size={16} />} disabled={disabled || changes === 0 || busy} onClick={onSave}>{busy ? 'שומר...' : label}</Cta>
+    </div>
+  );
 }
 
 export function Kpi({ k, v, small, icon }: { k: string; v: string | number; small?: string; icon?: ReactNode }) {

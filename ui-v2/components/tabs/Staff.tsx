@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Check, CloudArrowDown, FloppyDisk, LockSimple, Plus, PushPin, Star, Trash, UserMinus, UserPlus, X } from '@phosphor-icons/react';
+import { Check, CloudArrowDown, FloppyDisk, LockSimple, Plus, PushPin, Star, Trash, UserMinus, UserPlus, Warning, X } from '@phosphor-icons/react';
 import { useStore } from '@/lib/store';
 import { DAILY_DEPTS, DOW_FULL, HEB_MONTHS, MONTH, ROLES, STAFF_DEPTS, YEAR, dowOf, iso, type Role, type Staff } from '@/lib/mock';
 import { absenceConflicts, constraintCounters, fmtRange } from '@/lib/logic';
@@ -10,35 +10,35 @@ import { Bezel, Cta, Expander, Field, Modal, Note, PageHead } from '../ui';
 export function ConstraintCalendar({ cons, onToggle, special, rules = true, y = YEAR, m = MONTH }: { cons: Record<number, 'B' | 'R'>; onToggle: (d: number) => void; special: Record<number, string>; rules?: boolean; y?: number; m?: number }) {
   const c = constraintCounters(cons, y, m);
   const nDays = new Date(y, m, 0).getDate();
-  const ring = (val: number, max: number, ok: boolean) => {
-    const r = 22, C = 2 * Math.PI * r, p = Math.min(val / max, 1);
-    return <svg width="54" height="54" viewBox="0 0 54 54" aria-hidden><circle cx="27" cy="27" r={r} fill="none" stroke="#EEF1F3" strokeWidth="6" />
-      <circle cx="27" cy="27" r={r} fill="none" stroke={ok ? 'var(--accent)' : 'var(--danger)'} strokeWidth="6" strokeLinecap="round" strokeDasharray={`${C * p} ${C}`} transform="rotate(-90 27 27)" style={{ transition: 'stroke-dasharray .8s var(--ease)' }} /></svg>;
-  };
+  // Rule counters as one compact line above the calendar, so they stay in view while tapping (no progress rings).
+  const ctr = (label: string, val: string, ok: boolean | null, rule = '') => (
+    <span className={`ctr ${ok === null ? '' : ok ? 'ok' : 'bad'}`} title={rule}>
+      {ok === false ? <Warning size={14} weight="fill" /> : ok ? <Check size={14} weight="bold" /> : null}
+      <b>{val}</b> {label}
+    </span>
+  );
   return (
-    <div className="split">
+    <div>
+      <div className="ctrs" aria-live="polite">
+        {ctr('חסימות', String(c.blocks), null)}
+        {ctr('בקשות', `${c.wishes}/2`, c.okWish, 'עד 2 בקשות')}
+        {rules && ctr('ה׳ פנויים', String(c.thu), c.okThu, 'צריך לפחות 2 ימי חמישי פנויים')}
+        {rules && ctr('סופ״ש פנויים', String(c.wknd), c.okWknd, 'צריך לפחות 4 ימי סופ״ש פנויים')}
+      </div>
+      <p className="muted small tap-hint">לחיצה על יום: פנוי ← <LockSimple size={12} weight="bold" /> חסימה ← <Star size={12} weight="fill" /> בקשה ← פנוי.{rules && ' צריך להשאיר לפחות 2 ימי חמישי ו-4 ימי סופ״ש פנויים.'}</p>
       <div className="cal">
         {DOW_FULL.map((h, i) => <div key={h} className={`h ${i >= 5 ? 'we' : ''}`}>{h}</div>)}
         {Array.from({ length: dowOf(y, m, 1) }, (_, i) => <div key={'b' + i} className="day blank" />)}
         {Array.from({ length: nDays }, (_, i) => i + 1).map((d) => {
           const v = cons[d]; const we = dowOf(y, m, d) >= 5;
           return (
-            <button key={d} className={`day ${v ?? ''} ${we ? 'we' : ''}`} onClick={() => onToggle(d)} aria-label={`${d}/${m} ${v === 'B' ? 'חסימה' : v === 'R' ? 'בקשה' : 'רגיל'}`}>
+            <button key={d} className={`day ${v ?? ''} ${we ? 'we' : ''}`} onClick={() => onToggle(d)} aria-label={`${d}/${m} ${v === 'B' ? 'חסימה' : v === 'R' ? 'בקשה' : 'פנוי'}`}>
               <span className="num">{d}{special[d] && <PushPin size={12} weight="fill" />}</span>
               {special[d] && <span className="sp">{special[d]}</span>}
               <span className="st">{v === 'B' && <><LockSimple size={13} weight="bold" /><span>חסימה</span></>}{v === 'R' && <><Star size={13} weight="fill" /><span>בקשה</span></>}</span>
             </button>
           );
         })}
-      </div>
-      <div className="cardlist">
-        <div className="ring">{ring(c.blocks, 10, true)}<div><div className="t">חסימות</div><div className="v">{c.blocks}</div></div></div>
-        <div className="ring">{ring(c.wishes, 2, c.okWish)}<div><div className="t">בקשות</div><div className="v">{c.wishes}<small> מתוך 2</small></div></div></div>
-        {rules && <>
-          <div className="ring">{ring(c.thu, 2, c.okThu)}<div><div className="t">ימי חמישי פנויים</div><div className="v">{c.thu}<small> מינימום 2</small></div></div></div>
-          <div className="ring">{ring(c.wknd, 4, c.okWknd)}<div><div className="t">ימי סופ&quot;ש פנויים</div><div className="v">{c.wknd}<small> מינימום 4</small></div></div></div>
-        </>}
-        <p className="muted small">פנוי, חסימה, בקשה: כל לחיצה מחליפה מצב.</p>
       </div>
     </div>
   );
