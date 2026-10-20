@@ -5,7 +5,7 @@ import { useApi } from '@/lib/api';
 import { DOW_FULL, HEB_MONTHS, dowOf } from '@/lib/mock';
 import { constraintCounters } from '@/lib/logic';
 import { monthDays, useMe, ymOf } from '@/lib/store';
-import { Bezel, Cta, Expander, Field, Note, PageHead, SaveBar } from '../ui';
+import { Bezel, Cta, Expander, Field, MarkMode, Note, PageHead, SaveBar } from '../ui';
 import { ConstraintCalendar } from '../tabs/Staff';
 import { Load, range, useAction } from './common';
 
@@ -24,11 +24,11 @@ function NightLive() {
   useEffect(() => setCons(saved), [saved]);
   const intern = me.type === 'מתמחה';
   const c = constraintCounters(cons, y, m);
-  const errors = [!c.okWish && 'ניתן לבחור עד 2 בקשות (⭐) בלבד.', intern && !c.okThu && `יש להשאיר לפחות 2 ימי חמישי פנויים (כרגע ${c.thu}).`,
+  const errors = [!c.okWish && 'ניתן לבחור עד 2 בקשות בלבד.', intern && !c.okThu && `יש להשאיר לפחות 2 ימי חמישי פנויים (כרגע ${c.thu}).`,
     intern && !c.okWknd && `יש להשאיר לפחות 4 ימי סופ״ש פנויים (כרגע ${c.wknd}).`].filter(Boolean) as string[];
   const nChanged = new Set([...Object.keys(cons), ...Object.keys(saved)].filter((d) => cons[+d] !== saved[+d])).size;
   const special = Object.fromEntries((sd.data ?? []).filter((s) => s.date.startsWith(ym)).map((s) => [+s.date.slice(8), s.description]));
-  const toggle = (d: number) => setCons((x) => { const n = { ...x }; const v = n[d]; if (!v) n[d] = 'B'; else if (v === 'B') n[d] = 'R'; else delete n[d]; return n; });
+  const toggle = (d: number, v: 'B' | 'R' | null) => setCons((c) => { const n = { ...c }; if (v) n[d] = v; else delete n[d]; return n; });
   return (
     <Bezel>
       <h2 className="sec"><Moon size={22} />אילוצים לתורנויות · {HEB_MONTHS[m - 1]} {y}</h2>
@@ -61,7 +61,7 @@ function DailyLive() {
   }, [q.data]);
   const [picks, setPicks] = useState<Record<number, Pick>>({});
   useEffect(() => setPicks(saved), [saved]);
-  const cycle: Pick[] = senior ? ['', 'V'] : ['', 'V', 'S'];
+  const [mode, setMode] = useState<'V' | 'S'>('V');
   const [fut, setFut] = useState({ start: '', end: '', note: '' });
   return (
     <>
@@ -84,6 +84,7 @@ function DailyLive() {
           }, 'הבקשות נשמרו ונשלחו למנהל/ת המחלקה').then(q.reload).catch(() => {});
           return (
             <>
+              {!senior && <MarkMode value={mode} onChange={setMode} options={[{ v: 'V' as const, label: 'חופש', hint: 'יום חופש', cls: 'V' }, ...(senior ? [] : [{ v: 'S' as const, label: '202', hint: 'יום 202', cls: 'S' }])]} />}
               <div className="cal abs-cal">
                 {DOW_FULL.map((h, i) => <div key={h} className={`h ${i >= 5 ? 'we' : ''}`}>{h}</div>)}
                 {Array.from({ length: dowOf(y, m, 1) }, (_, i) => <div key={'b' + i} className="day blank" />)}
@@ -91,11 +92,11 @@ function DailyLive() {
                   const f = fixed(d);
                   if (f) return <div key={d} className={`day fixed ${f[1]}`}><span className="num">{d}</span><span className="st">{f[0]}</span></div>;
                   const p = picks[d] ?? '';
-                  return <button key={d} className={`day pick ${p}`} disabled={!open} onClick={() => setPicks((x) => { const n = { ...x }; const nx = cycle[(cycle.indexOf(p) + 1) % cycle.length]; if (nx) n[d] = nx; else delete n[d]; return n; })}>
+                  return <button key={d} className={`day pick ${p}`} disabled={!open} onClick={() => setPicks((x) => { const n = { ...x }; if (n[d] === mode) delete n[d]; else n[d] = mode; return n; })}>
                     <span className="num">{d}</span><span className="st">{p === 'V' ? 'חופש' : p === 'S' ? '202' : ''}</span></button>;
                 })}
               </div>
-              <p className="muted small" style={{ margin: '10px 0' }}>לחיצה על יום: {senior ? 'עבודה → חופש → עבודה' : 'עבודה → חופש → 202 → עבודה'}.</p>
+              <p className="muted small" style={{ margin: '10px 0' }}>לחיצה על יום מסמנת {mode === 'V' ? 'חופש' : '202'}, ולחיצה נוספת מבטלת.</p>
               <SaveBar changes={nDirty} label="שמור בקשות היעדרות" onSave={save} disabled={!open} busy={busy} />
             </>
           );

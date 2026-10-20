@@ -4,7 +4,7 @@ import { CalendarPlus, ClockCounterClockwise, FloppyDisk, LockSimple, Moon, Push
 import { useMe, useStore } from '@/lib/store';
 import { DOW_FULL, HEB_MONTHS, YEAR, daysIn, dowOf, iso, type Absence } from '@/lib/mock';
 import { STATUS, absenceConflicts, constraintCounters, deptOf, deriveStatus, fmtDate, fmtRange } from '@/lib/logic';
-import { Bezel, Cta, Expander, Field, Note, PageHead, SaveBar } from '../ui';
+import { Bezel, Cta, Expander, Field, MarkMode, Note, PageHead, SaveBar } from '../ui';
 import { ConstraintCalendar } from './Staff';
 
 type Cons = Record<number, 'B' | 'R'>;
@@ -22,11 +22,11 @@ function NightConstraints() {
     .map((r) => [+r.date.slice(8), r.status === 'אילוץ' ? 'B' : 'R'])), [db.requests, me.name, m]);
   const [cons, setCons] = useState<Cons>(saved);
   const special = Object.fromEntries(db.specialDays.filter((s) => +s.date.slice(5, 7) === m).map((s) => [+s.date.slice(8), s.description]));
-  const toggle = (d: number) => setCons((c) => { const n = { ...c }; const v = n[d]; if (!v) n[d] = 'B'; else if (v === 'B') n[d] = 'R'; else delete n[d]; return n; });
+  const toggle = (d: number, v: 'B' | 'R' | null) => setCons((c) => { const n = { ...c }; if (v) n[d] = v; else delete n[d]; return n; });
 
   const c = constraintCounters(cons, YEAR, m);
   const errors = [
-    !c.okWish && 'ניתן לבחור עד 2 בקשות (⭐) בלבד.',
+    !c.okWish && 'ניתן לבחור עד 2 בקשות בלבד.',
     intern && !c.okThu && `יש להשאיר לפחות 2 ימי חמישי פנויים (כרגע ${c.thu}).`,
     intern && !c.okWknd && `יש להשאיר לפחות 4 ימי סופ״ש פנויים (כרגע ${c.wknd}).`,
   ].filter(Boolean) as string[];
@@ -95,8 +95,8 @@ function DailyAbsence() {
     if (appr) return { lab: `${appr.type === '202' ? '202' : 'חופש'} מאושר`, cls: appr.type === '202' ? 'S' : 'V' };
     return null;
   };
-  const cycle: Pick[] = senior ? ['', 'V'] : ['', 'V', 'S'];
-  const click = (d: number) => setPicks((p) => { const cur = p[d] ?? ''; const nx = cycle[(cycle.indexOf(cur) + 1) % cycle.length]; const q = { ...p }; if (nx) q[d] = nx; else delete q[d]; return q; });
+  const [mode, setMode] = useState<'V' | 'S'>('V');
+  const click = (d: number) => setPicks((p) => { const q = { ...p }; if (q[d] === mode) delete q[d]; else q[d] = mode; return q; });
 
   // Contiguous runs of the same type become one request each.
   const runs = () => {
@@ -130,6 +130,7 @@ function DailyAbsence() {
           <div className="lg"><span className="T">ת</span>תורנות (קבוע)</div>
           <div className="lg"><span className="A">א</span>אחרי תורנות (קבוע)</div>
         </div>
+        {!senior && <MarkMode value={mode} onChange={setMode} options={[{ v: 'V' as const, label: 'חופש', hint: 'יום חופש', cls: 'V' }, ...(senior ? [] : [{ v: 'S' as const, label: '202', hint: 'יום 202', cls: 'S' }])]} />}
         <div className="cal abs-cal">
           {DOW_FULL.map((h, i) => <div key={h} className={`h ${i >= 5 ? 'we' : ''}`}>{h}</div>)}
           {Array.from({ length: lead }, (_, i) => <div key={'b' + i} className="day blank" />)}
@@ -144,7 +145,7 @@ function DailyAbsence() {
             );
           })}
         </div>
-        <p className="muted small" style={{ margin: '10px 0' }}>לחיצה על יום: {senior ? 'עבודה → חופש → עבודה' : 'עבודה → חופש → 202 → עבודה'}. ימים קבועים לא ניתנים לשינוי.</p>
+        <p className="muted small" style={{ margin: '10px 0' }}>לחיצה על יום מסמנת {mode === 'V' ? 'חופש' : '202'}, ולחיצה נוספת מבטלת. ימים קבועים לא ניתנים לשינוי.</p>
         {overlaps.length > 0 && <Note kind="warn"><Warning size={14} /> כבר מאושרים בחופש מ{dept}: {[...new Set(overlaps.map((o) => `${o.employee} (${fmtRange(o.start_date, o.end_date)})`))].join(', ')}. אפשר לשמור, וההחלטה אצל המנהל/ת.</Note>}
         <SaveBar changes={nDirty} label="שמור בקשות היעדרות" onSave={save} disabled={!open} />
       </Bezel>

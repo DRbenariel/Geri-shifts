@@ -348,3 +348,29 @@ tr.we-row td { background: rgba(14,26,31,.025); }
 .toast-act { margin-inline-start: auto; border: 0; border-radius: 999px; padding: 5px 12px; background: rgba(255,255,255,.16); color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; }
 .toast-act:hover { background: rgba(255,255,255,.26); }
 .confirm-list { margin: 0 0 18px; padding-inline-start: 20px; display: grid; gap: 6px; font-size: 15px; }
+
+/* ---- Status picker (work grid) and marking mode (day calendars) */
+.picker { position: fixed; z-index: 80; background: #fff; border-radius: 20px; padding: 12px; box-shadow: 0 30px 60px -20px rgba(14,26,31,.45), 0 0 0 1px rgba(14,26,31,.08); }
+.picker-t { font-size: 13px; color: #56616B; padding: 2px 6px 8px; }
+.picker-opts { display: grid; gap: 4px; }
+.picker-opts button { display: flex; align-items: center; gap: 10px; border: 0; background: none; border-radius: 12px; padding: 7px 8px; font-size: 15px; text-align: right; cursor: pointer; }
+.picker-opts button:hover, .picker-opts button:focus-visible { background: rgba(14,26,31,.05); }
+.picker-opts button.on { background: rgba(14,26,31,.07); font-weight: 700; }
+.picker-opts .sw { width: 30px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-size: 12px; font-weight: 800; flex: none; }
+.picker-opts kbd { margin-inline-start: auto; font: inherit; font-size: 12px; color: #56616B; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; }
+.picker-x { display: flex; flex-wrap: wrap; gap: 6px; border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+.picker-x .btn { font-size: 13px; padding: 6px 10px; }
+.cell.picking { box-shadow: 0 0 0 3px var(--ink); }
+.markmode { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+.mm { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 14px; padding: 8px 14px; font-size: 15px; font-weight: 600; background: rgba(14,26,31,.05); color: var(--ink); cursor: pointer; }
+.mm small { font-size: 12px; font-weight: 400; color: #56616B; }
+.mm.on.B { background: var(--B); color: var(--Bt); box-shadow: inset 0 0 0 2px var(--Bt); }
+.mm.on.R { background: var(--W); color: var(--Wt); box-shadow: inset 0 0 0 2px var(--Wt); }
+.mm.on.V { background: var(--V); color: var(--Vt); box-shadow: inset 0 0 0 2px var(--Vt); }
+.mm.on.S { background: var(--S); color: var(--St); box-shadow: inset 0 0 0 2px var(--St); }
+.mm.on small { color: inherit; }
+
+/* Keep a marked day's colour on hover (touch keeps :hover after a tap) */
+button.day.B:hover { background: var(--B); } button.day.R:hover { background: var(--W); }
+.abs-cal button.day.V:hover { background: var(--V); } .abs-cal button.day.S:hover { background: var(--S); }
+@media (max-width: 767px) { .mm small { display: none; } .mm { padding: 8px 12px; } }

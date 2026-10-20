@@ -1,10 +1,13 @@
 'use client';
 import { useMemo, useState } from 'react';
-import { Bell, DownloadSimple, Moon, NotePencil, Plus, ShareNetwork, Sun, X } from '@phosphor-icons/react';
+import { ArrowCounterClockwise, Bell, DownloadSimple, Moon, NotePencil, Plus, ShareNetwork, Sun, X } from '@phosphor-icons/react';
 import { useMe, useStore } from '@/lib/store';
 import { DAILY_DEPTS, DOW_FULL, FRI_SLOTS, HEB_MONTHS, dowOf, daysIn, iso, type Role } from '@/lib/mock';
 import { STATUS, codeToHe, cycleFor, deptOf, deriveStatus, first, setManual, type Code, type DB } from '@/lib/logic';
-import { Bezel, Cta, Field, Modal, Note, PageHead, Person, PillSeg, StatusLegend } from '../ui';
+import { Bezel, Cta, Field, Modal, Note, PageHead, Person, PillSeg, StatusLegend, StatusPicker } from '../ui';
+
+// Keyboard shortcut per status in the picker (Hebrew letters as on the cells).
+const HOTKEY: Partial<Record<Code, string>> = { W: 'ע', V: 'ח', S: '2', A: 'א', O: '+', E: '-' };
 
 export const MONTHS12 = Array.from({ length: 12 }, (_, i) => { const m = ((9 + i) % 12) + 1; const y = 2026 + Math.floor((9 + i) / 12); return { y, m, v: `${y}-${String(m).padStart(2, '0')}`, l: `${HEB_MONTHS[m - 1]} ${y}` }; });
 
@@ -31,7 +34,7 @@ function deptRows(db: DB, dept: string, ym: string): Row[] {
 
 export function DeptGrid({ dept, y, m, editable, meName }: { dept: string; y: number; m: number; editable: boolean; meName?: string }) {
   const { db, mutate, toast } = useStore();
-  const [fullEdit, setFullEdit] = useState(false);
+  const [pick, setPick] = useState<{ row: Row; d: number; rect: DOMRect } | null>(null);
   const [edit, setEdit] = useState<{ name: string; d: number; code: Code; note: string } | null>(null);
   const ym = `${y}-${String(m).padStart(2, '0')}`;
   const rows = useMemo(() => deptRows(db, dept, ym), [db, dept, ym]);
@@ -43,15 +46,13 @@ export function DeptGrid({ dept, y, m, editable, meName }: { dept: string; y: nu
   const nightNames = (d: number) => db.schedule.filter((r) => r.date === iso(y, m, d) && !r.dept.startsWith('שישי') && r.employee !== '---' && rows.some((x) => x.name === r.employee)).map((r) => first(r.employee));
   const friNames = (d: number) => db.schedule.filter((r) => r.date === iso(y, m, d) && FRI_SLOTS.includes(r.dept) && rows.some((x) => x.name === r.employee)).map((r) => first(r.employee));
 
-  const click = (row: Row, d: number) => {
+  const apply = (row: Row, d: number, next: Code | 'AUTO') => {
+    setPick(null);
     const st = deriveStatus(db, y, m, d, row.name);
-    if (fullEdit) return setEdit({ name: row.name, d, code: st.code, note: st.note });
-    const cyc = cycleFor(row.role); const i = cyc.indexOf(st.code);
-    const next = cyc[(i + 1) % cyc.length];
     const date = iso(y, m, d);
     const prev = db.wsd.find((r) => r.date === date && r.employee === row.name);     // undefined = was automatic
-    mutate((x) => setManual(x, date, row.name, dept, next));
-    toast(`${first(row.name)} · ${d}/${m}: ${STATUS[st.code].he} ← ${STATUS[next].he}`, 'info', {
+    mutate((x) => { if (next === 'AUTO') x.wsd = x.wsd.filter((r) => !(r.date === date && r.employee === row.name)); else setManual(x, date, row.name, dept, next); });
+    toast(`${first(row.name)} · ${d}/${m}: ${STATUS[st.code].he} ← ${next === 'AUTO' ? 'חישוב אוטומטי' : STATUS[next].he}`, 'info', {
       label: 'בטל',
       fn: () => mutate((x) => { x.wsd = x.wsd.filter((r) => !(r.date === date && r.employee === row.name)); if (prev) x.wsd.push(prev); }),
     });
@@ -59,12 +60,7 @@ export function DeptGrid({ dept, y, m, editable, meName }: { dept: string; y: nu
 
   return (
     <>
-      {editable && (
-        <div className="row" style={{ marginBottom: 14 }}>
-          <PillSeg value={fullEdit ? 'f' : 'q'} onChange={(v) => setFullEdit(v === 'f')} options={[{ v: 'q', l: 'לחיצה מחליפה סטטוס' }, { v: 'f', l: 'עריכה עם הערה' }]} />
-          <span className="muted small">שבת וימי תורנות מחושבים אוטומטית ונעולים לעריכה</span>
-        </div>
-      )}
+      {editable && <p className="muted small" style={{ marginBottom: 14 }}>לחיצה על משבצת פותחת בחירת סטטוס. שבת וימי תורנות מחושבים אוטומטית ונעולים.</p>}
       {weeks.map((wk, wi) => (
         <Bezel key={wi}>
           <div className="row" style={{ marginBottom: 14 }}>
@@ -86,7 +82,8 @@ export function DeptGrid({ dept, y, m, editable, meName }: { dept: string; y: nu
                     const st = deriveStatus(db, y, m, d, r.name);
                     const locked = !editable || st.code === 'T' || i === 6;
                     return (
-                      <button key={r.name + i} className={`cell ${st.code}`} disabled={locked} onClick={() => click(r, d)}
+                      <button key={r.name + i} className={`cell ${st.code} ${pick?.row.name === r.name && pick.d === d ? 'picking' : ''}`} disabled={locked}
+                        onClick={(e) => setPick({ row: r, d, rect: e.currentTarget.getBoundingClientRect() })}
                         title={`${r.name} · ${d}/${m} · ${STATUS[st.code].he}${st.note ? ' · ' + st.note : ''}${st.manual ? ' (ידני)' : ''}`}
                         aria-label={`${r.name} ${d}/${m} ${STATUS[st.code].he}`}>
                         {STATUS[st.code].lab}{st.note && <span className="nt" />}
@@ -106,6 +103,18 @@ export function DeptGrid({ dept, y, m, editable, meName }: { dept: string; y: nu
           </div>
         </Bezel>
       ))}
+      {pick && (() => {
+        const st = deriveStatus(db, y, m, pick.d, pick.row.name);
+        return (
+          <StatusPicker anchor={pick.rect} title={`${pick.row.name} · ${DOW_FULL[dowOf(y, m, pick.d)]} ${pick.d}/${m}`} current={st.code}
+            options={cycleFor(pick.row.role).map((c) => ({ key: c, label: c === 'E' ? 'ריק (לא עובד/ת)' : STATUS[c].he, short: STATUS[c].lab, cls: c, hotkey: HOTKEY[c] }))}
+            onPick={(k) => apply(pick.row, pick.d, k as Code)} onClose={() => setPick(null)}
+            extra={<>
+              {st.manual && <button className="btn" onClick={() => apply(pick.row, pick.d, 'AUTO')}><ArrowCounterClockwise size={14} />חזרה לחישוב אוטומטי</button>}
+              <button className="btn" onClick={() => { setEdit({ name: pick.row.name, d: pick.d, code: st.code, note: st.note }); setPick(null); }}><NotePencil size={14} />הערה</button>
+            </>} />
+        );
+      })()}
       <Modal open={!!edit} onClose={() => setEdit(null)}>
         {edit && <>
           <h2 className="sec"><NotePencil size={22} />{edit.name} · {edit.d}/{m}</h2>

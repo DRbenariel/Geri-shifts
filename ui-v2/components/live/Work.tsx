@@ -1,10 +1,10 @@
 'use client';
 import { useState } from 'react';
-import { Bell, Moon, Sun } from '@phosphor-icons/react';
+import { ArrowCounterClockwise, Bell, Moon, NotePencil, Sun } from '@phosphor-icons/react';
 import { useApi, type Grid, type GridRow } from '@/lib/api';
 import { DAILY_DEPTS, DOW_FULL, HEB_MONTHS } from '@/lib/mock';
 import { useMe, useStore, ymOf } from '@/lib/store';
-import { Bezel, Note, PageHead, Person, PillSeg, StatusLegend } from '../ui';
+import { Bezel, Cta, Field, Modal, Note, PageHead, Person, PillSeg, StatusLegend, StatusPicker } from '../ui';
 import { Load, MonthPick, STATUS_CLASS, enc, useAction } from './common';
 
 const first = (n: string) => n.replace('ד"ר ', '').trim().split(' ')[0];
@@ -17,7 +17,7 @@ function weeks(g: Grid) {
   return out;
 }
 
-function GridView({ g, me, onCycle }: { g: Grid; me: string; onCycle: (r: GridRow, d: number) => void }) {
+function GridView({ g, me, onCycle }: { g: Grid; me: string; onCycle: (r: GridRow, d: number, rect: DOMRect) => void }) {
   const pnim = !!g.side_groups;
   const groups = pnim ? [{ k: 'ורוד', l: 'צד ורוד', c: 'pink' }, { k: 'כחול', l: 'צד כחול', c: 'blue' }] : [{ k: '', l: '', c: '' }];
   const day = (d: number) => g.days[d - 1];
@@ -45,7 +45,7 @@ function GridView({ g, me, onCycle }: { g: Grid; me: string; onCycle: (r: GridRo
                     return (
                       <button key={r.employee + i} className={`cell ${cls}`} data-k={`${r.employee}|${d}`}
                         disabled={!g.editable || c.status === 'תורנות' || c.blank_weekend || i === 6}
-                        onClick={() => onCycle(r, d)} title={`${r.employee} · ${d}/${g.month} · ${c.status || 'לא הוגדר'}${c.note ? ' · ' + c.note : ''}${c.manual ? ' (ידני)' : ''}`}>
+                        onClick={(e) => onCycle(r, d, e.currentTarget.getBoundingClientRect())} title={`${r.employee} · ${d}/${g.month} · ${c.status || 'לא הוגדר'}${c.note ? ' · ' + c.note : ''}${c.manual ? ' (ידני)' : ''}`}>
                         {c.blank_weekend ? '' : c.label}{c.note && <span className="nt" />}
                       </button>
                     );
@@ -67,23 +67,61 @@ function GridView({ g, me, onCycle }: { g: Grid; me: string; onCycle: (r: GridRo
   );
 }
 
+const HOTKEYS: Record<string, string> = { 'עובד': 'ע', 'חופש': 'ח', '202': '2', 'אחרי תורנות': 'א', 'אחר': '+', '': '-' };
+const SHORT: Record<string, string> = { 'עובד': 'ע', 'חופש': 'ח', '202': '202', 'אחרי תורנות': 'א', 'אחר': '+', '': '·' };
+
 function DeptGridLive({ dept, ym, me }: { dept: string; ym: string; me: string }) {
   const q = useApi<Grid>(`/work/${enc(dept)}/${ym}`);
   const { run } = useAction();
   const { toast } = useStore();
-  const cycle = (r: GridRow, d: number) => {
-    const body = { dept, date: `${ym}-${String(d).padStart(2, '0')}`, employee: r.employee };
+  const [pick, setPick] = useState<{ r: GridRow; d: number; rect: DOMRect } | null>(null);
+  const [noteFor, setNoteFor] = useState<{ r: GridRow; d: number; status: string; note: string } | null>(null);
+  const body = (r: GridRow, d: number) => ({ dept, date: `${ym}-${String(d).padStart(2, '0')}`, employee: r.employee });
+  // Every change offers undo: put back the previous manual value, or drop the override so the day is computed again.
+  const undoFor = (r: GridRow, d: number) => {
     const prev = r.cells[d - 1];
-    run<{ status: string }>('/work/cell/cycle', 'POST', body).then((res) => {
+    return prev.manual && prev.status && r.allowed_statuses.includes(prev.status)
+      ? () => run('/work/cell', 'PUT', { ...body(r, d), status: prev.status, note: prev.note }).then(q.reload).catch(() => {})
+      : () => run('/work/cell', 'DELETE', body(r, d)).then(q.reload).catch(() => {});
+  };
+  const apply = (r: GridRow, d: number, status: string | null, note?: string) => {
+    setPick(null);
+    const prev = r.cells[d - 1];
+    const req = status === null ? run('/work/cell', 'DELETE', body(r, d)) : run('/work/cell', 'PUT', { ...body(r, d), status, note: note ?? prev.note });
+    req.then(() => {
       q.reload();
-      // Undo: put back a previous manual value, or drop the override so the day is computed again.
-      const restore = prev.manual && prev.status && r.allowed_statuses.includes(prev.status)
-        ? () => run('/work/cell', 'PUT', { ...body, status: prev.status, note: prev.note }).then(q.reload).catch(() => {})
-        : () => run('/work/cell', 'DELETE', body).then(q.reload).catch(() => {});
-      toast(`${first(r.employee)} · ${d}/${q.data?.month ?? ''}: ${prev.status || 'לא הוגדר'} ← ${res?.status || 'לא הוגדר'}`, 'info', { label: 'בטל', fn: restore });
+      toast(`${first(r.employee)} · ${d}/${q.data?.month ?? ''}: ${prev.status || 'לא הוגדר'} ← ${status === null ? 'חישוב אוטומטי' : status || 'לא הוגדר'}`, 'info', { label: 'בטל', fn: undoFor(r, d) });
     }).catch(() => {});
   };
-  return <Load q={q}>{(g) => <GridView g={g} me={me} onCycle={cycle} />}</Load>;
+  return (
+    <>
+      <Load q={q}>{(g) => <GridView g={g} me={me} onCycle={(r, d, rect) => setPick({ r, d, rect })} />}</Load>
+      {pick && (() => {
+        const c = pick.r.cells[pick.d - 1];
+        return (
+          <StatusPicker anchor={pick.rect} title={`${pick.r.employee} · ${pick.d}/${q.data?.month ?? ''}`} current={c.status ?? ''}
+            options={pick.r.allowed_statuses.map((st) => ({ key: st, label: st || 'ריק (לא עובד/ת)', short: SHORT[st] ?? st, cls: STATUS_CLASS[st] ?? 'O', hotkey: HOTKEYS[st] }))}
+            onPick={(k) => apply(pick.r, pick.d, k)} onClose={() => setPick(null)}
+            extra={<>
+              {c.manual && <button className="btn" onClick={() => apply(pick.r, pick.d, null)}><ArrowCounterClockwise size={14} />חזרה לחישוב אוטומטי</button>}
+              <button className="btn" onClick={() => { setNoteFor({ r: pick.r, d: pick.d, status: c.status && pick.r.allowed_statuses.includes(c.status) ? c.status : pick.r.allowed_statuses[0], note: c.note }); setPick(null); }}><NotePencil size={14} />הערה</button>
+            </>} />
+        );
+      })()}
+      <Modal open={!!noteFor} onClose={() => setNoteFor(null)}>
+        {noteFor && <>
+          <h2 className="sec"><NotePencil size={22} />{noteFor.r.employee} · {noteFor.d}/{q.data?.month ?? ''}</h2>
+          <Field label="סטטוס"><select className="input" value={noteFor.status} onChange={(e) => setNoteFor({ ...noteFor, status: e.target.value })}>
+            {noteFor.r.allowed_statuses.map((st) => <option key={st} value={st}>{st || 'ריק'}</option>)}</select></Field>
+          <Field label="הערה"><input className="input" value={noteFor.note} onChange={(e) => setNoteFor({ ...noteFor, note: e.target.value })} placeholder="למשל: קורס, ישיבה" /></Field>
+          <div className="row">
+            <Cta onClick={() => { apply(noteFor.r, noteFor.d, noteFor.status, noteFor.note); setNoteFor(null); }}>שמירה</Cta>
+            <button className="btn" onClick={() => setNoteFor(null)}>ביטול</button>
+          </div>
+        </>}
+      </Modal>
+    </>
+  );
 }
 
 function ManagerWork({ depts }: { depts: string[] }) {

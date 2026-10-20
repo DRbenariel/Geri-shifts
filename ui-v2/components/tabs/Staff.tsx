@@ -4,11 +4,14 @@ import { Check, CloudArrowDown, FloppyDisk, LockSimple, Plus, PushPin, Star, Tra
 import { useStore } from '@/lib/store';
 import { DAILY_DEPTS, DOW_FULL, HEB_MONTHS, MONTH, ROLES, STAFF_DEPTS, YEAR, dowOf, iso, type Role, type Staff } from '@/lib/mock';
 import { absenceConflicts, constraintCounters, fmtRange } from '@/lib/logic';
-import { Bezel, Cta, Expander, Field, Modal, Note, PageHead } from '../ui';
+import { Bezel, Cta, Expander, Field, MarkMode, Modal, Note, PageHead } from '../ui';
 
 /** rules=false hides the Thursday/weekend counters (תורן חוץ, and the admin editor which saves without enforcing them). */
-export function ConstraintCalendar({ cons, onToggle, special, rules = true, y = YEAR, m = MONTH }: { cons: Record<number, 'B' | 'R'>; onToggle: (d: number) => void; special: Record<number, string>; rules?: boolean; y?: number; m?: number }) {
+/** Marking mode: pick "חסימה" or "בקשה" once, then each tap marks a day with it (tap again to clear). */
+export function ConstraintCalendar({ cons, onToggle, special, rules = true, y = YEAR, m = MONTH }: { cons: Record<number, 'B' | 'R'>; onToggle: (d: number, v: 'B' | 'R' | null) => void; special: Record<number, string>; rules?: boolean; y?: number; m?: number }) {
   const c = constraintCounters(cons, y, m);
+  const [mode, setMode] = useState<'B' | 'R'>('B');
+  const tap = (d: number) => onToggle(d, cons[d] === mode ? null : mode);
   const nDays = new Date(y, m, 0).getDate();
   // Rule counters as one compact line above the calendar, so they stay in view while tapping (no progress rings).
   const ctr = (label: string, val: string, ok: boolean | null, rule = '') => (
@@ -25,14 +28,18 @@ export function ConstraintCalendar({ cons, onToggle, special, rules = true, y = 
         {rules && ctr('ה׳ פנויים', String(c.thu), c.okThu, 'צריך לפחות 2 ימי חמישי פנויים')}
         {rules && ctr('סופ״ש פנויים', String(c.wknd), c.okWknd, 'צריך לפחות 4 ימי סופ״ש פנויים')}
       </div>
-      <p className="muted small tap-hint">לחיצה על יום: פנוי ← <LockSimple size={12} weight="bold" /> חסימה ← <Star size={12} weight="fill" /> בקשה ← פנוי.{rules && ' צריך להשאיר לפחות 2 ימי חמישי ו-4 ימי סופ״ש פנויים.'}</p>
+      <MarkMode value={mode} onChange={setMode} options={[
+        { v: 'B', label: 'חסימה', hint: 'לא יכול/ה', cls: 'B', icon: <LockSimple size={15} weight="bold" /> },
+        { v: 'R', label: 'בקשה', hint: 'רוצה לעבוד', cls: 'R', icon: <Star size={15} weight="fill" /> },
+      ]} />
+      <p className="muted small tap-hint">לחיצה על יום מסמנת {mode === 'B' ? 'חסימה' : 'בקשה'}. לחיצה נוספת מבטלת.{rules && ' צריך להשאיר לפחות 2 ימי חמישי ו-4 ימי סופ״ש פנויים.'}</p>
       <div className="cal">
         {DOW_FULL.map((h, i) => <div key={h} className={`h ${i >= 5 ? 'we' : ''}`}>{h}</div>)}
         {Array.from({ length: dowOf(y, m, 1) }, (_, i) => <div key={'b' + i} className="day blank" />)}
         {Array.from({ length: nDays }, (_, i) => i + 1).map((d) => {
           const v = cons[d]; const we = dowOf(y, m, d) >= 5;
           return (
-            <button key={d} className={`day ${v ?? ''} ${we ? 'we' : ''}`} onClick={() => onToggle(d)} aria-label={`${d}/${m} ${v === 'B' ? 'חסימה' : v === 'R' ? 'בקשה' : 'פנוי'}`}>
+            <button key={d} className={`day ${v ?? ''} ${we ? 'we' : ''}`} onClick={() => tap(d)} aria-label={`${d}/${m} ${v === 'B' ? 'חסימה' : v === 'R' ? 'בקשה' : 'פנוי'}`}>
               <span className="num">{d}{special[d] && <PushPin size={12} weight="fill" />}</span>
               {special[d] && <span className="sp">{special[d]}</span>}
               <span className="st">{v === 'B' && <><LockSimple size={13} weight="bold" /><span>חסימה</span></>}{v === 'R' && <><Star size={13} weight="fill" /><span>בקשה</span></>}</span>
@@ -151,7 +158,7 @@ function PerEmployee() {
   const [cons, setCons] = useState(fromDb);
   useEffect(() => { setCons(fromDb()); }, [emp]); // eslint-disable-line react-hooks/exhaustive-deps
   const special = Object.fromEntries(db.specialDays.filter((s) => s.date.startsWith('2026-11')).map((s) => [+s.date.slice(8), s.description]));
-  const toggle = (d: number) => setCons((c) => { const n = { ...c }; const v = n[d]; if (!v) n[d] = 'B'; else if (v === 'B') n[d] = 'R'; else delete n[d]; return n; });
+  const toggle = (d: number, v: 'B' | 'R' | null) => setCons((c) => { const n = { ...c }; if (v) n[d] = v; else delete n[d]; return n; });
   const myAbs = db.absences.filter((a) => a.employee === emp);
   return (
     <Bezel>

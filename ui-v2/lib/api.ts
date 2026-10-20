@@ -1,7 +1,7 @@
 // Client for the FastAPI layer (backend/api). Same origin: the Cloudflare Worker proxies /api/* to Cloud Run,
 // so the httpOnly session cookie stays first-party.
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -39,10 +39,15 @@ export function useApi<T>(path: string | null) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(!!path);
+  // Only the latest request may update state: a slow earlier reload must not overwrite a newer one.
+  const seq = useRef(0);
   const load = useCallback(async () => {
     if (!path) return;
+    const mine = ++seq.current;
     setLoading(true); setError(null);
-    try { setData(await api<T>(path)); } catch (e) { setError(e as ApiError); } finally { setLoading(false); }
+    try { const d = await api<T>(path); if (mine === seq.current) setData(d); }
+    catch (e) { if (mine === seq.current) setError(e as ApiError); }
+    finally { if (mine === seq.current) setLoading(false); }
   }, [path]);
   useEffect(() => { load(); }, [load]);
   return { data, error, loading, reload: load };

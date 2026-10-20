@@ -19,6 +19,57 @@ export function SaveBar({ changes, label, onSave, disabled, busy }: { changes: n
   );
 }
 
+export interface PickOption { key: string; label: string; short: string; cls: string; hotkey?: string }
+/** Picks a day status from named buttons instead of cycling blindly. Opens next to the tapped cell;
+ *  Escape or a click outside closes it, and on a keyboard the hotkey letter picks directly. */
+export function StatusPicker({ anchor, title, options, current, onPick, extra, onClose }: {
+  anchor: DOMRect; title: string; options: PickOption[]; current: string;
+  onPick: (key: string) => void; extra?: ReactNode; onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') return onClose();
+      const o = options.find((x) => x.hotkey && x.hotkey === e.key);
+      if (o) { e.preventDefault(); onPick(o.key); }
+    };
+    const out = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    window.addEventListener('keydown', k); document.addEventListener('mousedown', out);
+    ref.current?.querySelector<HTMLButtonElement>('button.on, button')?.focus();
+    return () => { window.removeEventListener('keydown', k); document.removeEventListener('mousedown', out); };
+  }, [options, onPick, onClose]);
+  const W = 240, below = anchor.bottom + 8 + 260 < window.innerHeight;
+  const left = Math.min(Math.max(8, anchor.left + anchor.width / 2 - W / 2), window.innerWidth - W - 8);
+  return (
+    <div ref={ref} className="picker" role="dialog" aria-label={title}
+      style={{ left, width: W, ...(below ? { top: anchor.bottom + 8 } : { bottom: window.innerHeight - anchor.top + 8 }) }}>
+      <div className="picker-t">{title}</div>
+      <div className="picker-opts">
+        {options.map((o) => (
+          <button key={o.key} className={o.key === current ? 'on' : ''} onClick={() => onPick(o.key)} aria-pressed={o.key === current}>
+            <span className={`sw ${o.cls}`}>{o.short}</span>{o.label}{o.hotkey && <kbd>{o.hotkey}</kbd>}
+          </button>
+        ))}
+      </div>
+      {extra && <div className="picker-x">{extra}</div>}
+    </div>
+  );
+}
+
+/** "What does a tap mark?" selector above a day calendar (marking mode instead of cycling). */
+export function MarkMode<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { v: T; label: string; hint: string; cls: string; icon?: ReactNode }[] }) {
+  return (
+    <div className="markmode" role="radiogroup" aria-label="מה לסמן">
+      <span className="muted small">מסמנים:</span>
+      {options.map((o) => (
+        <button key={o.v} role="radio" aria-checked={value === o.v} className={`mm ${o.cls} ${value === o.v ? 'on' : ''}`} onClick={() => onChange(o.v)}>
+          {o.icon}{o.label}<small>{o.hint}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Kpi({ k, v, small, icon }: { k: string; v: string | number; small?: string; icon?: ReactNode }) {
   return <Bezel tight><div className="kpi"><div className="k">{icon}{k}</div><div className="v">{v}{small && <small> {small}</small>}</div></div></Bezel>;
 }
