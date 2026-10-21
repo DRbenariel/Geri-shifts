@@ -58,7 +58,7 @@ function AbsenceGantt({ filter, scope }: { filter: string; scope: string[] }) {
         <select className="input" style={{ width: 170 }} value={ym} onChange={(e) => setYm(e.target.value)}>{MONTHS12.map((x) => <option key={x.v} value={x.v}>{x.l}</option>)}</select>
       </div>
       <div className="legend">
-        {(['V', 'S', 'A', 'O'] as Code[]).map((c) => <div key={c} className="lg"><span className={c}>{STATUS[c].lab === STATUS[c].he ? '' : STATUS[c].lab}</span>{STATUS[c].he}</div>)}
+        {(['V', 'S', 'A', 'O'] as Code[]).map((c) => <div key={c} className="lg"><span className={c}>{STATUS[c].lab}</span>{STATUS[c].he}</div>)}
         <div className="lg"><span className="gcell ov" style={{ width: 24, height: 24 }} />חפיפה במחלקה</div>
       </div>
       {depts.map((dept) => {

@@ -140,7 +140,7 @@ export function Person({ name, role, me }: { name: string; role?: Role | string;
 export function StatusLegend({ codes = ['W', 'V', 'S', 'A', 'T', 'O', 'E'] as Code[] }) {
   return (
     <div className="legend">
-      {codes.map((k) => <div key={k} className="lg"><span className={k}>{STATUS[k].lab === STATUS[k].he ? '' : STATUS[k].lab}</span>{STATUS[k].he}</div>)}
+      {codes.map((k) => <div key={k} className="lg"><span className={k}>{STATUS[k].lab}</span>{STATUS[k].he}</div>)}
     </div>
   );
 }
