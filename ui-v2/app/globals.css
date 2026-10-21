@@ -383,3 +383,10 @@ button.day.B:hover { background: var(--B); } button.day.R:hover { background: va
   .slot { font-size: 11px; }
   .rail a, .mob-nav a { font-size: 11px; }
 }
+
+.gantt-empty { margin: 0 0 10px; padding: 8px 12px; border-radius: 12px; background: rgba(14,26,31,.035); }
+
+/* Day tooltip in the absence tables */
+.daytip { width: max-content; max-width: 260px; position: fixed; z-index: 85; pointer-events: none; transform: translateY(-100%); background: var(--ink); color: #fff; border-radius: 14px; padding: 10px 12px; font-size: 13px; line-height: 1.5; box-shadow: 0 16px 34px -14px rgba(14,26,31,.55); }
+.daytip b { display: block; font-size: 14px; margin-bottom: 2px; }
+.abs-t td.gc { cursor: default; }

@@ -80,4 +80,4 @@ export interface Pending {
   dept_at_request: string; dept_canonical: string; created_at?: string; conflict_question: string;
   conflicts: { employee: string; start: string; end: string }[];
 }
-export interface AbsGantt { by_dept: Record<string, Record<string, [number, string][]>>; conflicts: { dept: string; day: number; employees: string[] }[] }
+export interface AbsGantt { by_dept: Record<string, Record<string, [number, string][]>>; notes?: Record<string, Record<string, string>>; conflicts: { dept: string; day: number; employees: string[] }[] }

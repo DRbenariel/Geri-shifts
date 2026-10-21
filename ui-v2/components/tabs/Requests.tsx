@@ -2,9 +2,9 @@
 import { useState } from 'react';
 import { Check, Plus, Table, Trash, Tray, Warning, X } from '@phosphor-icons/react';
 import { useMe, useStore } from '@/lib/store';
-import { DAILY_DEPTS, DOW_FULL, dowOf, daysIn, iso, type Absence } from '@/lib/mock';
+import { DAILY_DEPTS, DOW_LETTER, dowOf, daysIn, iso, type Absence } from '@/lib/mock';
 import { STATUS, absenceConflicts, deptOf, deriveStatus, fmtRange, type Code } from '@/lib/logic';
-import { Bezel, Cta, Expander, Field, Note, PageHead, Person, PillSeg } from '../ui';
+import { Bezel, Cta, Expander, Field, Note, PageHead, Person, PillSeg, useDayTip } from '../ui';
 import { MONTHS12 } from './Work';
 
 const TYPE_BADGE: Record<string, string> = { 'חופש': 'b-info', '202': 'b-warn', 'חופש עתידי': 'b-teal', 'היעדרות אחרת': 'b-mute' };
@@ -51,10 +51,15 @@ function AbsenceGantt({ filter, scope }: { filter: string; scope: string[] }) {
   for (let d = 1; d <= n; d++) { const w = dowOf(mo.y, mo.m, d); if (w <= 4) wk.push(d); if (w === 4 || d === n) { if (wk.length) weeks.push(wk); wk = []; } }
   const depts = filter === 'הכל' ? scope : [filter];
   const absent = (c: Code) => c === 'V' || c === 'S' || c === 'A' || c === 'O';
+  // By default each week lists only who is away that week; "show everyone" brings back the full roster.
+  const [all, setAll] = useState(false);
+  const { bind, node } = useDayTip();
+  const away = (e: string, ds: number[]) => ds.some((d) => absent(deriveStatus(db, mo.y, mo.m, d, e).code));
   return (
     <Bezel>
       <div className="row" style={{ marginBottom: 14 }}>
         <h2 className="sec" style={{ margin: 0 }}>כל ההיעדרויות בחודש</h2><span className="grow" />
+        <PillSeg value={all ? 'all' : 'away'} onChange={(v) => setAll(v === 'all')} options={[{ v: 'away', l: 'רק מי שנעדר/ה' }, { v: 'all', l: 'כל העובדים' }]} />
         <select className="input" style={{ width: 170 }} value={ym} onChange={(e) => setYm(e.target.value)}>{MONTHS12.map((x) => <option key={x.v} value={x.v}>{x.l}</option>)}</select>
       </div>
       <div className="legend">
@@ -62,31 +67,35 @@ function AbsenceGantt({ filter, scope }: { filter: string; scope: string[] }) {
         <div className="lg"><span className="gcell ov" style={{ width: 24, height: 24 }} />חפיפה במחלקה</div>
       </div>
       {depts.map((dept) => {
+        // One compact month table per department: weekday columns, and by default only people who are away.
         const emps = db.rotation.filter((r) => r.daily_dept === dept).map((r) => r.employee);
+        const days = weeks.flat();
+        const shown = all ? emps : emps.filter((e) => away(e, days));
+        const hidden = emps.length - shown.length;
         return (
-          <div key={dept} style={{ marginBottom: 22 }}>
-            <h3 className="sub">{dept}</h3>
-            {weeks.map((w, wi) => (
-              <div key={wi} className="gantt" style={{ marginBottom: 10 }}>
-                <div className="gh" style={{ textAlign: 'right' }}>שבוע {wi + 1}</div>
-                {Array.from({ length: 5 }, (_, i) => { const d = w.find((x) => dowOf(mo.y, mo.m, x) === i); return <div key={i} className="gh">{DOW_FULL[i]}<b>{d ?? ''}</b></div>; })}
-                {emps.map((e) => [
-                  <div key={e} className="small" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e}</div>,
-                  ...Array.from({ length: 5 }, (_, i) => {
-                    const d = w.find((x) => dowOf(mo.y, mo.m, x) === i);
-                    if (!d) return <div key={e + i} />;
+          <div key={dept} style={{ marginBottom: 20 }}>
+            <h3 className="sub">{dept}{hidden > 0 && <span className="muted small" style={{ fontWeight: 400, marginInlineStart: 8 }}>· עוד {hidden} בלי היעדרויות החודש</span>}</h3>
+            {shown.length === 0 ? <p className="muted small gantt-empty">אין היעדרויות החודש.</p> : (
+              <div className="tbl-wrap"><table className="t abs-t">
+                <thead><tr><th>עובד/ת</th>{days.map((d) => <th key={d} className="num">{d}<div className="muted small">{DOW_LETTER[dowOf(mo.y, mo.m, d)]}</div></th>)}</tr></thead>
+                <tbody>{shown.map((e) => (
+                  <tr key={e}><td style={{ whiteSpace: 'nowrap' }}>{e}</td>{days.map((d) => {
                     const c = deriveStatus(db, mo.y, mo.m, d, e).code;
-                    if (!absent(c)) return <div key={e + i} className="gcell" />;
+                    if (!absent(c)) return <td key={d} />;
                     const real = (x: Code) => x === 'V' || x === 'S' || x === 'O';
                     const others = real(c) ? emps.filter((o) => o !== e && real(deriveStatus(db, mo.y, mo.m, d, o).code)) : [];
-                    return <div key={e + i} className={`gcell ${c} ${others.length ? 'ov' : ''}`} title={others.length ? `חפיפה: ${[e, ...others].join(', ')}` : `${e}: ${STATUS[c].he}`}>{STATUS[c].lab}</div>;
-                  }),
-                ])}
-              </div>
-            ))}
+                    const st = deriveStatus(db, mo.y, mo.m, d, e);
+                    // What the person does that day: the absence type, plus its note if any (e.g. "מילואים").
+                    const lines = [STATUS[c].he, ...(st.note ? [st.note] : [])];
+                    return <td key={d} className={`gc ${c} ${others.length ? 'ov' : ''}`} {...bind(lines)}>{STATUS[c].lab}</td>;
+                  })}</tr>
+                ))}</tbody>
+              </table></div>
+            )}
           </div>
         );
       })}
+      {node}
     </Bezel>
   );
 }

@@ -67,9 +67,30 @@ class LoginBody(BaseModel):
     password: str
 
 
-def _gantt_json(g: dict) -> dict:
-    """absence_gantt keys conflicts by (dept, day) tuples, which JSON can't hold."""
-    return {'by_dept': g['by_dept'],
+def _day_note(ctx, emp: str, ds: str) -> str:
+    """The note behind an absent day: a manual WSD note, else the approved request's note (e.g. "מילואים")."""
+    note = daily.wsd_get_note(ctx, ds, emp)
+    if note:
+        return note
+    ar = ctx.absence_requests
+    if ar.empty or 'employee' not in ar.columns:
+        return ''
+    m = ar[(ar['employee'].astype(str).str.strip() == emp) & (ar['status'].astype(str).str.lower() == 'approved')
+           & (ar['start_date'].astype(str) <= ds) & (ar['end_date'].astype(str) >= ds)]
+    return '' if m.empty else str(m.iloc[0].get('notes', '') or '').strip()
+
+
+def _gantt_json(g: dict, ctx=None, y: int = 0, m: int = 0) -> dict:
+    """absence_gantt keys conflicts by (dept, day) tuples, which JSON can't hold; also attach each day's note."""
+    notes = {}
+    if ctx is not None:
+        for emps in g['by_dept'].values():
+            for emp, items in emps.items():
+                for day, _st in items:
+                    n = _day_note(ctx, emp, f"{y}-{m:02d}-{day:02d}")
+                    if n:
+                        notes.setdefault(emp, {})[str(day)] = n
+    return {'by_dept': g['by_dept'], 'notes': notes,
             'conflicts': [{'dept': d, 'day': day, 'employees': es} for (d, day), es in g['conflicts'].items()]}
 
 
@@ -233,8 +254,8 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
             mine = people.managed_depts(ctx, me.name)
             if dept and dept not in mine:
                 raise HTTPException(403, "אין הרשאה למחלקה זו")
-            return {d: _gantt_json(absences.absence_gantt(ctx, y, m, dept_filter=d)) for d in ([dept] if dept else mine)}
-        return _gantt_json(absences.absence_gantt(ctx, y, m, dept_filter=dept))
+            return {d: _gantt_json(absences.absence_gantt(ctx, y, m, dept_filter=d), ctx, y, m) for d in ([dept] if dept else mine)}
+        return _gantt_json(absences.absence_gantt(ctx, y, m, dept_filter=dept), ctx, y, m)
 
     @app.get("/api/absences/me/{ym}")
     def my_absences(ym: str, me: Me = Depends(require('מתמחה', 'רופא בכיר')), ctx: DataContext = Depends(get_ctx)):

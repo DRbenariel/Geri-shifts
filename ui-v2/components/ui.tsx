@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowUpLeft, CaretDown, CheckCircle, FloppyDisk, Info, Warning, XCircle } from '@phosphor-icons/react';
 import { STATUS, type Code, initials } from '@/lib/logic';
 import type { Role } from '@/lib/mock';
@@ -170,6 +171,26 @@ export function Popover({ trigger, children }: { trigger: (toggle: () => void) =
       {open && <div className="popover" style={{ top: '110%', insetInlineStart: 0 }}>{children(() => setOpen(false))}</div>}
     </div>
   );
+}
+
+/** Card tooltip for a day cell: full wording on hover, and on tap for touch screens.
+ *  lines[0] is the heading; later lines are details. */
+export function useDayTip() {
+  const [tip, setTip] = useState<{ x: number; y: number; lines: string[] } | null>(null);
+  const bind = (lines: string[]) => ({
+    onMouseMove: (e: React.MouseEvent) => setTip({ x: e.clientX, y: e.clientY, lines }),
+    onMouseLeave: () => setTip(null),
+    onClick: (e: React.MouseEvent) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setTip({ x: r.left + r.width / 2, y: r.top, lines }); },
+  });
+  const W = 160;   // used only to keep the box on screen; the box itself sizes to its text
+  // Portalled to <body>: a transformed ancestor (the cards' entrance animation) would otherwise
+  // turn position:fixed into position-relative-to-the-card.
+  const node = tip && typeof document !== 'undefined' ? createPortal(
+    <div className="daytip" role="tooltip" style={{ left: Math.min(Math.max(8, tip.x - W / 2), (typeof window !== 'undefined' ? window.innerWidth : 1200) - W - 8), top: tip.y - 12 }}>
+      <b>{tip.lines[0]}</b>
+      {tip.lines.slice(1).map((l) => <div key={l}>{l}</div>)}
+    </div>, document.body) : null;
+  return { bind, node };
 }
 
 /** Tooltip that follows the pointer; used by chart marks. */

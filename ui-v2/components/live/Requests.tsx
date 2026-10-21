@@ -4,7 +4,7 @@ import { Check, Plus, Tray, Warning, X } from '@phosphor-icons/react';
 import { ApiError, useApi, type AbsGantt, type Pending } from '@/lib/api';
 import { DAILY_DEPTS, DOW_LETTER, dowOf } from '@/lib/mock';
 import { useMe, ymOf } from '@/lib/store';
-import { Bezel, Cta, Expander, Field, Modal, Note, PageHead, Person, PillSeg } from '../ui';
+import { Bezel, Cta, Expander, Field, Modal, Note, PageHead, Person, PillSeg, useDayTip } from '../ui';
 import { Load, MonthPick, range, STATUS_CLASS, useAction } from './common';
 
 const TYPE_BADGE: Record<string, string> = { 'חופש': 'b-info', '202': 'b-warn', 'חופש עתידי': 'b-teal', 'היעדרות אחרת': 'b-mute' };
@@ -55,6 +55,7 @@ function GanttLive({ filter, scope, manager }: { filter: string; scope: string[]
   const dept = filter !== 'הכל' ? filter : manager && scope.length === 1 ? scope[0] : '';
   const q = useApi<AbsGantt | Record<string, AbsGantt>>(`/absences/gantt/${ym}${dept ? `?dept=${encodeURIComponent(dept)}` : ''}`);
   const days = Array.from({ length: new Date(y, m, 0).getDate() }, (_, i) => i + 1).filter((d) => dowOf(y, m, d) <= 4);
+  const { bind, node } = useDayTip();
   return (
     <Bezel>
       <div className="row" style={{ marginBottom: 14 }}><h2 className="sec" style={{ margin: 0 }}>כל ההיעדרויות בחודש</h2><span className="grow" /><MonthPick value={ym} onChange={setYm} /></div>
@@ -62,7 +63,8 @@ function GanttLive({ filter, scope, manager }: { filter: string; scope: string[]
         // Managers get {dept: gantt}; admins one gantt across departments.
         const parts: AbsGantt[] = 'by_dept' in raw ? [raw as AbsGantt] : Object.values(raw as Record<string, AbsGantt>);
         const by: Record<string, Record<string, [number, string][]>> = Object.assign({}, ...parts.map((p) => p.by_dept));
-        const conf = new Set(parts.flatMap((p) => p.conflicts.map((c) => `${c.dept}|${c.day}`)));
+        const confMap = new Map(parts.flatMap((p) => p.conflicts.map((c) => [`${c.dept}|${c.day}`, c.employees] as const)));
+        const notes: Record<string, Record<string, string>> = Object.assign({}, ...parts.map((p) => p.notes ?? {}));
         const depts = Object.keys(by).filter((d) => !manager || scope.includes(d));
         if (depts.length === 0) return <p className="muted">אין היעדרויות בחודש זה.</p>;
         return depts.map((d) => (
@@ -73,13 +75,19 @@ function GanttLive({ filter, scope, manager }: { filter: string; scope: string[]
               <tbody>{Object.entries(by[d]).map(([emp, items]) => {
                 const map = Object.fromEntries(items);
                 return <tr key={emp}><td style={{ whiteSpace: 'nowrap' }}>{emp}</td>{days.map((x) => {
-                  const st = map[x]; return <td key={x} className={st ? `gc ${STATUS_CLASS[st] ?? 'O'} ${conf.has(`${d}|${x}`) ? 'ov' : ''}` : ''} title={st ?? ''}>{st === '202' ? '202' : st ? st[0] : ''}</td>;
+                  const st = map[x];
+                  if (!st) return <td key={x} />;
+                  const others = (confMap.get(`${d}|${x}`) ?? []).filter((o) => o !== emp);
+                  const note = notes[emp]?.[String(x)];
+                  const lines = [st, ...(note ? [note] : [])];
+                  return <td key={x} className={`gc ${STATUS_CLASS[st] ?? 'O'} ${others.length ? 'ov' : ''}`} {...bind(lines)}>{st === '202' ? '202' : st[0]}</td>;
                 })}</tr>;
               })}</tbody>
             </table></div>
           </div>
         ));
       }}</Load>
+      {node}
     </Bezel>
   );
 }
