@@ -1,5 +1,7 @@
 # Geri-shifts: deploying the new UI
 
+Status (2026-10-26): **API deployed read-only** at `https://geri-api-987250474634.me-west1.run.app` (checklist steps 1–5 done). The site is still in demo mode until step 6 points the Worker at it.
+
 Status (2026-10-19): **built, not yet deployed.** The UI is live on Cloudflare in demo mode; the API (`backend/api`) is complete (reads + writes, read-only by default) and the UI switches to it automatically once `/api` answers. Next step: **deploy the API to Cloud Run** (section "Next session: deploy checklist" below). Ben asked to hold this until the next session.
 
 Route chosen by Ben: **Cloudflare (Workers static assets) + Google Cloud Run**, aiming for about $0 a month.
@@ -33,7 +35,7 @@ browser ──HTTPS──> Cloudflare Worker  (one origin: geri-shifts.<account>
                                                         FastAPI (Python)
                                                          ├─ auth: login → signed httpOnly session cookie
                                                          ├─ role check on every route (server side)
-                                                         ├─ scheduling_core/ (logic lifted from appy.py)
+                                                         ├─ geri_core/ (logic lifted from appy.py)    
                                                          └─ gspread ──> Google Sheets (unchanged schema)
 GitHub Actions ── daily_report.py ──> Sheets   (unchanged)
 Gmail SMTP <── API (absence notifications)      (unchanged)
@@ -117,16 +119,19 @@ Done so far (2026-10-19):
 - Google Cloud: project **`gerishifts`** (same project as the Sheets service account) is linked to a billing account; Ben set a budget alert of ₪5.
 
 Steps, in order (nothing written to the Sheet; `API_READ_ONLY=1` throughout):
-1. Install the gcloud CLI on D: (C: is full), e.g. `D:\Program Files\google-cloud-sdk`, config dir on D: too.
+1. Install the gcloud CLI (Single User): installed at `C:\Users\User\AppData\Local\Google\Cloud SDK\google-cloud-sdk` (`bin\gcloud.cmd`); config dir `D:\Projects\gcloud-config` via the user variable `CLOUDSDK_CONFIG` (set 2026-10-26). `D:\Program Files` is not writable without admin, so the installer fails there with "Error opening unzip files".
 2. Ben runs `gcloud auth login` once (browser → Allow) with the Google account that owns `gerishifts`; `gcloud config set project gerishifts`.
 3. Enable APIs: Cloud Run, Cloud Build, Artifact Registry, Secret Manager.
 4. Secrets in Secret Manager: `SESSION_SECRET` (random 48 chars), `GSHEETS_CREDENTIALS` (the service-account JSON already used by the app), `SPREADSHEET_URL`; optional `SMTP_USER` / `SMTP_PASSWORD` (same Gmail as Streamlit's `[email]` secrets).
-5. `gcloud run deploy geri-api --source backend --region me-west1 --cpu 4 --memory 2Gi --min-instances 0 --max-instances 2 --timeout 300 --set-env-vars API_READ_ONLY=1,STREAMLIT_PARALLEL=1 --set-secrets ...` (Cloud Build builds `backend/Dockerfile`; no local Docker needed). Check: `/api/health`.
+5. `gcloud run deploy geri-api --source backend --region me-west1 --service-account scheduler-bot@gerishifts.iam.gserviceaccount.com --cpu 4 --memory 2Gi --min-instances 0 --max-instances 2 --timeout 300 --allow-unauthenticated --set-env-vars API_READ_ONLY=1,STREAMLIT_PARALLEL=1 --set-secrets SESSION_SECRET=SESSION_SECRET:latest,SPREADSHEET_URL=SPREADSHEET_URL:latest,GSHEETS_CREDENTIALS=GSHEETS_CREDENTIALS:latest` (Cloud Build builds `backend/Dockerfile`; no local Docker needed). Check: `/api/health`.
+   - **Done 2026-10-26** (revision `geri-api-00002`). Secrets created in step 4 without SMTP (local `secrets.toml` has no `[email]`), readable by `scheduler-bot`. `--allow-unauthenticated` approved by Ben: the Worker forwards requests without Google identity; the API's own session + role checks protect the data.
+   - The first revision took 14–21 s per request: it re-authenticated and read the 10 sheets one by one (~20 Sheets calls) even for a 401. Fixed in `d6ac5cf`: cookie checked before any read, one shared store, one `values.batchGet` (output verified identical on all 10 live sheets). Now a no-session request takes ~0.13 s, a Sheet load ~1–2 s.
+   - Every request still loads all sheets on the same service account as Streamlit (60 reads/min per user). Add a short cache, cleared on writes, before the pilot (step 8).
 6. Point the Worker at it: `npx wrangler secret put API_ORIGIN` (the run.app URL), redeploy. The site switches to live mode by itself.
 7. Ben logs in with his normal name and password and reviews every tab on real data (read-only). Watch: response time from Israel, Sheets read quota (each request loads all sheets: add a short cache if slow), cost after a few days.
 8. Only after Ben approves: turn writes on screen by screen (`API_READ_ONLY=0`), Streamlit stays primary until the pilot ends (Rollout steps 2–5).
 
-Open questions for Ben before step 8: hospital IT on the new server reading the same Sheet; whether to keep "open in Sheets" link sharing; forcing a password change from 1234.
+Decided by Ben (2026-10-26): hospital IT sign-off is not needed; "open in Sheets" keeps "anyone with the link" sharing; no forced password change from 1234.
 
 ## What Ben needs to do
 
