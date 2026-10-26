@@ -21,6 +21,9 @@ function GridView({ g, me, onCycle }: { g: Grid; me: string; onCycle: (r: GridRo
   const pnim = !!g.side_groups;
   const groups = pnim ? [{ k: 'ורוד', l: 'צד ורוד', c: 'pink' }, { k: 'כחול', l: 'צד כחול', c: 'blue' }] : [{ k: '', l: '', c: '' }];
   const day = (d: number) => g.days[d - 1];
+  // Night duty is shown only for people on this board: an intern rotated elsewhere who did this
+  // dept's night shift isn't part of this dept's day schedule.
+  const onBoard = new Set(g.rows.map((r) => r.employee.trim()));
   return (
     <>
       {g.unassigned_side.length > 0 && <Note kind="warn">בלי צד בפנימית (לא מוצגים בגריד): {g.unassigned_side.join(', ')}</Note>}
@@ -55,7 +58,7 @@ function GridView({ g, me, onCycle }: { g: Grid; me: string; onCycle: (r: GridRo
             })}
             <div className="gsep" />
             <div className="meta-l"><Moon size={18} weight="light" />תורנ/ית</div>
-            {wk.map((d, i) => { const n = d ? names(day(d).night_duty) : []; return n.length ? <span key={'n' + i} className="mchip">{n.map(first).join(', ')}</span> : <span key={'n' + i} />; })}
+            {wk.map((d, i) => { const n = d ? names(day(d).night_duty).filter((x) => onBoard.has(x.trim())) : []; return n.length ? <span key={'n' + i} className="mchip">{n.map(first).join(', ')}</span> : <span key={'n' + i} />; })}
             <div className="meta-l"><Sun size={18} weight="light" />שישי בוקר</div>
             {wk.map((d, i) => { const n = d ? names(day(d).friday_workers) : []; return n.length ? <span key={'f' + i} className="mchip">{n.map(first).join(', ')}</span> : <span key={'f' + i} />; })}
             <div className="meta-l"><Bell size={18} weight="light" />כונן/ית</div>

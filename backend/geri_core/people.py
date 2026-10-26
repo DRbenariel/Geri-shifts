@@ -191,7 +191,8 @@ def dept_roster(ctx, dept_name, year_month) -> list:
 
 def grid_employees(ctx, dept_name, year_month, include_user=None) -> list:
     """Managers + roster, role-sorted — the row list every סידור עבודה view uses (7973-7982, 8894)."""
-    emps = dept_roster(ctx, dept_name, year_month)
+    # dept_rotation rows outlive a deleted employee; only people still in the staff sheet get a row.
+    emps = [e for e in dept_roster(ctx, dept_name, year_month) if staff_row(ctx, e) is not None]
     mgrs = get_dept_managers(ctx, dept_name)
     if include_user and include_user not in mgrs:
         mgrs = [include_user] + mgrs

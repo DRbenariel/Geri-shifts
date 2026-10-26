@@ -11,7 +11,6 @@ import { Load, MonthPick, dmy, useAction } from './common';
 const ORDER = ['שיקום', 'פנימית גריאטרית', 'שישי בוקר - שיקום (1)', 'שישי בוקר - שיקום (2)', 'שישי בוקר - פנימית (1)', 'שישי בוקר - פנימית (2)'];
 const kind = (dept: string) => (dept.startsWith('שישי') ? 'fr' : dept === 'שיקום' ? 'sh' : 'pn');
 const short = (dept: string) => (dept.startsWith('שישי') ? 'שישי' : dept === 'שיקום' ? 'שיקום' : 'פנימית');
-const first = (n: string) => n.replace('ד"ר ', '').trim().split(' ')[0];
 
 function Month({ y, m, cell }: { y: number; m: number; cell: (d: number, date: string) => React.ReactNode }) {
   const lead = dowOf(y, m, 1);
@@ -83,7 +82,7 @@ function AdminNight() {
                       {sp && <span className="sp" title={sp.day_type}>{sp.description}</span>}
                       {rows.map((r) => r.employee === '---'
                         ? <span key={r.dept} className="slot empty" title={`${r.dept}: ${r.empty_reason}`}><Question size={11} />{short(r.dept)} חסר</span>
-                        : <span key={r.dept} className={`slot ${kind(r.dept)}`} title={`${r.dept}: ${r.employee}${r.is_manual ? ' (ידני)' : ''}`}>{first(r.employee)}</span>)}
+                        : <span key={r.dept} className={`slot ${kind(r.dept)}`} title={`${r.dept}: ${r.employee}${r.is_manual ? ' (ידני)' : ''}`}>{r.employee.trim()}</span>)}
                       {(bl.length > 0 || wi.length > 0) && (
                         <span className="who hide-m">
                           {bl.map((e) => <span key={'b' + e} className="b"><Prohibit size={10} weight="bold" />{e}</span>)}

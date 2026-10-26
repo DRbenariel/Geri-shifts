@@ -29,7 +29,7 @@ function DayCell({ d, db, onPick }: { d: number; db: DB; onPick: (d: number) => 
       {[...rows].sort((a, b) => order(a) - order(b)).map((r) => (
         r.employee === '---'
           ? <span key={r.dept} className="slot empty" title={`${r.dept}: ${r.empty_reason ?? ''}`}><Question size={11} />{r.dept.startsWith('שישי') ? 'שישי' : r.dept === 'שיקום' ? 'ש' : 'פ'} חסר</span>
-          : <span key={r.dept} className={`slot ${r.dept === 'שיקום' ? 'sh' : r.dept.startsWith('שישי') ? 'fr' : 'pn'}`} title={`${r.dept}: ${r.employee}${r.is_manual ? ' (ידני)' : ''}`}>{first(r.employee)}</span>
+          : <span key={r.dept} className={`slot ${r.dept === 'שיקום' ? 'sh' : r.dept.startsWith('שישי') ? 'fr' : 'pn'}`} title={`${r.dept}: ${r.employee}${r.is_manual ? ' (ידני)' : ''}`}>{r.employee.trim()}</span>
       ))}
       {(nB > 0 || nR > 0) && (
         <span className="who hide-m">

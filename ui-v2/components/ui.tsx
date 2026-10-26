@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowUpLeft, CaretDown, CheckCircle, FloppyDisk, Info, Warning, XCircle } from '@phosphor-icons/react';
-import { STATUS, type Code, initials } from '@/lib/logic';
+import { STATUS, type Code } from '@/lib/logic';
 import type { Role } from '@/lib/mock';
 
 export function Bezel({ children, tight, className = '', id }: { children: ReactNode; tight?: boolean; className?: string; id?: string }) {
@@ -127,7 +127,7 @@ export function Note({ kind = 'info', children }: { kind?: 'info' | 'warn' | 'er
 
 export function Avatar({ name, role }: { name: string; role?: Role }) {
   const cls = role === 'מתמחה' ? 'int' : role === 'תורן חוץ' ? 'ext' : 'sen';
-  return <div className={`av ${cls}`}>{initials(name)}</div>;
+  return <div className={`av ${cls}`} aria-hidden="true" />;
 }
 export function Person({ name, role, me }: { name: string; role?: Role | string; me?: boolean }) {
   return (

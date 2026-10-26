@@ -344,6 +344,8 @@ def pnim_side_groups(ctx, year_month, employees):
     unassigned = _sorted_group([e for e in emp_strs if side_map.get(e, '') == ''])
     transfer_days = {}
     for emp, rec in incoming_transfers(ctx, PNIM_DEPT, year_month).items():
+        if staff_row(ctx, emp) is None:          # deleted from the staff sheet
+            continue
         transfer_days[emp] = rec['days']
         if (rec.get('side') or '') == 'כחול':
             if emp not in blue:
@@ -376,7 +378,8 @@ def dept_grid(ctx, dept_name, year_month, month, employees, year=None) -> dict:
     else:
         employees = list(employees)
         transfer_days = {}
-        inc = incoming_transfers(ctx, dept_name, year_month)
+        inc = {e: r for e, r in incoming_transfers(ctx, dept_name, year_month).items()
+               if staff_row(ctx, e) is not None}   # deleted from the staff sheet
         if inc:
             emp_set = {str(e).strip() for e in employees}
             employees = employees + [e for e in inc if e not in emp_set]

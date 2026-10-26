@@ -196,6 +196,18 @@ def test_dept_grid_model(ctx):
     assert any(d['konenut'] for d in g['days'])
 
 
+def test_deleted_employee_left_in_gantt_gets_no_grid_row(ctx):
+    from geri_core import people
+    from geri_core.people import grid_employees
+    dept = 'פנימית גריאטרית'
+    gone = next(e for e in grid_employees(ctx, dept, YM) if e not in people.get_dept_managers(ctx, dept))
+    ctx.staff = ctx.staff[ctx.staff['name'].astype(str).str.strip() != gone]   # deleted; rotation row stays
+    assert gone in people.dept_roster(ctx, dept, YM)
+    assert gone not in grid_employees(ctx, dept, YM)
+    g = daily.dept_grid(ctx, dept, YM, MONTH, grid_employees(ctx, dept, YM))
+    assert gone not in [r['employee'] for r in g['rows']]
+
+
 def test_temp_transfer_add_remove(ctx):
     daily.add_temp_transfer(ctx, f"{YM}-03", SENIORS[0], "שיקום גריאטרי ב'")
     assert 3 in daily.incoming_transfers(ctx, "שיקום גריאטרי ב'", YM)[SENIORS[0]]['days']

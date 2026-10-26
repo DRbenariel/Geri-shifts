@@ -107,7 +107,8 @@ table.t td.num { font-variant-numeric: tabular-nums; font-weight: 600; }
 table.t input.input, table.t select.input { padding: 7px 10px; border-radius: 10px; font-size: 14px; min-width: 70px; }
 
 /* ---------- avatars / people ---------- */
-.av { width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; }
+/* Role marker next to a name (colour only; no initials). */
+.av { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .av.sen { background: var(--ink); color: #fff; } .av.int { background: var(--accent-soft); color: var(--accent-ink); } .av.ext { background: #F1E7D8; color: #7A4B12; }
 .person { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .person .n { font-weight: 500; font-size: 15px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -159,6 +160,8 @@ button.day:hover { background: #EDF0F3; transform: translateY(-2px); }
 .slot.sh { background: var(--accent-soft); color: var(--accent-ink); } .slot.pn { background: var(--T); color: var(--Tt); } .slot.fr { background: var(--A); color: var(--At); }
 .slot.empty { background: #fff; color: var(--Bt); box-shadow: inset 0 0 0 1.5px var(--Bt); border-style: dashed; }
 .slot.mine { outline: 2px solid var(--ink); }
+/* Night calendar shows full names: wrap onto a second line instead of cutting with an ellipsis. */
+.day .slot { white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
 .av-row { display: flex; gap: 6px; font-size: 11px; color: var(--muted); }
 .mark { font-size: 11px; display: inline-flex; gap: 2px; align-items: center; }
 /* Night calendar: who blocked (אילוץ) / asked for (בקשה) the day, under the slots, as in the Streamlit grid. */
@@ -242,7 +245,7 @@ button.day:hover { background: #EDF0F3; transform: translateY(-2px); }
   .dgrid { grid-template-columns: repeat(7, minmax(0,1fr)); gap: 5px 4px; }
   .dgrid .corner { display: none; }
   .dgrid .person, .dgrid .meta-l { grid-column: 1/-1; padding-top: 4px; }
-  .dgrid .av { width: 26px; height: 26px; border-radius: 9px; font-size: 10px; }
+  .dgrid .av { width: 8px; height: 8px; border-radius: 2px; }
   .cell { height: 36px; border-radius: 11px; font-size: 13px; }
   .mchip { font-size: 10px; padding: 2px 4px; }
   .dh b { font-size: 15px; }
