@@ -209,14 +209,18 @@ button.day:hover { background: #EDF0F3; transform: translateY(-2px); }
 .rcard .meta { font-size: 13px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
 
 /* login */
-.login { min-height: 100dvh; display: grid; grid-template-columns: 1.1fr 1fr; }
-.login .art { position: relative; overflow: hidden; background: var(--ink); color: #fff; padding: 56px; display: flex; flex-direction: column; justify-content: flex-end; }
-.login .art::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 20% 20%, rgba(13,148,136,.55), transparent 50%), radial-gradient(circle at 90% 80%, rgba(217,119,6,.25), transparent 45%); }
-.login .art > * { position: relative; }
-.login .art h1 { font-size: 56px; font-weight: 900; letter-spacing: -.03em; line-height: 1; }
-.login .art p { color: rgba(255,255,255,.7); max-width: 36ch; margin-top: 14px; font-size: 17px; }
-.login .form { display: grid; place-items: center; padding: 24px; }
-.login .form .shell { width: min(440px, 100%); }
+/* Login (option ג2): name above one white card, on dark teal with a faint month grid. */
+.login { position: relative; overflow: hidden; min-height: 100dvh; display: grid; place-items: center; padding: 32px 16px; background: var(--accent-ink); }
+.login-grid { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(7, 1fr); align-content: start; gap: 8px; padding: 12px; opacity: .55; pointer-events: none; }
+.login-grid i { aspect-ratio: 1; border-radius: 10px; background: rgba(255,255,255,.05); }
+.login-grid i.n { background: rgba(255,255,255,.14); }
+.login-col { position: relative; width: min(400px, 100%); display: grid; gap: 22px; }
+.login-brand { display: grid; justify-items: center; gap: 8px; text-align: center; color: #fff; }
+.login-brand .mark { width: 52px; height: 52px; border-radius: 15px; background: #fff; display: grid; place-items: center; }
+.login-brand h1 { margin: 6px 0 0; font-size: 28px; font-weight: 800; line-height: 1.15; letter-spacing: -.01em; }
+.login-brand p { margin: 0; font-size: 16px; font-weight: 300; color: rgba(255,255,255,.82); }
+.login-card { background: #fff; border-radius: 24px; padding: 22px; box-shadow: 0 30px 60px -30px rgba(0,0,0,.45); }
+.login-card .cta { width: 100%; justify-content: space-between; }
 
 /* toasts, sheets */
 .toasts { position: fixed; bottom: 24px; left: 24px; z-index: 90; display: flex; flex-direction: column; gap: 8px; }
@@ -262,7 +266,7 @@ button.day:hover { background: #EDF0F3; transform: translateY(-2px); }
   .slot { font-size: 10px; padding: 1px 4px; border-radius: 6px; }
   .gantt { grid-template-columns: 96px repeat(5, minmax(0,1fr)); }
   .bar-row { grid-template-columns: 90px 1fr 34px; }
-  .login { grid-template-columns: 1fr; } .login .art { padding: 32px 24px; min-height: 220px; } .login .art h1 { font-size: 38px; }
+  .login-brand h1 { font-size: 24px; } .login-card { padding: 18px; }
   .toasts { left: 12px; right: 12px; bottom: 96px; }
   .mob-nav { display: flex; position: fixed; bottom: 14px; left: 12px; right: 12px; width: max-content; max-width: calc(100% - 24px); margin-inline: auto; gap: 2px; padding: 6px; border-radius: 999px;
     overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-width: none; -webkit-overflow-scrolling: touch;
