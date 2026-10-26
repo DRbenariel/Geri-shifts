@@ -7,6 +7,7 @@
   COOKIE_SECURE        "1" (default) sends the cookie over HTTPS only; "0" for local http
   STREAMLIT_PARALLEL   "1" (default) keeps new passwords SHA-256 so the Streamlit app can still read them
   SMTP_USER / SMTP_PASSWORD   Gmail sender for absence notifications (optional)
+  API_CACHE_SECONDS    "60" (default) shares one Sheet load across requests; any write clears it. "0" = no cache
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ class Settings:
     streamlit_parallel: bool = True
     smtp_user: str = ""
     smtp_password: str = ""
+    cache_seconds: float = 0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -41,4 +43,5 @@ class Settings:
             streamlit_parallel=os.environ.get("STREAMLIT_PARALLEL", "1") != "0",
             smtp_user=os.environ.get("SMTP_USER", ""),
             smtp_password=os.environ.get("SMTP_PASSWORD", ""),
+            cache_seconds=float(os.environ.get("API_CACHE_SECONDS", "60")),
         )

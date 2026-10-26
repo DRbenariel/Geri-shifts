@@ -32,3 +32,28 @@ class ReadOnlyStore:
         raise ReadOnlyError(READ_ONLY_MSG)
 
     write = append_row = set_rtl = _refuse
+
+
+class CacheClearingStore:
+    """Calls on_write after every successful write, so the API's shared Sheet cache is dropped."""
+
+    def __init__(self, inner, on_write):
+        self._inner = inner
+        self._on_write = on_write
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def _written(self, method, *a, **k):
+        result = getattr(self._inner, method)(*a, **k)
+        self._on_write()
+        return result
+
+    def write(self, *a, **k):
+        return self._written('write', *a, **k)
+
+    def append_row(self, *a, **k):
+        return self._written('append_row', *a, **k)
+
+    def set_rtl(self, *a, **k):
+        return self._written('set_rtl', *a, **k)

@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import math
 import re
+import threading
+import time
 from datetime import date
 
+import gspread
 import numpy as np
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -25,7 +28,10 @@ from geri_core.constants import DAILY_DEPTS_ALL, default_tab_for_role, tabs_for_
 from . import session
 from .config import Settings
 from .mailer import SmtpMailer
-from .store import READ_ONLY_MSG, ReadOnlyError, ReadOnlyStore
+from .store import READ_ONLY_MSG, CacheClearingStore, ReadOnlyError, ReadOnlyStore
+
+QUOTA_BACKOFF = 15
+SHEETS_BUSY_MSG = "המערכת עמוסה כרגע. נסה/י שוב בעוד דקה."
 
 # Hebrew tab names (geri_core.constants) → keys the ui-v2 frontend routes by (ui-v2/lib/roles.ts).
 TAB_KEYS = {'הגדרות': 'settings', 'סידור תורנויות': 'night', 'הגשת בקשות': 'submit', 'צוות': 'staff',
@@ -128,9 +134,49 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
     staff.use_legacy_hashes(settings.streamlit_parallel)
     mailer = SmtpMailer(settings.smtp_user, settings.smtp_password) if settings.smtp_user else None
 
+    # The Sheets quota is 60 reads/min for the service account, shared with Streamlit, and one screen
+    # fires several /api calls at once. So one load is shared for cache_seconds; the lock makes
+    # concurrent requests wait for that load instead of each starting its own. Writes clear it; `gen`
+    # stops a load that started before a write from caching pre-write data. After a 429 nothing calls
+    # Sheets for QUOTA_BACKOFF s (stale frames are served if any), so queued requests can't each
+    # retry and keep the shared quota exhausted.
+    cache = {'frames': None, 'at': 0.0, 'gen': 0, 'failed_at': None}
+    cache_lock = threading.Lock()
+
+    def clear_cache():
+        cache['gen'] += 1
+        cache['frames'] = None
+
+    def load_frames(store) -> dict:
+        now = time.monotonic()
+        if cache['frames'] is not None and now - cache['at'] < settings.cache_seconds:
+            return cache['frames']
+        if cache['failed_at'] is not None and now - cache['failed_at'] < QUOTA_BACKOFF:
+            if cache['frames'] is not None:
+                return cache['frames']
+            raise HTTPException(503, SHEETS_BUSY_MSG)
+        gen = cache['gen']
+        try:
+            read_many = getattr(store, 'read_many', None)
+            frames = read_many(DataContext.FRAMES) if read_many else {n: store.read(n) for n in DataContext.FRAMES}
+        except gspread.exceptions.APIError as e:
+            if e.response.status_code != 429:
+                raise
+            cache['failed_at'] = time.monotonic()
+            if cache['frames'] is not None:
+                return cache['frames']
+            raise HTTPException(503, SHEETS_BUSY_MSG)
+        cache['failed_at'] = None
+        if cache['gen'] == gen:
+            cache['frames'], cache['at'] = frames, time.monotonic()
+        return frames
+
     def get_ctx() -> DataContext:
         store = store_factory()
-        return DataContext.load(ReadOnlyStore(store) if settings.read_only else store, mailer=mailer)
+        store = CacheClearingStore(ReadOnlyStore(store) if settings.read_only else store, clear_cache)
+        with cache_lock:
+            frames = {n: df.copy() for n, df in load_frames(store).items()}
+        return DataContext.from_frames(frames, store=store, mailer=mailer)
 
     def session_name(request: Request) -> str:
         name = session.verify(settings.session_secret, request.cookies.get(session.COOKIE))
@@ -160,6 +206,12 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
                 and request.url.path not in ("/api/auth/login", "/api/auth/logout")):
             return Plain({"detail": READ_ONLY_MSG}, status_code=403)
         return await call_next(request)
+
+    @app.exception_handler(gspread.exceptions.APIError)
+    async def _sheets(_, exc):
+        if exc.response.status_code == 429:     # a write still over quota after the store's retries
+            return Plain({"detail": SHEETS_BUSY_MSG}, status_code=503)
+        raise exc
 
     @app.exception_handler(ReadOnlyError)
     async def _ro(_, exc):

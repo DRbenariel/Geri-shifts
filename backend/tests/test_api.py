@@ -94,6 +94,58 @@ def test_no_session_is_refused_before_any_sheet_read(store):
     assert loads == []
 
 
+def test_sheet_load_is_shared_across_requests_and_cleared_by_writes(store):
+    loads = []
+
+    class Counting:
+        def read_many(self, names):
+            loads.append(1)
+            return {n: store.read(n) for n in names}
+
+        def __getattr__(self, k):
+            return getattr(store, k)
+
+    app = create_app(Settings(session_secret=SECRET, read_only=True, cookie_secure=False, cache_seconds=60),
+                     store_factory=Counting)
+    c = TestClient(app)
+    assert login(c, INTERNS[0]).status_code == 200            # login writes nothing: cache kept
+    assert c.get("/api/me").status_code == 200
+    assert c.get("/api/me").status_code == 200
+    assert len(loads) == 1
+
+
+def test_quota_error_is_not_retried_by_every_queued_request(store):
+    import gspread
+    from types import SimpleNamespace
+    calls = []
+
+    class OverQuota:
+        def read_many(self, names):
+            calls.append(1)
+            raise gspread.exceptions.APIError(SimpleNamespace(
+                status_code=429, json=lambda: {'error': {'code': 429, 'message': 'quota', 'status': 'x'}},
+                text='quota'))
+
+    app = create_app(Settings(session_secret=SECRET, read_only=True, cookie_secure=False, cache_seconds=60),
+                     store_factory=OverQuota)
+    c = TestClient(app)
+    for _ in range(4):
+        r = login(c, INTERNS[0])
+        assert r.status_code == 503 and r.json()['detail'] == "המערכת עמוסה כרגע. נסה/י שוב בעוד דקה."
+    assert len(calls) == 1
+
+
+def test_store_writes_clear_the_cache():
+    from api.store import CacheClearingStore
+    cleared = []
+    s = CacheClearingStore(MemoryStore(), lambda: cleared.append(1))
+    s.read('staff')
+    assert cleared == []
+    s.write('staff', build()['staff'])
+    s.append_row('analytics_log', ['a'], header=['x'])
+    assert len(cleared) == 2
+
+
 def test_gsheet_read_many_pads_rows_and_skips_missing_tabs():
     from types import SimpleNamespace
     from geri_core.store import GSheetStore
