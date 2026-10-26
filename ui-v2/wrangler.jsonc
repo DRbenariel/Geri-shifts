@@ -1,9 +1,13 @@
 // Cloudflare Worker for the ui-v2 site: static assets from ./out, plus worker/index.js proxying /api/* to Cloud Run.
-// Set the API address with:  npx wrangler secret put API_ORIGIN   (or a plain var in the dashboard)
+// API_ORIGIN is the Cloud Run API (not a secret). Kept here, not in the dashboard, so Workers Builds deploys don't drop it.
+// Remove it to put the site back in demo mode.
 {
   "name": "geri-shifts",
   "compatibility_date": "2026-10-01",
   "main": "worker/index.js",
+  "vars": {
+    "API_ORIGIN": "https://geri-api-987250474634.me-west1.run.app"
+  },
   "assets": {
     "directory": "./out",
     "binding": "ASSETS",

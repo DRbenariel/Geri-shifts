@@ -128,6 +128,7 @@ Steps, in order (nothing written to the Sheet; `API_READ_ONLY=1` throughout):
    - The first revision took 14–21 s per request: it re-authenticated and read the 10 sheets one by one (~20 Sheets calls) even for a 401. Fixed in `d6ac5cf`: cookie checked before any read, one shared store, one `values.batchGet` (output verified identical on all 10 live sheets). Now a no-session request takes ~0.13 s, a Sheet load ~1–2 s.
    - Every request still loads all sheets on the same service account as Streamlit (60 reads/min per user). Add a short cache, cleared on writes, before the pilot (step 8).
 6. Point the Worker at it: `npx wrangler secret put API_ORIGIN` (the run.app URL), redeploy. The site switches to live mode by itself.
+   - **Done 2026-10-26:** `API_ORIGIN` is a plain var in `wrangler.jsonc` (not a secret, and a dashboard var would be dropped by the next Workers Builds deploy). Pushing `ui-v2-mockup` deploys it.
 7. Ben logs in with his normal name and password and reviews every tab on real data (read-only). Watch: response time from Israel, Sheets read quota (each request loads all sheets: add a short cache if slow), cost after a few days.
 8. Only after Ben approves: turn writes on screen by screen (`API_READ_ONLY=0`), Streamlit stays primary until the pilot ends (Rollout steps 2–5).
 
@@ -145,7 +146,7 @@ Decided by Ben (2026-10-26): hospital IT sign-off is not needed; "open in Sheets
    - Path (root directory): `ui-v2`
    - Branch: `ui-v2-mockup`. `main` has no `ui-v2/` folder yet, so a build from it fails. If setup offers no branch picker, change it afterwards in Settings → Build → Branch control.
    - Build watch paths (Settings → Build, after the first build): include `ui-v2/*`, so commits to `appy.py` don't trigger builds.
-4. The `*.workers.dev` link is **public by default**. The mockup holds only fictional data, but to restrict it, put **Cloudflare Access** in front (Zero Trust free plan, up to 50 users, email one-time PIN). Required before any real data goes through it.
+4. The `*.workers.dev` link is **public by default**. The mockup holds only fictional data, but to restrict it, put **Cloudflare Access** in front (Zero Trust free plan, up to 50 users, email one-time PIN). ~~Required before any real data goes through it.~~ **Ben decided (2026-10-26) to skip Access:** anyone with the link may reach the login screen, as with Streamlit today; the API's login, role checks and read-only mode protect the data.
 
 ### Later: the API on Cloud Run (step 1)
 
