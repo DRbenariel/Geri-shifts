@@ -18,6 +18,10 @@ class ReadOnlyStore:
     def read(self, name):
         return self._inner.read(name)
 
+    def read_many(self, names):
+        inner = getattr(self._inner, 'read_many', None)
+        return inner(names) if inner else {n: self._inner.read(n) for n in names}
+
     def tab_url(self, name):
         return self._inner.tab_url(name)
 

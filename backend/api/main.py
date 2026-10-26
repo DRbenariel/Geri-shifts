@@ -119,8 +119,11 @@ def _ym(ym: str) -> tuple[int, int]:
 def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
     settings = settings or Settings.from_env()
     if store_factory is None:
+        # One store for the app's lifetime: gspread auth + open_by_url cost ~3 s, so not per request.
+        shared = GSheetStore(settings.credentials, settings.spreadsheet_url)
+
         def store_factory():
-            return GSheetStore(settings.credentials, settings.spreadsheet_url)
+            return shared
     app = FastAPI(title="Geri-shifts API", default_response_class=Plain, docs_url=None, redoc_url=None)
     staff.use_legacy_hashes(settings.streamlit_parallel)
     mailer = SmtpMailer(settings.smtp_user, settings.smtp_password) if settings.smtp_user else None
@@ -129,10 +132,14 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
         store = store_factory()
         return DataContext.load(ReadOnlyStore(store) if settings.read_only else store, mailer=mailer)
 
-    def current_user(request: Request, ctx: DataContext = Depends(get_ctx)) -> Me:
+    def session_name(request: Request) -> str:
         name = session.verify(settings.session_secret, request.cookies.get(session.COOKIE))
         if not name:
             raise HTTPException(401, "יש להתחבר מחדש")
+        return name
+
+    # session_name is listed before ctx so a missing/bad cookie is refused before any Sheets read.
+    def current_user(name: str = Depends(session_name), ctx: DataContext = Depends(get_ctx)) -> Me:
         row = people.staff_row(ctx, name)
         if row is None:                       # removed from the staff sheet since login
             raise HTTPException(401, "יש להתחבר מחדש")

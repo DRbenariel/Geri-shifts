@@ -44,7 +44,8 @@ class DataContext:
     @classmethod
     def load(cls, store: SheetStore, mailer=None, **kw) -> "DataContext":
         ctx = cls(store=store, mailer=mailer, **kw)
-        ctx.set_frames({name: store.read(name) for name in cls.FRAMES})
+        read_many = getattr(store, 'read_many', None)
+        ctx.set_frames(read_many(cls.FRAMES) if read_many else {name: store.read(name) for name in cls.FRAMES})
         return ctx
 
     @classmethod

@@ -112,6 +112,28 @@ class GSheetStore:
         except gspread.exceptions.WorksheetNotFound:
             return pd.DataFrame()
 
+    def read_many(self, names):
+        """Every sheet in one values.batchGet (2 API calls instead of 2 per sheet). Rows are padded
+        like get_all_values (batchGet trims trailing empty cells); missing tabs come back empty."""
+        def fetch():
+            sh = self._spreadsheet()
+            have = [n for n in names if n in {ws.title for ws in sh.worksheets()}]
+            if not have:
+                return {}
+            ranges = ["'" + n.replace("'", "''") + "'" for n in have]
+            got = sh.values_batch_get(ranges).get('valueRanges', [])
+            return dict(zip(have, (vr.get('values', []) for vr in got)))
+        raw = self._retry(fetch)
+        out = {}
+        for n in names:
+            rows = raw.get(n)
+            if not rows:
+                out[n] = pd.DataFrame()
+                continue
+            width = max(len(r) for r in rows)
+            out[n] = clean_sheet_values([r + [''] * (width - len(r)) for r in rows])
+        return out
+
     def write(self, name, df, is_rtl=False):
         """Write-then-trim (never clear first), as appy.save_to_db."""
         import gspread

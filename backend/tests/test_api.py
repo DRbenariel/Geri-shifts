@@ -83,6 +83,36 @@ def test_requires_session(client):
     assert client.get("/api/me").status_code == 401
 
 
+def test_no_session_is_refused_before_any_sheet_read(store):
+    loads = []
+    app = create_app(Settings(session_secret=SECRET, read_only=True, cookie_secure=False),
+                     store_factory=lambda: loads.append(1) or store)
+    c = TestClient(app)
+    assert c.get("/api/me").status_code == 401
+    c.cookies.set(session.COOKIE, "garbage.value")
+    assert c.get("/api/night/2026-11").status_code == 401
+    assert loads == []
+
+
+def test_gsheet_read_many_pads_rows_and_skips_missing_tabs():
+    from types import SimpleNamespace
+    from geri_core.store import GSheetStore
+
+    class FakeSheet:
+        def worksheets(self):
+            return [SimpleNamespace(title='staff'), SimpleNamespace(title='settings')]
+
+        def values_batch_get(self, ranges):
+            assert ranges == ["'staff'", "'settings'"]
+            return {'valueRanges': [{'values': [['name', 'type', 'email'], ['א', 'מתמחה']]}, {}]}
+
+    s = GSheetStore({}, "")
+    s._sh = FakeSheet()
+    got = s.read_many(('staff', 'swap_requests', 'settings'))
+    assert got['staff'].to_dict('records') == [{'name': 'א', 'type': 'מתמחה', 'email': ''}]
+    assert got['swap_requests'].empty and got['settings'].empty
+
+
 def test_logout(client):
     login(client, INTERNS[0])
     client.post("/api/auth/logout")
