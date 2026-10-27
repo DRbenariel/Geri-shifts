@@ -347,7 +347,8 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
         y, m = _ym(ym)
         return {"submissions": reports.submission_status(ctx, y, m),
                 "shift_counts": _shift_split(ctx, y, m),
-                "problems": reports.problem_report(ctx)}
+                "problems": reports.problem_report(ctx),
+                "fairness": reports.fairness(ctx)}          # all history, not this month (as in Streamlit)
 
     @app.get("/api/swaps/mine")
     def my_upcoming(me: Me = Depends(current_user), ctx: DataContext = Depends(get_ctx)):

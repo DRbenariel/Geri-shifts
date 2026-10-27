@@ -142,7 +142,9 @@ interface Report {
   submissions: { total: number; submitted: number; pending: number; rows: { name: string; type: string; submitted: boolean; blocks: number; wishes: number }[] };
   shift_counts: { employee: string; sh: number; pn: number; fri: number }[];
   problems: { generated_at: string | null; rows: { severity: string; problem_type: string; description: string }[] };
+  fairness: { name: string; wed: number; thu: number; friday_morning: number; net: number }[];
 }
+const scoreColor = (s: number) => (s >= 1 ? 'var(--W)' : s <= -2 ? 'var(--B)' : s < 0 ? 'var(--S)' : '#F4F6F8');
 const SERIES = [{ k: 'sh', l: 'תורנות שיקום', c: 'var(--chart1)' }, { k: 'pn', l: 'תורנות פנג״ר', c: 'var(--chart3)' }, { k: 'fri', l: 'שישי בוקר', c: 'var(--chart2)' }] as const;
 
 export function LiveReports() {
@@ -206,6 +208,15 @@ export function LiveReports() {
                       <div className="main">{s.submitted ? <span className="badge b-ok">הגיש/ה</span> : <span className="badge b-warn">טרם הגיש/ה</span>}
                         <div className="meta">{s.blocks} חסימות · {s.wishes} בקשות</div></div></div>
                   ))}</div>
+                </Bezel>
+                <Bezel>
+                  <h2 className="sec">מעקב הוגנות</h2>
+                  <p className="muted small" style={{ marginBottom: 10 }}>מתמחים בלבד, כל החודשים. ציון = רביעי פחות (חמישי + שישי בוקר).</p>
+                  {r.fairness.length === 0 ? <p className="muted">אין שיבוצים.</p> : (
+                    <div className="tbl-wrap"><table className="t"><thead><tr><th>מתמחה</th><th>ד׳</th><th>ה׳</th><th>ו׳ בוקר</th><th>ציון</th></tr></thead>
+                      <tbody>{r.fairness.map((f) => <tr key={f.name}><td>{f.name}</td><td className="num">{f.wed}</td><td className="num">{f.thu}</td><td className="num">{f.friday_morning}</td>
+                        <td className="num" style={{ background: scoreColor(f.net), borderRadius: 8, textAlign: 'center' }}>{f.net > 0 ? '+' : ''}{f.net}</td></tr>)}</tbody></table></div>
+                  )}
                 </Bezel>
               </div>
             </div>

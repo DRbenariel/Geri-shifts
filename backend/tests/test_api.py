@@ -269,3 +269,13 @@ def test_report_shift_split(client):
     login(client, USERS['מנהל על'])
     rows = client.get("/api/reports/2026-11").json()['shift_counts']
     assert rows and set(rows[0]) == {'employee', 'sh', 'pn', 'fri'}
+
+
+def test_report_fairness_table(client, store):
+    from geri_core import DataContext, reports
+    login(client, USERS['מנהל על'])
+    rows = client.get("/api/reports/2026-11").json()['fairness']
+    assert rows and set(rows[0]) == {'name', 'wed', 'thu', 'friday_morning', 'net'}
+    assert rows == reports.fairness(DataContext.load(store))
+    assert all(r['net'] == r['wed'] - (r['thu'] + r['friday_morning']) for r in rows)
+    assert [r['net'] for r in rows] == sorted((r['net'] for r in rows), reverse=True)
