@@ -271,6 +271,21 @@ def test_absence_gantt_overlaps(ctx):
     assert set(mine['by_dept']) <= {'פנימית גריאטרית'}
 
 
+def test_absence_gantt_unrotated_intern_not_in_legacy_dept(ctx):
+    dept = 'פנימית גריאטרית'
+    ym = f"{YEAR}-{MONTH:02d}"
+    g = absences.absence_gantt(ctx, YEAR, MONTH, dept_filter={dept})
+    emp = next(iter(g['by_dept'].get(dept, {})), None)
+    assert emp is not None, 'fixture needs a פנימית intern with an absence-gantt row'
+    # Same person, no Gantt row this month, legacy staff.dept still says פנימית.
+    ctx.dept_rotation = ctx.dept_rotation[~((ctx.dept_rotation['employee'].astype(str).str.strip() == emp) &
+                                            (ctx.dept_rotation['year_month'].astype(str) == ym))]
+    sf = ctx.staff.copy()
+    sf.loc[sf['name'].astype(str).str.strip() == emp, ['type', 'dept']] = ['מתמחה', dept]
+    ctx.staff = sf
+    assert emp not in absences.absence_gantt(ctx, YEAR, MONTH, dept_filter={dept})['by_dept'].get(dept, {})
+
+
 def test_my_absence_calendar(ctx):
     cal = absences.my_absence_calendar(ctx, INTERNS[6], YEAR, MONTH)
     assert cal['approved_future'] == [16, 17, 18, 19]

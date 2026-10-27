@@ -29,9 +29,6 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
       </div>
       <div className="login-col">
         <div className="login-brand">
-          <span className="mark" aria-hidden="true">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="3" stroke="#0B5F58" strokeWidth="1.8" /><path d="M3 10h18M8 3v4M16 3v4" stroke="#0B5F58" strokeWidth="1.8" strokeLinecap="round" /><circle cx="12" cy="15.5" r="2" fill="#0F766E" /></svg>
-          </span>
           <h1>המערך הגריאטרי</h1>
           <p>סידור עבודה ותורנויות</p>
         </div>

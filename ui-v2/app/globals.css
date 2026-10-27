@@ -216,8 +216,7 @@ button.day:hover { background: #EDF0F3; transform: translateY(-2px); }
 .login-grid i.n { background: rgba(255,255,255,.14); }
 .login-col { position: relative; width: min(400px, 100%); display: grid; gap: 22px; }
 .login-brand { display: grid; justify-items: center; gap: 8px; text-align: center; color: #fff; }
-.login-brand .mark { width: 52px; height: 52px; border-radius: 15px; background: #fff; display: grid; place-items: center; }
-.login-brand h1 { margin: 6px 0 0; font-size: 28px; font-weight: 800; line-height: 1.15; letter-spacing: -.01em; }
+.login-brand h1 { margin: 0; font-size: 28px; font-weight: 800; line-height: 1.15; letter-spacing: -.01em; }
 .login-brand p { margin: 0; font-size: 16px; font-weight: 300; color: rgba(255,255,255,.82); }
 .login-card { background: #fff; border-radius: 24px; padding: 22px; box-shadow: 0 30px 60px -30px rgba(0,0,0,.45); }
 .login-card .cta { width: 100%; justify-content: space-between; }
@@ -253,6 +252,10 @@ button.day:hover { background: #EDF0F3; transform: translateY(-2px); }
   table.t th:first-child, table.t td:first-child { padding-inline-start: 12px; }
   table.t th:last-child, table.t td:last-child { padding-inline-end: 12px; }
   table.t select.input, table.t input.input { min-width: 0; padding: 6px 8px; font-size: 13px; }
+  /* iOS Safari zooms into any field under 16px on focus and stays zoomed after login. */
+  .input, select.input, textarea.input { font-size: 16px; }
+  /* Night calendar: full names in ~45px cells. Smaller type, one word per line, break inside a word only if it can't fit. */
+  .day .slot { font-size: 9px; padding: 1px 2px; border-radius: 5px; overflow-wrap: break-word; word-break: normal; line-height: 1.2; }
   .cols2, .cols3 { grid-template-columns: 1fr; }
   .dgrid { grid-template-columns: repeat(7, minmax(0,1fr)); gap: 5px 4px; }
   .dgrid .corner { display: none; }
@@ -261,7 +264,7 @@ button.day:hover { background: #EDF0F3; transform: translateY(-2px); }
   .cell { height: 36px; border-radius: 11px; font-size: 13px; }
   .mchip { font-size: 10px; padding: 2px 4px; }
   .dh b { font-size: 15px; }
-  .cal { gap: 4px; } .day { min-height: 58px; border-radius: 14px; padding: 6px; } .day .num { font-size: 15px; }
+  .cal { gap: 3px; } .day { min-height: 58px; border-radius: 12px; padding: 4px 3px; } .day .num { font-size: 15px; }
   .day .st span, .day .sp, .day .hide-m { display: none; }
   .slot { font-size: 10px; padding: 1px 4px; border-radius: 6px; }
   .gantt { grid-template-columns: 96px repeat(5, minmax(0,1fr)); }

@@ -12,7 +12,7 @@ from .context import daterange, now_str
 from .daily import derive_auto_status, wsd_upsert
 from .days import to_date
 from .normalize import norm_dept, parse_manage_depts
-from .people import emp_dept_for_date, manager_email_for_dept, staff_row
+from .people import emp_dept_for_date, employee_dept_for_month, manager_email_for_dept, staff_row
 
 ABSENCE_STATUSES_FOR_GANTT = {"חופש", "202", "אחר", "אחרי תורנות"}
 GANTT_ACTIVE_TYPES = ['מתמחה', 'רופא בכיר', 'מנהל מחלקה', 'מנהל/ת']
@@ -474,7 +474,14 @@ def absence_gantt(ctx, year, month, dept_filter=None) -> dict:
     for emp in emp_names:
         if not emp:
             continue
-        dept_canon = emp_dept_for_date(ctx, emp, month_start) or '—'
+        # Interns rotate monthly, so their legacy staff.dept is stale: without a Gantt row this month
+        # they belong to no dept (their after-night days would otherwise land in staff.dept's grid).
+        srow = staff_row(ctx, emp)
+        if srow is not None and str(srow.get('type', '')).strip() == 'מתמחה' and not employee_dept_for_month(
+                ctx, emp, month_start.strftime('%Y-%m')):
+            dept_canon = '—'
+        else:
+            dept_canon = emp_dept_for_date(ctx, emp, month_start) or '—'
         if dept_filter and dept_canon not in dept_filter:
             continue
         for d in range(1, num_days + 1):
