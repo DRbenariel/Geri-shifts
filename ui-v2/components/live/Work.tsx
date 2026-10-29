@@ -1,11 +1,11 @@
 'use client';
 import { useState } from 'react';
-import { ArrowCounterClockwise, Bell, Moon, NotePencil, Sun } from '@phosphor-icons/react';
+import { ArrowCounterClockwise, ArrowsLeftRight, Bell, FileXls, GoogleLogo, Moon, NotePencil, Plus, Sun, X } from '@phosphor-icons/react';
 import { useApi, type Grid, type GridRow } from '@/lib/api';
 import { DAILY_DEPTS, DOW_FULL, HEB_MONTHS } from '@/lib/mock';
 import { useMe, useStore, ymOf } from '@/lib/store';
 import { Bezel, Cta, Field, Modal, Note, PageHead, Person, PillSeg, StatusLegend, StatusPicker } from '../ui';
-import { Load, MonthPick, STATUS_CLASS, enc, useAction } from './common';
+import { Load, MonthPick, STATUS_CLASS, dmy, enc, useAction, useDownload } from './common';
 
 const first = (n: string) => n.replace('ד"ר ', '').trim().split(' ')[0];
 const names = (v: string | string[] | null) => (Array.isArray(v) ? v : v ? [v] : []).filter((x) => x && x !== '---');
@@ -98,7 +98,7 @@ function DeptGridLive({ dept, ym, me }: { dept: string; ym: string; me: string }
   };
   return (
     <>
-      <Load q={q}>{(g) => <GridView g={g} me={me} onCycle={(r, d, rect) => setPick({ r, d, rect })} />}</Load>
+      <Load q={q}>{(g) => <><GridView g={g} me={me} onCycle={(r, d, rect) => setPick({ r, d, rect })} />{g.transfer_candidates && <TransferForm g={g} candidates={g.transfer_candidates} onDone={q.reload} />}</>}</Load>
       {pick && (() => {
         const c = pick.r.cells[pick.d - 1];
         return (
@@ -127,6 +127,68 @@ function DeptGridLive({ dept, ym, me }: { dept: string; ym: string; me: string }
   );
 }
 
+/** Streamlit "העברה זמנית": add someone from another dept for one day, or remove such a day. */
+function TransferForm({ g, candidates, onDone }: { g: Grid; candidates: string[]; onDone: () => void }) {
+  const { run, busy } = useAction();
+  const pnim = !!g.side_groups;
+  const first = `${g.year_month}-01`;
+  const last = `${g.year_month}-${String(g.days.length).padStart(2, '0')}`;
+  const [f, setF] = useState({ employee: '', date: first, side: 'ורוד' });
+  const list = Object.entries(g.transfers).flatMap(([emp, t]) => t.days.map((d) => ({ emp, d, side: t.side })))
+    .sort((a, b) => a.d - b.d || a.emp.localeCompare(b.emp));
+  const body = (employee: string, date: string, side = '') => ({ dept: g.dept, employee, date, side });
+  const add = () => run('/work/transfer', 'POST', body(f.employee, f.date, pnim ? f.side : ''), `${f.employee} נוסף/ה ל${g.dept} ב-${dmy(f.date)}`)
+    .then(() => { setF({ ...f, employee: '' }); onDone(); }).catch(() => {});
+  return (
+    <Bezel>
+      <h2 className="sec"><ArrowsLeftRight size={22} />העברה זמנית</h2>
+      <p className="muted small" style={{ marginBottom: 12 }}>הוספת עובד/ת ממחלקה אחרת ל{g.dept} ליום מסוים.{pnim ? ' בפנימית אפשר גם להעביר בין הצדדים.' : ''}</p>
+      <div className={pnim ? 'cols3' : 'cols2'}>
+        <Field label="עובד/ת"><select className="input" value={f.employee} onChange={(e) => setF({ ...f, employee: e.target.value })}>
+          <option value="">בחר/י</option>{candidates.map((n) => <option key={n}>{n}</option>)}</select></Field>
+        <Field label="תאריך"><input className="input" type="date" min={first} max={last} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
+        {pnim && <Field label="צד"><select className="input" value={f.side} onChange={(e) => setF({ ...f, side: e.target.value })}>
+          <option value="ורוד">צד ורוד</option><option value="כחול">צד כחול</option></select></Field>}
+      </div>
+      <Cta variant="teal" icon={<Plus size={16} />} disabled={busy || !f.employee || f.date < first || f.date > last} onClick={add}>הוסף</Cta>
+      {list.length > 0 && (
+        <>
+          <h3 className="sub" style={{ marginTop: 18 }}>העברות זמניות בחודש זה</h3>
+          <div className="cardlist">{list.map((t) => {
+            const ds = `${g.year_month}-${String(t.d).padStart(2, '0')}`;
+            return (
+              <div key={t.emp + t.d} className="rcard">
+                <div className="main"><b>{t.emp}</b><div className="meta">{dmy(ds)}{pnim && t.side ? ` · צד ${t.side}` : ''}</div></div>
+                <button className="btn no" disabled={busy} onClick={() => run('/work/transfer', 'DELETE', body(t.emp, ds), 'ההעברה הוסרה').then(onDone).catch(() => {})}><X size={14} />הסר</button>
+              </div>
+            );
+          })}</div>
+        </>
+      )}
+    </Bezel>
+  );
+}
+
+/** Streamlit _render_export_buttons: batched Excel download + the WSD_<dept> tab in Sheets. */
+function DeptExports({ dept, ym }: { dept: string; ym: string }) {
+  const { download, busy } = useDownload();
+  const { run, busy: sheetBusy } = useAction();
+  const toSheet = async () => {
+    // Open the tab first so Safari doesn't block it as a popup, then point it at the sheet.
+    const w = window.open('', '_blank');
+    try {
+      const r = await run<{ url: string }>(`/export/work/${enc(dept)}/${ym}/sheet`, 'POST', undefined, 'הגיליון נוצר');
+      if (r?.url && w) w.location.href = r.url; else w?.close();
+    } catch { w?.close(); }
+  };
+  return (
+    <>
+      <button className="btn" disabled={busy} onClick={() => download(`/export/work/${enc(dept)}/${ym}`)}><FileXls size={16} />הורד Excel</button>
+      <button className="btn" disabled={sheetBusy} onClick={toSheet}><GoogleLogo size={16} />פתח ב-Sheets</button>
+    </>
+  );
+}
+
 function ManagerWork({ depts }: { depts: string[] }) {
   const me = useMe();
   const [dept, setDept] = useState(depts[0]);
@@ -134,7 +196,7 @@ function ManagerWork({ depts }: { depts: string[] }) {
   const [y, m] = ym.split('-').map(Number);
   return (
     <>
-      <PageHead eyebrow={`${HEB_MONTHS[m - 1]} ${y}`} title="סידור עבודה" sub={dept} actions={<MonthPick value={ym} onChange={setYm} />} />
+      <PageHead eyebrow={`${HEB_MONTHS[m - 1]} ${y}`} title="סידור עבודה" sub={dept} actions={<><MonthPick value={ym} onChange={setYm} /><DeptExports dept={dept} ym={ym} /></>} />
       {depts.length > 1 && <div className="row" style={{ marginBottom: 18 }}><PillSeg value={dept} onChange={setDept} options={depts.map((d) => ({ v: d, l: d }))} /></div>}
       <StatusLegend />
       <DeptGridLive key={dept + ym} dept={dept} ym={ym} me={me.name} />
@@ -147,11 +209,12 @@ function MyWork() {
   const [ym, setYm] = useState(ymOf(new Date().getFullYear(), new Date().getMonth() + 1));
   const [y, m] = ym.split('-').map(Number);
   const q = useApi<{ dept: string }>(`/work/me/${ym}`);
+  const { download, busy } = useDownload();
   return (
     <>
       <PageHead eyebrow={`${HEB_MONTHS[m - 1]} ${y}`} title="סידור עבודה"
         sub={q.data?.dept ? <>מחלקתך: <b>{q.data.dept}</b></> : q.loading ? '' : 'טרם שובצת למחלקה בחודש זה'}
-        actions={<MonthPick value={ym} onChange={setYm} />} />
+        actions={<><MonthPick value={ym} onChange={setYm} />{q.data?.dept && <button className="btn" disabled={busy} onClick={() => download(`/export/me/${ym}`)}><FileXls size={16} />הורד לוח עבודה שלי</button>}</>} />
       <Load q={q}>{(r) => r.dept
         ? <><StatusLegend /><DeptGridLive key={ym} dept={r.dept} ym={ym} me={me.name} /></>
         : <Note kind="info">טרם שובצת למחלקה ב{HEB_MONTHS[m - 1]} {y}. הסידור יופיע כאן אחרי שיבוץ החודש בגאנט.</Note>}</Load>

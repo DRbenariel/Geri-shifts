@@ -4,6 +4,7 @@ import { ArrowsClockwise, CalendarPlus, Key, MagnifyingGlass, Plus, Trash } from
 import { useApi } from '@/lib/api';
 import { handoff } from '@/lib/logic';
 import { useMe } from '@/lib/store';
+import { roleLabel } from '@/lib/mock';
 import { Bezel, Cta, Field, Note, PageHead, Person } from '../ui';
 import { Load, dmy, useAction } from './common';
 
@@ -114,7 +115,7 @@ export default function LiveSettings() {
   const special = me.type === 'מנהל על';
   return (
     <>
-      <PageHead eyebrow={`${me.name} · ${me.type}`} title="הגדרות" />
+      <PageHead eyebrow={`${me.name} · ${roleLabel(me.type)}`} title="הגדרות" />
       <div className="cols2" style={{ alignItems: 'start' }}>
         <div><Password />{special && swaps && <Swaps />}</div>
         <div>{special ? <SpecialDays /> : swaps ? <Swaps /> : <Note kind="info">אין הגדרות נוספות לתפקיד זה.</Note>}</div>

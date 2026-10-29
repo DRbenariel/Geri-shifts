@@ -451,6 +451,13 @@ def register_writes(app, settings, get_ctx, current_user, require):
         exports.export_schedule_wide(ctx, m, y)
         return {"ok": True}
 
+    @app.post("/api/export/work/{dept}/{ym}/sheet")
+    def export_dept_sheet(dept: str, ym: str, me: Me = edit_roles, ctx: DataContext = ctx_dep):
+        """Streamlit "🔗 פתח ב-Sheets": writes the WSD_<dept>_<ym> tab and shares the file by link (Ben's decision)."""
+        y, m = _ym(ym)
+        _can_edit_dept(ctx, me, dept)
+        return {"url": exports.export_dept_to_sheet(ctx, dept, ym, m, year=y, share_anyone=True)}
+
     # ── swaps ──────────────────────────────────────────────────────────
     def _my_shift(ctx, me: Me, ds: str, dept: str):
         s = ctx.schedule

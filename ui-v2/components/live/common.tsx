@@ -36,6 +36,14 @@ export function rollingMonths(): { v: string; y: number; m: number; l: string }[
   });
 }
 
+/** Months a month-number-only setting can hold: the server infers the year 5 months back to 6 ahead. */
+export function inSettingWindow(ym: string): boolean {
+  const t = new Date();
+  const [y, m] = ym.split('-').map(Number);
+  const diff = (y - t.getFullYear()) * 12 + (m - (t.getMonth() + 1));
+  return diff >= -5 && diff <= 6;
+}
+
 export function MonthPick({ value, onChange, options }: { value: string; onChange: (v: string) => void; options?: { v: string; l: string }[] }) {
   const opts = options ?? rollingMonths();
   const all = opts.some((o) => o.v === value) ? opts : [{ v: value, l: value }, ...opts];
@@ -63,6 +71,32 @@ export function useAction() {
     } finally { setBusy(false); }
   };
   return { run, busy };
+}
+
+/** Downloads an .xlsx from the API; toasts the server's Hebrew message on failure. */
+export function useDownload() {
+  const { toast } = useStore();
+  const [busy, setBusy] = useState(false);
+  const download = async (path: string) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api${path}`, { credentials: 'same-origin' });
+      if (!res.ok) {
+        let msg = 'שגיאה בייצוא. נסה/י שוב.';
+        try { const j = await res.json(); if (typeof j?.detail === 'string') msg = j.detail; } catch { /* not JSON */ }
+        toast(msg, 'err');
+        return;
+      }
+      const cd = res.headers.get('Content-Disposition') ?? '';
+      const m = /filename\*=UTF-8''([^;]+)/.exec(cd);
+      const name = m ? decodeURIComponent(m[1]) : 'export.xlsx';
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch { toast('שגיאה בייצוא. נסה/י שוב.', 'err'); } finally { setBusy(false); }
+  };
+  return { download, busy };
 }
 
 export const enc = encodeURIComponent;

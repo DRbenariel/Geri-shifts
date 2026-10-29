@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowUpLeft, CaretDown, CheckCircle, FloppyDisk, Info, Warning, XCircle } from '@phosphor-icons/react';
 import { STATUS, type Code } from '@/lib/logic';
-import type { Role } from '@/lib/mock';
+import { roleLabel, type Role } from '@/lib/mock';
 
 export function Bezel({ children, tight, className = '', id }: { children: ReactNode; tight?: boolean; className?: string; id?: string }) {
   return <section className={`shell ${className}`} id={id}><div className={`core ${tight ? 'tight' : ''}`}>{children}</div></section>;
@@ -133,7 +133,7 @@ export function Person({ name, role, me }: { name: string; role?: Role | string;
   return (
     <div className={`person ${me ? 'me' : ''}`}>
       <Avatar name={name} role={role as Role} />
-      <div style={{ minWidth: 0 }}><div className="n">{name}</div>{role && <div className="r">{role}</div>}</div>
+      <div style={{ minWidth: 0 }}><div className="n">{name}</div>{role && <div className="r">{roleLabel(role)}</div>}</div>
     </div>
   );
 }

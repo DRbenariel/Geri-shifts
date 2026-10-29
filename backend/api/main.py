@@ -13,6 +13,7 @@ import re
 import threading
 import time
 from datetime import date
+from urllib.parse import quote
 
 import gspread
 import numpy as np
@@ -22,7 +23,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from geri_core import DataContext, GSheetStore
-from geri_core import absences, admin, daily, night, people, reports, staff
+from geri_core import absences, admin, daily, exports, night, people, reports, staff
 from geri_core.constants import DAILY_DEPTS_ALL, default_tab_for_role, tabs_for_role
 
 from . import session
@@ -120,6 +121,14 @@ def _ym(ym: str) -> tuple[int, int]:
     if not m:
         raise HTTPException(400, "חודש לא תקין (YYYY-MM)")
     return int(m.group(1)), int(m.group(2))
+
+
+def _manager_dept(ctx, me, dept: str):
+    """404 for an unknown dept; a מנהל מחלקה only for the depts they manage."""
+    if dept not in DAILY_DEPTS_ALL:
+        raise HTTPException(404, "מחלקה לא קיימת")
+    if me.role not in ADMINS and dept not in people.managed_depts(ctx, me.name):
+        raise HTTPException(403, "אין הרשאה למחלקה זו")
 
 
 def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
@@ -294,8 +303,35 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
         include = me.name if me.role == 'מנהל מחלקה' else None
         emps = people.grid_employees(ctx, dept, ym, include_user=include)
         grid = daily.dept_grid(ctx, dept, ym, m, emps, year=y)
-        grid['editable'] = False if settings.read_only else me.role in ADMINS + ('מנהל מחלקה',)
+        can_edit = me.role in ADMINS + ('מנהל מחלקה',)
+        grid['editable'] = can_edit and not settings.read_only
+        # The "העברה זמנית" form (Streamlit: allow_temp_add on the admin and manager grids) shows by role, also
+        # while read-only, so it can be reviewed; adding then gets the read-only notice like every other write.
+        grid['transfer_candidates'] = daily.transfer_candidates(ctx, dept, ym) if can_edit else None
         return grid
+
+    # ── Excel exports (reads only, so they work in read-only mode) ─────
+    def _xlsx(data, fname):
+        if not data:
+            raise HTTPException(404, "אין שיבוצים לייצוא לחודש זה")
+        return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": f"attachment; filename=\"export.xlsx\"; filename*=UTF-8''{quote(fname)}"})
+
+    @app.get("/api/export/work/{dept}/{ym}")
+    def export_dept(dept: str, ym: str, me: Me = Depends(require(*ADMINS, 'מנהל מחלקה')), ctx: DataContext = Depends(get_ctx)):
+        y, m = _ym(ym)
+        _manager_dept(ctx, me, dept)
+        return _xlsx(*exports.dept_batched_excel(ctx, dept, ym, m, year=y))
+
+    @app.get("/api/export/work-all/{ym}")
+    def export_all(ym: str, _: Me = Depends(require(*ADMINS)), ctx: DataContext = Depends(get_ctx)):
+        y, m = _ym(ym)
+        return _xlsx(*exports.all_depts_batched_excel(ctx, ym, m, year=y))
+
+    @app.get("/api/export/me/{ym}")
+    def export_mine(ym: str, me: Me = Depends(require('מתמחה', 'רופא בכיר')), ctx: DataContext = Depends(get_ctx)):
+        y, m = _ym(ym)
+        return _xlsx(*exports.personal_excel(ctx, me.name, m, daily_dept=people.employee_dept_for_month(ctx, me.name, ym) or None, year=y))
 
     # ── absences ───────────────────────────────────────────────────────
     @app.get("/api/absences/pending")

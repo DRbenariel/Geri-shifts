@@ -4,8 +4,7 @@ import {
   CalendarCheck, CalendarDots, ChartBar, GearSix, LockSimple, LockSimpleOpen, MoonStars, ShieldCheck, SignOut, SquaresFour, Tray, UsersThree, type IconProps,
 } from '@phosphor-icons/react';
 import { useStore } from '@/lib/store';
-import { HEB_MONTHS } from '@/lib/mock';
-import { initials } from '@/lib/logic';
+import { HEB_MONTHS, roleLabel } from '@/lib/mock';
 import { MOBILE_PRIMARY, type TabKey } from '@/lib/roles';
 import Login from './Login';
 import Settings from './tabs/Settings';
@@ -81,18 +80,16 @@ export default function AppShell() {
   return (
     <div className="layout">
       <aside className="rail" aria-label="ניווט ראשי">
-        <div className="logo" title="מערכת סידור עבודה המערך הגריאטרי">ג</div>
         {tabs.map((t) => (
           <a key={t.k} href={`#/${t.k}`} className={t.k === route ? 'on' : ''} data-tab={t.k} aria-current={t.k === route ? 'page' : undefined}>
             <t.I size={22} weight={t.k === route ? 'fill' : 'light'} />{t.he}
           </a>
         ))}
-        <div className="me" title={`${me.name} · ${me.type}`}>{initials(me.name)}</div>
         <button className="out" onClick={out}><SignOut size={16} /> התנתק</button>
       </aside>
       <main className="page" key={route + me.name}>
         <div className="statusbar">
-          <span className="who"><b>{me.name}</b> · {me.type}</span>
+          <span className="who"><b>{me.name}</b> · {roleLabel(me.type)}</span>
           <span className="grow" />
           {route !== 'night' && allowed.includes('night') && <span className="pill"><MoonStars size={14} />חודש פעיל לתורנויות: <b>{HEB_MONTHS[s.active_month - 1]}</b></span>}
           {me.type !== 'תורן חוץ' && (

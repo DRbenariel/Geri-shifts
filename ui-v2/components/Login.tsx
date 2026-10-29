@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { SignIn } from '@phosphor-icons/react';
 import { Cta, Field, Note } from './ui';
 import { DEMO_USERS } from '@/lib/roles';
+import { roleLabel } from '@/lib/mock';
 import { useStore } from '@/lib/store';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
@@ -46,7 +47,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
               <div className="chips">
                 {DEMO_USERS.map((u) => (
                   <button key={u.name} type="button" className="chip" data-user={u.role} onClick={() => go(u.name)}>
-                    <b>{u.role}</b>{u.name}
+                    <b>{roleLabel(u.role)}</b>{u.name}
                   </button>
                 ))}
               </div>

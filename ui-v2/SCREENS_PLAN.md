@@ -84,7 +84,7 @@
 | סידור עבודה | `GET /work/{dept}/{ym}` · `GET /work/me/{ym}` | `daily.dept_grid` + `people.grid_employees` | לפי טבלת הטאבים |
 | | `POST /work/cell/cycle` · `PUT /work/cell` | `daily.cycle_cell` · `daily.set_cell` | מנהל על, מנהל/ת, מנהל מחלקה (במחלקות שלו) |
 | | `POST /work/transfer` · `DELETE /work/transfer` | `daily.add_temp_transfer` · `wsd_delete` | אותם תפקידים |
-| ייצוא | `GET /work/{dept}/{ym}.xlsx` · `GET /work/all/{ym}.xlsx` · `GET /work/me/{ym}.xlsx` · `POST /work/{dept}/{ym}/sheet` | `exports.*` | לפי טבלת הטאבים |
+| ייצוא | `GET /export/work/{dept}/{ym}` · `GET /export/work-all/{ym}` · `GET /export/me/{ym}` · `POST /export/work/{dept}/{ym}/sheet` | `exports.*` | מחלקה: מנהל על, מנהל/ת, מנהל/ת מחלקה (במחלקות שלו) · כל המחלקות: מנהל על, מנהל/ת · אישי: מתמחה, רופא בכיר |
 | גאנט | `GET /gantt/{ym}` · `PUT /gantt/{ym}` | `admin.gantt_rows` · `save_gantt` | מנהל על, מנהל/ת |
 | | `POST /gantt/{ym}/activate` · `PUT /settings/daily_requests_open` | `make_daily_month_active` · `set_setting` | מנהל על, מנהל/ת |
 | כוננויות | `GET /oncall/{ym}` · `PUT /oncall/{ym}` · `PUT /oncall/day/{date}` | `admin.konenut_*` | מנהל על, מנהל/ת |

@@ -1,11 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { CheckCircle, FloppyDisk, Lightning, LockSimple, LockSimpleOpen, Table, Warning, WarningOctagon } from '@phosphor-icons/react';
+import { CheckCircle, FileXls, FloppyDisk, Lightning, LockSimple, LockSimpleOpen, Table, Warning, WarningOctagon } from '@phosphor-icons/react';
 import { useApi } from '@/lib/api';
-import { DOW_FULL, HEB_MONTHS, dowOf } from '@/lib/mock';
+import { DOW_FULL, HEB_MONTHS, dowOf, roleLabel } from '@/lib/mock';
 import { useMe, useStore, ymOf } from '@/lib/store';
 import { Bezel, Cta, Kpi, Note, PageHead, Person, useTip } from '../ui';
-import { Load, MonthPick, dmy, useAction } from './common';
+import { Load, MonthPick, dmy, inSettingWindow, useAction, useDownload } from './common';
 
 // ── גאנט חודשי ───────────────────────────────────────────────────────────────
 interface GRow { name: string; type: string; options: string[]; dept: string | null; invalid_existing: boolean; side: string; manual_schedule_only: boolean }
@@ -17,6 +17,7 @@ export function LiveGantt() {
   const [y, m] = ym.split('-').map(Number);
   const q = useApi<{ rows: GRow[]; summary: { total: number; by_dept: Record<string, number> } }>(`/gantt/${ym}`);
   const { run, busy } = useAction();
+  const xl = useDownload();
   const [form, setForm] = useState<Record<string, { dept: string; side: string }>>({});
   useEffect(() => { if (q.data) setForm(Object.fromEntries(q.data.rows.map((r) => [r.name, { dept: r.dept ?? '', side: r.side }]))); }, [q.data]);
   const active = me.settings.daily_active_month === m && me.settings.daily_active_year === y;
@@ -37,7 +38,7 @@ export function LiveGantt() {
           <span className="grow" />
           {active
             ? <span className="badge b-ok" style={{ fontSize: 14, padding: '6px 14px' }}><CheckCircle size={16} weight="fill" />זהו החודש הפעיל</span>
-            : <Cta variant="teal" icon={<Lightning size={16} />} disabled={busy} onClick={() => run(`/gantt/${ym}/activate`, 'POST', undefined, `${HEB_MONTHS[m - 1]} הוא עכשיו החודש הפעיל`).then(refreshMe).catch(() => {})}>הפוך את {HEB_MONTHS[m - 1]} לחודש פעיל</Cta>}
+            : <Cta variant="teal" icon={<Lightning size={16} />} disabled={busy || !inSettingWindow(ym)} onClick={() => run(`/gantt/${ym}/activate`, 'POST', undefined, `${HEB_MONTHS[m - 1]} הוא עכשיו החודש הפעיל`).then(refreshMe).catch(() => {})}>הפוך את {HEB_MONTHS[m - 1]} לחודש פעיל</Cta>}
           {active && <Cta variant={open ? 'light' : 'teal'} icon={open ? <LockSimple size={16} /> : <LockSimpleOpen size={16} />} disabled={busy}
             onClick={() => run('/settings/daily_requests_open', 'PUT', { open: !open }, open ? 'ההגשות נסגרו' : 'ההגשות נפתחו').then(refreshMe).catch(() => {})}>{open ? 'סגור הגשות' : 'פתח הגשות'}</Cta>}
         </div>
@@ -65,6 +66,7 @@ export function LiveGantt() {
           <div className="row" style={{ marginTop: 18 }}>
             <Cta icon={<FloppyDisk size={16} />} disabled={busy} onClick={save}>שמור שיבוץ</Cta><span className="grow" />
             {Object.entries(d.summary.by_dept).map(([k, n]) => <span key={k} className="chip">{k}: <b>{n}</b></span>)}
+            <button className="btn" disabled={xl.busy} onClick={() => xl.download(`/export/work-all/${ym}`)}><FileXls size={16} />Excel, כל המחלקות</button>
           </div>
         </Bezel>
       )}</Load>
@@ -126,7 +128,7 @@ export function LiveStaff() {
             <div className="tbl-wrap"><table className="t">
               <thead><tr>{cols.map((c) => <th key={c}>{LABEL[c]}</th>)}<th>מוגבל/ת למחלקת הבית</th></tr></thead>
               <tbody>{d.rows.map((r) => (
-                <tr key={String(r.name)}>{cols.map((c) => <td key={c} className={c === 'email' ? 'small' : ''} dir={c === 'email' ? 'ltr' : undefined}>{typeof r[c] === 'boolean' ? (r[c] ? '✓' : '') : String(r[c] ?? '')}</td>)}
+                <tr key={String(r.name)}>{cols.map((c) => <td key={c} className={c === 'email' ? 'small' : ''} dir={c === 'email' ? 'ltr' : undefined}>{typeof r[c] === 'boolean' ? (r[c] ? '✓' : '') : (c === 'type' ? roleLabel(String(r[c] ?? '')) : String(r[c] ?? ''))}</td>)}
                   <td>{d.only_home.includes(String(r.name)) ? '✓' : ''}</td></tr>
               ))}</tbody>
             </table></div>

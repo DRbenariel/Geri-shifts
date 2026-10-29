@@ -198,3 +198,80 @@ def test_cell_undo_restores_computed_status(rw):
     assert c2['status'] == cell['status'] and not c2['manual']
     as_(rw, SENIORS[0])
     assert rw.request("DELETE", "/api/work/cell", json=body).status_code == 403
+
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def test_excel_exports_respect_scope(rw):
+    as_(rw, MGR_A)
+    r = rw.get("/api/export/work/שיקום גריאטרי א'/2026-11")
+    assert r.status_code == 200 and r.headers['content-type'] == XLSX and r.content[:2] == b'PK'
+    assert "filename*=UTF-8''" in r.headers['content-disposition']
+    assert rw.get("/api/export/work/פנימית גריאטרית/2026-11").status_code == 403
+    assert rw.get("/api/export/work-all/2026-11").status_code == 403
+    as_(rw, SUPER)
+    assert rw.get("/api/export/work-all/2026-11").headers['content-type'] == XLSX
+    assert rw.get("/api/export/work/לא קיים/2026-11").status_code == 404
+    as_(rw, INTERNS[1])
+    assert rw.get("/api/export/work/שיקום גריאטרי א'/2026-11").status_code == 403
+    assert rw.get("/api/export/me/2026-11").headers['content-type'] == XLSX
+
+
+def test_excel_export_works_in_read_only_but_sheet_export_does_not(store):
+    ro = _client(store, read_only=True)
+    as_(ro, MGR_A)
+    assert ro.get("/api/export/work/שיקום גריאטרי א'/2026-11").status_code == 200
+    r = ro.post("/api/export/work/שיקום גריאטרי א'/2026-11/sheet")
+    assert r.status_code == 403 and r.json()['detail'] == READ_ONLY_MSG
+
+
+def test_sheet_export_writes_tab_and_returns_url(rw, store):
+    as_(rw, MGR_A)
+    r = rw.post("/api/export/work/שיקום גריאטרי א'/2026-11/sheet")
+    assert r.status_code == 200, r.text
+    assert r.json()['url'].startswith("memory://WSD_")
+    assert any(n.startswith("WSD_") for n in store.sheets)
+    assert rw.post("/api/export/work/פנימית גריאטרית/2026-11/sheet").status_code == 403
+
+
+def test_temp_transfer_roundtrip(rw, store):
+    dept = "שיקום גריאטרי א'"
+    as_(rw, MGR_A)
+    grid = rw.get(f"/api/work/{dept}/2026-11").json()
+    assert grid['editable'] and grid['transfer_candidates']
+    on_board = {r['employee'] for r in grid['rows']}
+    who = next(n for n in grid['transfer_candidates'] if n not in on_board and n in INTERNS)
+    body = {"dept": dept, "date": "2026-11-04", "employee": who}
+    assert rw.post("/api/work/transfer", json=body).status_code == 200
+    after = rw.get(f"/api/work/{dept}/2026-11").json()
+    assert after['transfers'][who]['days'] == [4]
+    assert rw.request("DELETE", "/api/work/transfer", json=body).status_code == 200
+    assert who not in rw.get(f"/api/work/{dept}/2026-11").json()['transfers']
+    ro = _client(store, read_only=True)
+    as_(ro, MGR_A)
+    g = ro.get(f"/api/work/{dept}/2026-11").json()
+    assert g['editable'] is False and g['transfer_candidates']           # form still shown while read-only
+    assert ro.post("/api/work/transfer", json=body).status_code == 403
+    as_(ro, SENIORS[0])
+    mine = ro.get("/api/work/me/2026-11").json()['dept']
+    if mine:
+        assert ro.get(f"/api/work/{mine}/2026-11").json()['transfer_candidates'] is None
+
+
+def test_clear_month_auto_keeps_manual(rw, store):
+    as_(rw, SUPER)
+    assert rw.put("/api/night/slot", json={"date": "2026-11-05", "dept": "שיקום", "employee": EXTERNALS[0]}).status_code == 200
+    before = store.read('schedule')
+    before = before[before['date'].astype(str).str.startswith('2026-11')]
+    manual = before[before['is_manual'].astype(str).str.upper() == 'TRUE']
+    assert len(manual) < len(before)                          # the month has auto rows to clear
+    assert rw.post("/api/night/2026-11/clear", json={"mode": "auto"}).status_code == 200
+    s = store.read('schedule')
+    nov = s[s['date'].astype(str).str.startswith('2026-11')]
+    assert len(nov) == len(manual) and EXTERNALS[0] in set(nov['employee'])
+    assert rw.post("/api/night/2026-11/clear", json={"mode": "all"}).status_code == 200
+    s = store.read('schedule')
+    assert not s['date'].astype(str).str.startswith('2026-11').any()
+    as_(rw, ADMIN)
+    assert rw.post("/api/night/2026-11/clear", json={"mode": "all"}).status_code == 403

@@ -1,12 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { ArrowsClockwise, Check, Coffee, FileArrowUp, MagicWand, Moon, Prohibit, Question, Star, Sun, X } from '@phosphor-icons/react';
+import { ArrowsClockwise, Broom, CalendarCheck, Check, Coffee, FileArrowUp, MagicWand, Moon, PencilSimple, Prohibit, Question, Star, Sun, Trash, X } from '@phosphor-icons/react';
 import { useApi, type NightCal, type NightSlot } from '@/lib/api';
 import { DOW_FULL, HEB_MONTHS, dowOf } from '@/lib/mock';
 import { handoff } from '@/lib/logic';
-import { monthDays, useMe, ymOf } from '@/lib/store';
+import { monthDays, useMe, useStore, ymOf } from '@/lib/store';
 import { Bezel, Cta, Kpi, Modal, Note, PageHead, PillSeg } from '../ui';
-import { Load, MonthPick, dmy, useAction } from './common';
+import { Load, MonthPick, dmy, inSettingWindow, rollingMonths, useAction } from './common';
 
 const ORDER = ['שיקום', 'פנימית גריאטרית', 'שישי בוקר - שיקום (1)', 'שישי בוקר - שיקום (2)', 'שישי בוקר - פנימית (1)', 'שישי בוקר - פנימית (2)'];
 const kind = (dept: string) => (dept.startsWith('שישי') ? 'fr' : dept === 'שיקום' ? 'sh' : 'pn');
@@ -23,6 +23,74 @@ function Month({ y, m, cell }: { y: number; m: number; cell: (d: number, date: s
   );
 }
 
+const MAIN = ['שיקום', 'פנימית גריאטרית'];
+const FRI = ORDER.slice(2);
+
+/** Manual override for one day (Streamlit "כלי שיבוץ ידני"): pick who works each slot, or clear it. */
+function DayEditor({ date, cal, onClose, onSaved }: { date: string; cal: NightCal; onClose: () => void; onSaved: () => void }) {
+  const people = useApi<{ name: string; type: string }[]>('/people');
+  const { run, busy } = useAction();
+  const rows = cal.slots[date] ?? [];
+  const cur = (dept: string) => rows.find((r) => r.dept === dept);
+  const special = cal.special_days.find((x) => x.date === date);
+  const friday = new Date(date).getDay() === 5 || special?.day_type === 'כמו שישי (ערב חג)' || rows.some((r) => r.dept.startsWith('שישי'));
+  const depts = friday ? [...MAIN, ...FRI] : MAIN;
+  const blocked = new Set((cal.requests?.[date] ?? []).filter((x) => x.status === 'אילוץ').map((x) => x.employee.trim()));
+  const [pick, setPick] = useState<Record<string, string>>({});
+  const assign = (dept: string) => run('/night/slot', 'PUT', { date, dept, employee: pick[dept] }, `שובץ/ה: ${pick[dept]}`).then(onSaved).catch(() => {});
+  const clear = (dept: string) => run('/night/slot', 'DELETE', { date, dept }, 'השיבוץ בוטל').then(onSaved).catch(() => {});
+  return (
+    <Modal open onClose={onClose}>
+      <h2 className="sec"><PencilSimple size={22} />שיבוץ ידני · {DOW_FULL[new Date(date).getDay()]} {dmy(date)}</h2>
+      <p className="muted small" style={{ marginBottom: 14 }}>שיבוץ ידני לא נדרס בהרצת שיבוץ אוטומטי. אי אפשר לשבץ מי שהגיש/ה אילוץ ליום הזה.</p>
+      <Load q={people}>{(list) => (
+        <div className="cardlist">
+          {depts.map((dept) => {
+            const c = cur(dept);
+            const has = !!c && c.employee !== '---';
+            return (
+              <div key={dept} className="rcard" style={{ flexWrap: 'wrap' }}>
+                <div className="main" style={{ minWidth: 150 }}><b>{dept}</b>
+                  <div className="meta">{has ? <>כרגע: {c!.employee.trim()}{c!.is_manual ? ' (ידני)' : ''}</> : 'לא משובץ'}</div></div>
+                <select className="input" style={{ flex: '1 1 160px' }} value={pick[dept] ?? ''} onChange={(e) => setPick({ ...pick, [dept]: e.target.value })} aria-label={`עובד/ת ל${dept}`}>
+                  <option value="">בחר/י עובד/ת</option>
+                  {['מתמחה', 'תורן חוץ'].map((t) => (
+                    <optgroup key={t} label={t}>{list.filter((p) => p.type === t).map((p) => (
+                      <option key={p.name} value={p.name} disabled={blocked.has(p.name)}>{p.name}{blocked.has(p.name) ? ' (אילוץ)' : ''}</option>))}</optgroup>
+                  ))}
+                </select>
+                <button className="btn ok" disabled={busy || !pick[dept]} onClick={() => assign(dept)}><Check size={14} />שבץ</button>
+                {has && <button className="btn no" disabled={busy} onClick={() => clear(dept)}><X size={14} />בטל שיבוץ</button>}
+              </div>
+            );
+          })}
+        </div>
+      )}</Load>
+      <div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={onClose}>סגור</button></div>
+    </Modal>
+  );
+}
+
+/** Which month interns and externals submit night constraints for (settings.active_month). */
+function OpenMonth() {
+  const me = useMe();
+  const { refreshMe } = useStore();
+  const { run, busy } = useAction();
+  const cur = ymOf(me.settings.active_year, me.settings.active_month);
+  const opts = rollingMonths().filter((o) => inSettingWindow(o.v));
+  return (
+    <Bezel>
+      <h2 className="sec"><CalendarCheck size={22} />חודש פתוח להגשת אילוצים</h2>
+      <p className="muted small" style={{ marginBottom: 10 }}>המתמחים ותורני החוץ מגישים אילוצים ובקשות לחודש הזה.</p>
+      <select className="input" value={cur} disabled={busy} aria-label="חודש פתוח להגשה"
+        onChange={(e) => { const m = +e.target.value.slice(5); run('/settings/active_month', 'PUT', { month: m }, `החודש הפתוח להגשה עודכן ל${HEB_MONTHS[m - 1]}`).then(refreshMe).catch(() => {}); }}>
+        {!opts.some((o) => o.v === cur) && <option value={cur}>{HEB_MONTHS[me.settings.active_month - 1]} {me.settings.active_year}</option>}
+        {opts.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+      </select>
+    </Bezel>
+  );
+}
+
 function AdminNight() {
   const me = useMe();
   const [ym, setYm] = useState(ymOf(me.settings.active_year, me.settings.active_month));
@@ -32,6 +100,12 @@ function AdminNight() {
   const { run, busy } = useAction();
   const [summary, setSummary] = useState<string[]>([]);
   const [askAuto, setAskAuto] = useState<null | boolean>(null);
+  const [askClear, setAskClear] = useState<null | 'auto' | 'all'>(null);
+  const [editDay, setEditDay] = useState<string | null>(null);
+  const clear = (mode: 'auto' | 'all') => {
+    setAskClear(null);
+    run(`/night/${ym}/clear`, 'POST', { mode }, mode === 'auto' ? 'השיבוצים האוטומטיים נמחקו' : 'כל הלוח לחודש נמחק').then(() => q.reload()).catch(() => {});
+  };
   const auto = async (weekends: boolean) => {
     setAskAuto(null);
     try {
@@ -69,6 +143,7 @@ function AdminNight() {
                   <span className="mark"><Prohibit size={12} />חסימה</span><span className="mark"><Star size={12} weight="fill" />בקשה</span>
                 </div>
                 {cal.availability && !cal.availability.shown && <Note kind="info">לוח הזמינות היומי יוצג כשכל העובדים יגישו אילוצים.</Note>}
+                <p className="muted small" style={{ marginBottom: 10 }}><PencilSimple size={13} /> לחיצה על יום פותחת שיבוץ ידני.</p>
                 <Month y={y} m={m} cell={(d, date) => {
                   const rows = [...(cal.slots[date] ?? [])].sort((a, b) => ORDER.indexOf(a.dept) - ORDER.indexOf(b.dept));
                   const reqs = cal.requests?.[date] ?? [];
@@ -77,7 +152,8 @@ function AdminNight() {
                   const wi = reqs.filter((r) => r.status === 'בקשה').map((r) => r.employee);
                   const av = cal.availability?.shown ? cal.availability.available[date] ?? [] : null;
                   return (
-                    <div key={d} className={`day ${dowOf(y, m, d) >= 5 ? 'we' : ''}`}>
+                    <div key={d} className={`day click ${dowOf(y, m, d) >= 5 ? 'we' : ''}`} role="button" tabIndex={0} aria-label={`שיבוץ ידני ל-${d}/${m}`}
+                      onClick={() => setEditDay(date)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditDay(date); } }}>
                       <span className="num">{d}</span>
                       {sp && <span className="sp" title={sp.day_type}>{sp.description}</span>}
                       {rows.map((r) => r.employee === '---'
@@ -122,7 +198,29 @@ function AdminNight() {
                 </div>
                 {summary.length > 0 && <div style={{ marginTop: 14 }}><Note kind="ok">{summary.map((t) => <div key={t}>{t}</div>)}</Note></div>}
               </Bezel>
+              <Bezel>
+                <h2 className="sec"><Broom size={22} />ניקוי החודש</h2>
+                <div className="cardlist">
+                  <Cta variant="light" icon={<Broom size={16} />} disabled={busy} onClick={() => setAskClear('auto')}>נקה שיבוצים אוטומטיים</Cta>
+                  <Cta variant="danger" icon={<Trash size={16} />} disabled={busy} onClick={() => setAskClear('all')}>נקה את כל הלוח</Cta>
+                </div>
+              </Bezel>
+              <OpenMonth />
             </div>
+            {editDay && <DayEditor date={editDay} cal={cal} onClose={() => setEditDay(null)} onSaved={() => { q.reload(); setEditDay(null); }} />}
+            <Modal open={askClear !== null} onClose={() => setAskClear(null)}>
+              <h2 className="sec"><Trash size={22} />{askClear === 'all' ? `למחוק את כל הלוח של ${HEB_MONTHS[m - 1]}?` : `למחוק את השיבוצים האוטומטיים של ${HEB_MONTHS[m - 1]}?`}</h2>
+              <ul className="confirm-list">
+                {askClear === 'all'
+                  ? <li>כל <b>{filled}</b> המשמרות המשובצות יימחקו, כולל שיבוצים ידניים.</li>
+                  : <li><b>{Object.values(cal.slots).flat().filter((r) => !r.is_manual && r.employee !== '---').length}</b> שיבוצים אוטומטיים יימחקו. השיבוצים הידניים יישארו.</li>}
+                <li>אין ביטול אחרי המחיקה.</li>
+              </ul>
+              <div className="row">
+                <Cta variant="danger" icon={<Trash size={16} />} onClick={() => askClear && clear(askClear)}>מחק</Cta>
+                <button className="btn" onClick={() => setAskClear(null)}>ביטול</button>
+              </div>
+            </Modal>
             <Modal open={askAuto !== null} onClose={() => setAskAuto(null)}>
               <h2 className="sec"><MagicWand size={22} />{askAuto ? 'לשבץ אוטומטית את הסופ"שים?' : `לשבץ אוטומטית את ${HEB_MONTHS[m - 1]}?`}</h2>
               <ul className="confirm-list">

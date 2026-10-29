@@ -45,6 +45,8 @@ export const NIGHT_DEPTS = ['שיקום', 'פנימית גריאטרית'];
 export const FRI_SLOTS = ['שישי בוקר - שיקום (1)', 'שישי בוקר - שיקום (2)', 'שישי בוקר - פנימית (1)', 'שישי בוקר - פנימית (2)'];
 export const DAILY_DEPTS = ["שיקום גריאטרי א'", "שיקום גריאטרי ב'", 'פנימית גריאטרית'];
 export const STAFF_DEPTS = ['שיקום', 'פנימית גריאטרית', 'כללי', 'הנהלה', 'זה״ב'];
+/** Display name of a role; the sheet value (and every permission check) stays 'מנהל מחלקה'. */
+export const roleLabel = (r: string) => r.replace('מנהל מחלקה', 'מנהל/ת מחלקה');
 export const ROLES: Role[] = ['מתמחה', 'תורן חוץ', 'רופא בכיר', 'מנהל מחלקה', 'מנהל/ת', 'מנהל על'];
 
 export const ME = { name: 'ענבל רז', type: 'מנהל על' as Role };

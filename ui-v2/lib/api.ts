@@ -74,6 +74,7 @@ export interface Grid {
   rows: GridRow[];
   days: { day: number; date: string; weekday: number; night_duty: string | string[] | null; friday_workers: string[] | null; konenut: string | null }[];
   transfers: Record<string, { days: number[]; side: string }>;
+  transfer_candidates: string[] | null;   // null: no העברה זמנית form for this viewer
 }
 export interface Pending {
   id: string; employee: string; start_date: string; end_date: string; type: string; notes?: string;

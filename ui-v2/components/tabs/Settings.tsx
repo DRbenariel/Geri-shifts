@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { ArrowsClockwise, CalendarPlus, Key, MagnifyingGlass, Plus, Trash } from '@phosphor-icons/react';
 import { useMe, useStore } from '@/lib/store';
-import { type ShiftRow, type SpecialDay } from '@/lib/mock';
+import { roleLabel, type ShiftRow, type SpecialDay } from '@/lib/mock';
 import { NIGHT_POOL, canTake, fmtDate, handoff, isWeekendDay, wishedOn } from '@/lib/logic';
 
 const TODAY = '2026-10-18';
@@ -137,7 +137,7 @@ export default function Settings() {
   const special = me.type === 'מנהל על';
   return (
     <>
-      <PageHead eyebrow={`${me.name} · ${me.type}`} title="הגדרות" />
+      <PageHead eyebrow={`${me.name} · ${roleLabel(me.type)}`} title="הגדרות" />
       <div className={swaps || special ? 'cols2' : ''} style={{ alignItems: 'start', maxWidth: swaps || special ? undefined : 560 }}>
         <div><Password />{special && swaps && <SwapSearch />}</div>
         {(swaps || special) && <div>{special ? <SpecialDays /> : <SwapSearch />}</div>}

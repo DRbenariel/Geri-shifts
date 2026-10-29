@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Check, CloudArrowDown, FloppyDisk, LockSimple, Plus, PushPin, Star, Trash, UserMinus, UserPlus, Warning, X } from '@phosphor-icons/react';
 import { useStore } from '@/lib/store';
-import { DAILY_DEPTS, DOW_FULL, HEB_MONTHS, MONTH, ROLES, STAFF_DEPTS, YEAR, dowOf, iso, type Role, type Staff } from '@/lib/mock';
+import { DAILY_DEPTS, DOW_FULL, HEB_MONTHS, MONTH, ROLES, roleLabel, STAFF_DEPTS, YEAR, dowOf, iso, type Role, type Staff } from '@/lib/mock';
 import { absenceConflicts, constraintCounters, fmtRange } from '@/lib/logic';
 import { Bezel, Cta, Expander, Field, MarkMode, Modal, Note, PageHead } from '../ui';
 
@@ -66,7 +66,7 @@ function AddEmployee() {
       {ok && <Note kind="ok">{ok}</Note>}
       <div className="cols3">
         <Field label="שם מלא"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-        <Field label="תפקיד"><select className="input" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value as Role })}>{ROLES.map((r) => <option key={r}>{r}</option>)}</select></Field>
+        <Field label="תפקיד"><select className="input" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value as Role })}>{ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}</select></Field>
         <Field label="אימייל"><input className="input" type="email" dir="ltr" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
         <Field label="מחלקה"><select className="input" value={f.dept} onChange={(e) => setF({ ...f, dept: e.target.value })}>{STAFF_DEPTS.map((d) => <option key={d}>{d}</option>)}</select></Field>
         <Field label="מכסה חודשית"><input className="input" type="number" value={f.monthly_quota} onChange={(e) => setF({ ...f, monthly_quota: +e.target.value })} /></Field>
@@ -118,7 +118,7 @@ function StaffTable() {
           <tr key={i}>
             <td><button className="iconbtn del" aria-label={`מחק את ${r.name || 'השורה'}`} title="מחק עובד/ת" onClick={() => askDelete(i)}><UserMinus size={16} /></button></td>
             <td><input className="input" value={r.name} onChange={(e) => upd(i, { name: e.target.value })} style={{ minWidth: 130 }} /></td>
-            <td><select className="input" value={r.type} onChange={(e) => upd(i, { type: e.target.value as Role })}>{ROLES.map((x) => <option key={x}>{x}</option>)}</select></td>
+            <td><select className="input" value={r.type} onChange={(e) => upd(i, { type: e.target.value as Role })}>{ROLES.map((x) => <option key={x} value={x}>{roleLabel(x)}</option>)}</select></td>
             <td><select className="input" value={r.dept} onChange={(e) => upd(i, { dept: e.target.value })}>{STAFF_DEPTS.map((x) => <option key={x}>{x}</option>)}</select></td>
             <td><input className="input" type="number" value={r.monthly_quota} onChange={(e) => upd(i, { monthly_quota: +e.target.value })} style={{ width: 70 }} /></td>
             <td><input className="input" type="number" value={r.weekend_quota} onChange={(e) => upd(i, { weekend_quota: +e.target.value })} style={{ width: 70 }} /></td>
