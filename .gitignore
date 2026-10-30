@@ -66,3 +66,4 @@ infographics/screenshots/
 infographics/summary.json
 infographics/*.pdf
 .pytest_cache/
+backend/daily_report.py

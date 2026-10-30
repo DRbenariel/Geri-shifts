@@ -45,6 +45,7 @@ class FutureBody(BaseModel):
     start: str
     end: str
     note: str = ""
+    type: str = Field(default="חופש עתידי", pattern="^(חופש עתידי|חופש|202|היעדרות אחרת)$")
 
 
 class ApproveBody(BaseModel):
@@ -133,6 +134,19 @@ class SlotBody(BaseModel):
     date: str
     dept: str
     employee: str = ""
+
+
+class SuggestionBody(BaseModel):
+    date: str
+    dept: str
+    suggestion: dict
+
+
+class SwapExecBody(BaseModel):
+    date: str
+    dept: str
+    kind: str = Field(pattern="^(direct|exchange|mutual_cross|circular)$")
+    option: dict
 
 
 class SwapBody(BaseModel):
@@ -243,7 +257,7 @@ def register_writes(app, settings, get_ctx, current_user, require):
 
     @app.post("/api/absences/future")
     def submit_future(body: FutureBody, me: Me = Depends(require(*DAILY_SUBMITTERS)), ctx: DataContext = ctx_dep):
-        return absences.submit_future_absence(ctx, me.name, _iso(body.start), _iso(body.end), 'חופש עתידי', body.note)
+        return absences.submit_future_absence(ctx, me.name, _iso(body.start), _iso(body.end), body.type, body.note)
 
     # ── day absences: managers ─────────────────────────────────────────
     def _in_scope(ctx, me: Me, req_id: str, approved=False) -> bool:
@@ -398,6 +412,12 @@ def register_writes(app, settings, get_ctx, current_user, require):
 
     @app.put("/api/staff")
     def save_staff(body: StaffTableBody, _: Me = superadmin, ctx: DataContext = ctx_dep):
+        names = [str(r.get('name', '')).strip() for r in body.rows if str(r.get('name', '')).strip()]
+        dup = next((n for i, n in enumerate(names) if n in names[:i]), None)
+        if dup:
+            raise HTTPException(400, f"השם {dup} מופיע פעמיים")
+        if not names:
+            raise HTTPException(400, "טבלת הצוות ריקה")
         staff.save_staff_table(ctx, body.rows, body.only_home)
         return {"ok": True}
 
@@ -443,6 +463,49 @@ def register_writes(app, settings, get_ctx, current_user, require):
     @app.delete("/api/night/slot")
     def unassign(body: SlotBody, _: Me = superadmin, ctx: DataContext = ctx_dep):
         night.manual_unassign(ctx, _iso(body.date), body.dept)
+        return {"ok": True}
+
+    # Unfilled-slot help: the scheduler's own suggestions (returned by /auto, kept by the page as
+    # Streamlit keeps them in the session) and the admin swap finder (draw_calendar_view).
+    @app.post("/api/night/suggestion")
+    def apply_suggestion(body: SuggestionBody, _: Me = superadmin, ctx: DataContext = ctx_dep):
+        ds = _iso(body.date)
+        s = ctx.schedule
+        slot = s[(s['date'].astype(str) == ds) & (s['dept'] == body.dept)]
+        if slot.empty or str(slot.iloc[0]['employee']).strip() != '---':
+            raise HTTPException(409, "המשמרת כבר אוישה. הרץ/י שיבוץ או רענן/י את הלוח.")
+        sugg = body.suggestion
+        names = {'direct_swap': ('conflicted_emp', 'replacement_emp'), 'move_shift': ('conflicted_emp', 'replacement_emp'),
+                 'triple_swap': ('emp_a', 'emp_b', 'emp_c')}.get(str(sugg.get('type')))
+        if names is None or any(people.staff_row(ctx, str(sugg.get(k, ''))) is None for k in names):
+            raise HTTPException(400, "הצעה לא תקינה")
+        night.apply_suggestion(ctx, ds, body.dept, sugg)
+        return {"ok": True}
+
+    @app.get("/api/swap-options")
+    def swap_options(date: str, dept: str, _: Me = superadmin, ctx: DataContext = ctx_dep):
+        if dept not in ALL_SHIFT_DEPTS:
+            raise HTTPException(400, "משמרת לא קיימת")
+        return night.admin_swap_options(ctx, _iso(date), dept)
+
+    @app.post("/api/swap-options/execute")
+    def swap_execute(body: SwapExecBody, _: Me = superadmin, ctx: DataContext = ctx_dep):
+        if body.dept not in ALL_SHIFT_DEPTS:
+            raise HTTPException(400, "משמרת לא קיימת")
+        ds = _iso(body.date)
+        # Only an option the server finds now is executed, never what the page sends as-is.
+        opts = night.admin_swap_options(ctx, ds, body.dept)
+        cur, o = opts['current'], body.option
+        if body.kind == 'direct' and o.get('name') in opts['direct']:
+            night.execute_direct(ctx, ds, body.dept, o['name'])
+        elif body.kind == 'exchange' and o in opts['exchange']:
+            night.execute_exchange(ctx, ds, body.dept, cur, o['name'], o['dept'])
+        elif body.kind == 'mutual_cross' and o in opts['mutual_cross']:
+            night.execute_mutual_cross(ctx, ds, body.dept, cur, o['b_name'], o['b_date'], o['b_dept'])
+        elif body.kind == 'circular' and o in opts['circular']:
+            night.execute_circular(ctx, ds, body.dept, cur, o)
+        else:
+            raise HTTPException(400, "האפשרות כבר לא זמינה. חפש/י שוב.")
         return {"ok": True}
 
     @app.post("/api/night/{ym}/export-sheet")

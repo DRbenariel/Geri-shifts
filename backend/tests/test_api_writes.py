@@ -275,3 +275,138 @@ def test_clear_month_auto_keeps_manual(rw, store):
     assert not s['date'].astype(str).str.startswith('2026-11').any()
     as_(rw, ADMIN)
     assert rw.post("/api/night/2026-11/clear", json={"mode": "all"}).status_code == 403
+
+
+def test_staff_table_save_keeps_passwords_on_rename_and_refuses_duplicates(rw, store):
+    as_(rw, SUPER)
+    view = rw.get("/api/staff").json()
+    rows = [{**r, '_original_name': r['name']} for r in view['rows']]
+    old = rows[0]['name']
+    rows[0]['name'] = old + ' חדש'
+    dup = [*rows, {**rows[1], '_original_name': ''}]
+    assert rw.put("/api/staff", json={"rows": dup, "only_home": []}).status_code == 400
+    assert rw.put("/api/staff", json={"rows": [], "only_home": []}).status_code == 400
+    assert rw.put("/api/staff", json={"rows": rows, "only_home": [rows[1]['name']]}).status_code == 200
+    sf = store.read('staff')
+    renamed = sf[sf['name'] == old + ' חדש'].iloc[0]
+    assert renamed['password'] == SHA                                   # kept, not reset to the default
+    assert str(sf[sf['name'] == rows[1]['name']].iloc[0]['only_home_dept']) == 'True'
+    assert rw.post("/api/staff", json={"name": "עובד חדש", "type": "מתמחה", "dept": "שיקום"}).status_code == 200
+    assert rw.post("/api/staff", json={"name": "עובד חדש", "type": "מתמחה", "dept": "שיקום"}).status_code == 400
+
+
+def test_absence_history_for_one_employee_is_superadmin_only(rw):
+    as_(rw, SUPER)
+    r = rw.get("/api/absences/history", params={"employee": INTERNS[0]})
+    assert r.status_code == 200 and isinstance(r.json(), list)
+    assert rw.get("/api/absences/history", params={"employee": "לא קיים"}).status_code == 404
+    as_(rw, ADMIN)
+    assert rw.get("/api/absences/history", params={"employee": INTERNS[0]}).status_code == 403
+
+
+def test_approved_list_scoped_and_deletable(rw, store):
+    as_(rw, SUPER)
+    r = rw.post("/api/absences", json={"employee": INTERNS[0], "start": "2026-11-10", "end": "2026-11-11", "type": "חופש", "force": True})
+    assert r.status_code == 200, r.text
+    rows = rw.get("/api/absences/approved").json()
+    mine = next(a for a in rows if a['employee'] == INTERNS[0].strip() and a['start_date'] == '2026-11-10')
+    assert set(mine) >= {'id', 'dept', 'future', 'type'}
+    assert [(a['dept'], a['start_date']) for a in rows] == sorted((a['dept'], a['start_date']) for a in rows)
+    as_(rw, MGR_A)
+    scoped = rw.get("/api/absences/approved").json()
+    assert all(a['dept'] == "שיקום גריאטרי א'" for a in scoped)
+    if mine['dept'] != "שיקום גריאטרי א'":
+        assert rw.delete(f"/api/absences/{mine['id']}").status_code == 403
+    as_(rw, SUPER)
+    assert rw.delete(f"/api/absences/{mine['id']}").status_code == 200
+    assert all(a['id'] != mine['id'] for a in rw.get("/api/absences/approved").json())
+
+
+def test_future_absence_takes_a_type(rw, store):
+    as_(rw, INTERNS[0])
+    ok = rw.post("/api/absences/future", json={"start": "2027-02-01", "end": "2027-02-02", "type": "202", "note": ""})
+    assert ok.status_code == 200, ok.text
+    assert store.read('absence_requests').iloc[-1]['type'] == '202'
+    assert rw.post("/api/absences/future", json={"start": "2027-02-01", "end": "2027-02-02", "type": "סתם"}).status_code == 422
+    assert rw.post("/api/absences/future", json={"start": "2027-03-01", "end": "2027-03-01"}).status_code == 200
+
+
+def test_manual_problem_scan_rewrites_report(rw, store):
+    as_(rw, ADMIN)
+    assert rw.post("/api/reports/2026-11/scan").status_code == 403
+    as_(rw, SUPER)
+    r = rw.post("/api/reports/2026-11/scan")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body['month'] == '2026-11' and body['rows']
+    assert set(store.read('daily_report').columns) >= {'generated_at', 'month', 'severity', 'problem_type', 'description'}
+
+
+def test_swap_finder_executes_only_server_found_options(rw, store):
+    sched = store.read('schedule')
+    row = sched[(sched['employee'] != '---') & ~sched['dept'].str.startswith('שישי')].iloc[0]
+    as_(rw, SUPER)
+    opts = rw.get("/api/swap-options", params={"date": row['date'], "dept": row['dept']})
+    assert opts.status_code == 200, opts.text
+    o = opts.json()
+    assert o['current'] == row['employee'] and set(o) >= {'direct', 'exchange', 'mutual_cross', 'circular'}
+    assert rw.post("/api/swap-options/execute", json={"date": row['date'], "dept": row['dept'], "kind": "direct",
+                                                     "option": {"name": "מישהו מומצא"}}).status_code == 400
+    if o['direct']:
+        who = o['direct'][0]
+        ok = rw.post("/api/swap-options/execute", json={"date": row['date'], "dept": row['dept'], "kind": "direct", "option": {"name": who}})
+        assert ok.status_code == 200, ok.text
+        s = store.read('schedule')
+        assert s[(s['date'] == row['date']) & (s['dept'] == row['dept'])].iloc[0]['employee'] == who
+    as_(rw, ADMIN)
+    assert rw.get("/api/swap-options", params={"date": row['date'], "dept": row['dept']}).status_code == 403
+
+
+def test_suggestion_needs_an_empty_slot_and_known_staff(rw, store):
+    sched = store.read('schedule')
+    filled = sched[sched['employee'] != '---'].iloc[0]
+    as_(rw, SUPER)
+    sugg = {"type": "direct_swap", "target_date": filled['date'], "conflicted_emp": INTERNS[0],
+            "source_dept": "שיקום", "replacement_emp": INTERNS[1]}
+    assert rw.post("/api/night/suggestion", json={"date": filled['date'], "dept": filled['dept'], "suggestion": sugg}).status_code == 409
+    empty = sched[sched['employee'] == '---']
+    if not empty.empty:
+        e = empty.iloc[0]
+        bad = {**sugg, "replacement_emp": "לא קיים"}
+        assert rw.post("/api/night/suggestion", json={"date": e['date'], "dept": e['dept'], "suggestion": bad}).status_code == 400
+
+
+def test_usage_events_logged_with_server_side_identity(rw, store):
+    as_(rw, INTERNS[0])
+    r = rw.post("/api/events", json={"event_type": "tab_view", "detail_1": "הגשת בקשות", "detail_2": "enter",
+                                     "session_id": "s1", "vw": 390}, headers={"user-agent": "Mozilla iPhone"})
+    assert r.status_code == 200, r.text
+    row = store.read('analytics_log').iloc[-1]
+    assert row['user_name'] == INTERNS[0].strip() and row['event_type'] == 'tab_view' and row['device_type'] == 'mobile'
+    assert rw.post("/api/events", json={"event_type": "drop_tables"}).status_code == 400
+    rw.post("/api/auth/logout")
+    assert rw.post("/api/events", json={"event_type": "tab_view"}).status_code == 401
+    rw.post("/api/auth/login", json={"username": INTERNS[0], "password": "wrong"}, headers={"x-session-id": "s2"})
+    last = store.read('analytics_log').iloc[-1]
+    assert last['event_type'] == 'login_fail' and last['session_id'] == 's2'
+
+
+def test_analytics_summary_superadmin_only(rw):
+    as_(rw, INTERNS[0])
+    rw.post("/api/events", json={"event_type": "login_success", "detail_1": "desktop"})
+    assert rw.get("/api/reports/analytics/2026-11").status_code == 403
+    as_(rw, SUPER)
+    body = rw.get("/api/reports/analytics/2026-11").json()
+    assert body['empty'] is False and body['kpi']['logins'] >= 1
+
+
+def test_analytics_append_keeps_the_sheet_cache():
+    from api.store import CacheClearingStore
+    from geri_core import DataContext
+    cleared = []
+    s = CacheClearingStore(MemoryStore(), lambda: cleared.append(1), DataContext.FRAMES)
+    s.append_row('analytics_log', ['a'], header=['x'])
+    s.write('WSD_x_2026-11', build()['staff'])
+    assert cleared == []
+    s.write('schedule', build()['schedule'])
+    assert cleared == [1]

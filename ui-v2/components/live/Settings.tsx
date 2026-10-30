@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { ArrowsClockwise, CalendarPlus, Key, MagnifyingGlass, Plus, Trash } from '@phosphor-icons/react';
 import { useApi } from '@/lib/api';
 import { handoff } from '@/lib/logic';
+import { track } from '@/lib/analytics';
 import { useMe } from '@/lib/store';
 import { roleLabel } from '@/lib/mock';
 import { Bezel, Cta, Field, Note, PageHead, Person } from '../ui';
@@ -37,9 +38,11 @@ function Swaps() {
       if (shifts.length === 0) return null;
       const key = (s: { date: string; dept: string }) => `${s.date}|${s.dept}`;
       const cur = shifts.find((s) => key(s) === sel) ?? shifts[0];
-      const find = () => run<{ full: Cand[]; partial: Cand[]; chain: Chain[] }>(`/swaps/search?date=${cur.date}&dept=${encodeURIComponent(cur.dept)}`, 'GET').then(setRes).catch(() => {});
+      const find = () => run<{ full: Cand[]; partial: Cand[]; chain: Chain[] }>(`/swaps/search?date=${cur.date}&dept=${encodeURIComponent(cur.dept)}`, 'GET')
+        .then((r) => { track('swap_search', cur.date, cur.dept); setRes(r); }).catch(() => {});
       const send = (kind: string, candidate: string, chain_ext = '') =>
-        run('/swaps', 'POST', { date: cur.date, dept: cur.dept, kind, candidate, chain_ext }, 'הבקשה נשלחה למנהל/ת לאישור').then(() => setRes(null)).catch(() => {});
+        run('/swaps', 'POST', { date: cur.date, dept: cur.dept, kind, candidate, chain_ext }, 'הבקשה נשלחה למנהל/ת לאישור')
+          .then(() => { track('swap_request_sent', cur.date, kind); setRes(null); }).catch(() => {});
       return (
         <Bezel>
           <h2 className="sec"><ArrowsClockwise size={22} />חיפוש החלפות</h2>

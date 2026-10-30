@@ -37,16 +37,20 @@ class ReadOnlyStore:
 class CacheClearingStore:
     """Calls on_write after every successful write, so the API's shared Sheet cache is dropped."""
 
-    def __init__(self, inner, on_write):
+    def __init__(self, inner, on_write, cached=None):
         self._inner = inner
         self._on_write = on_write
+        # Sheets the cache holds; a write elsewhere (analytics_log, an export tab) keeps the cache.
+        self._cached = set(cached) if cached is not None else None
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
     def _written(self, method, *a, **k):
         result = getattr(self._inner, method)(*a, **k)
-        self._on_write()
+        sheet = a[0] if a else k.get('name')
+        if self._cached is None or sheet in self._cached:
+            self._on_write()
         return result
 
     def write(self, *a, **k):

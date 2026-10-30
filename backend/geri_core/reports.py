@@ -70,7 +70,11 @@ def fairness(ctx) -> list:
 
 # ── daily problem report ─────────────────────────────────────────────────────
 def _load_daily_report_module():
-    path = os.path.join(os.path.dirname(__file__), '..', '..', 'daily_report.py')
+    # The repo keeps daily_report.py at its root (GitHub Actions and Streamlit run it there); the
+    # Cloud Run image gets a copy next to geri_core, made before each deploy (DEPLOY_PLAN).
+    here = os.path.dirname(__file__)
+    path = next(p for p in (os.path.join(here, '..', 'daily_report.py'), os.path.join(here, '..', '..', 'daily_report.py'))
+                if os.path.exists(p))
     spec = importlib.util.spec_from_file_location("daily_report", os.path.abspath(path))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

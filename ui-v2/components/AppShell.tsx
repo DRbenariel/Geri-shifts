@@ -6,6 +6,7 @@ import {
 import { useStore } from '@/lib/store';
 import { HEB_MONTHS, roleLabel } from '@/lib/mock';
 import { MOBILE_PRIMARY, type TabKey } from '@/lib/roles';
+import { track } from '@/lib/analytics';
 import Login from './Login';
 import Settings from './tabs/Settings';
 import Night from './tabs/Night';
@@ -51,6 +52,18 @@ export default function AppShell() {
   useEffect(() => { navRef.current?.querySelector('.on')?.scrollIntoView({ inline: 'center', block: 'nearest' }); }, [hash, me]);
   // Keep the address bar on the tab actually shown (landing tab after login, fallback for tabs outside the role).
   useEffect(() => { if (me && !me.tabs.includes(hash as TabKey)) window.history.replaceState(null, '', `#/${me.home}`); }, [hash, me]);
+  // Usage log (live only): entering a tab, and the seconds spent on the one left (Streamlit's tab_view).
+  const tabSeen = useRef<{ he: string; at: number } | null>(null);
+  const shownTab = me ? (me.tabs.includes(hash as TabKey) ? (hash as TabKey) : me.home) : null;
+  useEffect(() => {
+    if (!live || !me || !shownTab) { tabSeen.current = null; return; }
+    const he = TABS.find((t) => t.k === shownTab)?.he ?? shownTab;
+    const prev = tabSeen.current;
+    if (prev?.he === he) return;
+    if (prev) track('tab_view', prev.he, String(Math.round((Date.now() - prev.at) / 1000)));
+    track('tab_view', he, 'enter');
+    tabSeen.current = { he, at: Date.now() };
+  }, [live, me, shownTab]);
 
   const toastLayer = (
     <div className="toasts" aria-live="polite">

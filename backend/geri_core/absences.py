@@ -461,6 +461,31 @@ def deletable_approved(ctx, manager_depts=None) -> list:
     return out
 
 
+def approved_rows(ctx, manager_depts=None, today=None) -> list:
+    """Approved requests for the ניהול בקשות table: same scope as deletable_approved, sorted by
+    Gantt-canonical dept then start date; `future` marks end_date >= today (Streamlit's תצוגת טבלה)."""
+    df = ctx.absence_requests.copy()
+    if df.empty or 'status' not in df.columns:
+        return []
+    df = df[df['status'].astype(str).str.lower() == 'approved'].copy()
+    if df.empty:
+        return []
+    df['dept_canonical'] = df.apply(
+        lambda r: emp_dept_for_date(ctx, r.get('employee', ''), r.get('start_date', '')) or '', axis=1)
+    if manager_depts is not None:
+        df = df[df['dept_canonical'].isin(manager_depts)]
+    today = (today or date.today()).isoformat()
+    out = []
+    for _, r in df.iterrows():
+        end = str(r.get('end_date', ''))[:10]
+        out.append({'id': str(r.get('id', '')), 'employee': str(r.get('employee', '')).strip(),
+                    'dept': r['dept_canonical'] or '—', 'start_date': str(r.get('start_date', ''))[:10],
+                    'end_date': end, 'type': str(r.get('type', '') or '').strip(),
+                    'approved_by': str(r.get('approved_by', '') or '').strip(),
+                    'notes': str(r.get('notes', '') or '').strip(), 'future': end >= today})
+    return sorted(out, key=lambda x: (x['dept'], x['start_date'], x['employee']))
+
+
 def absence_gantt(ctx, year, month, dept_filter=None) -> dict:
     """{dept: {employee: [(day, status)]}} + overlap days (appy._render_absence_gantt data)."""
     num_days = calendar.monthrange(year, month)[1]

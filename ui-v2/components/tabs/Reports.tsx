@@ -46,7 +46,7 @@ function ShiftBars({ data }: { data: ShiftCount[] }) {
   );
 }
 
-function VBars({ values, labels, fmt }: { values: number[]; labels: string[]; fmt: (v: number, i: number) => string }) {
+export function VBars({ values, labels, fmt }: { values: number[]; labels: string[]; fmt: (v: number, i: number) => string }) {
   const { bind, node } = useTip();
   const max = Math.max(...values, 1);
   return (
@@ -58,7 +58,7 @@ function VBars({ values, labels, fmt }: { values: number[]; labels: string[]; fm
   );
 }
 
-function HBars({ rows, unit }: { rows: [string, number][]; unit: string }) {
+export function HBars({ rows, unit }: { rows: [string, number][]; unit: string }) {
   const { bind, node } = useTip();
   const max = Math.max(...rows.map((r) => r[1]), 1);
   return (

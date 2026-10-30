@@ -1,8 +1,9 @@
 'use client';
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { DB, initialDB } from './logic';
 import type { Role } from './mock';
 import { api, detectLive, type MeResp, type Settings } from './api';
+import { track } from './analytics';
 import { homeTab, tabsForRole, type TabKey } from './roles';
 import { daysIn } from './mock';
 
@@ -63,17 +64,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 8000 : 3600);
   }, []);
 
+  const loginAt = useRef(Date.now());
   /** Returns an error message, or null on success. */
   const login = useCallback(async (name: string, password = '') => {
     if (live) {
-      try { setLiveMe(fromApi(await api<MeResp>('/auth/login', { method: 'POST', body: { username: name, password } }))); return null; }
+      try {
+        setLiveMe(fromApi(await api<MeResp>('/auth/login', { method: 'POST', body: { username: name, password } })));
+        loginAt.current = Date.now();
+        track('login_success', window.innerWidth < 768 ? 'mobile' : 'desktop', String(window.innerWidth));
+        return null;
+      }
       catch (e) { return (e as Error).message; }
     }
     if (!db.staff.some((s) => s.name === name)) return 'שם המשתמש לא נמצא במערכת';
     setDemoName(name); return null;
   }, [live, db.staff]);
   const logout = useCallback(() => {
-    if (live) { api('/auth/logout', { method: 'POST' }).catch(() => {}); setLiveMe(null); } else setDemoName(null);
+    if (live) {
+      // Logged before the session ends, so the server still knows who it is (Streamlit: seconds since login).
+      track('logout', String(Math.round((Date.now() - loginAt.current) / 1000)), 'explicit');
+      api('/auth/logout', { method: 'POST' }).catch(() => {}); setLiveMe(null);
+    } else setDemoName(null);
   }, [live]);
   const refreshMe = useCallback(async () => { if (live) setLiveMe(fromApi(await api<MeResp>('/me'))); }, [live]);
 

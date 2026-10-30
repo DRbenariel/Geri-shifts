@@ -2,6 +2,7 @@
 // so the httpOnly session cookie stays first-party.
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { sessionId } from './analytics';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -11,7 +12,7 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
   const res = await fetch(`/api${path}`, {
     method: opts.method ?? 'GET',
     credentials: 'same-origin',
-    headers: opts.body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    headers: { ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}), 'X-Session-Id': sessionId() },
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
   const text = await res.text();

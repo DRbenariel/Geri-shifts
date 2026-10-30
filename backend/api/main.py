@@ -74,6 +74,24 @@ class LoginBody(BaseModel):
     password: str
 
 
+class EventBody(BaseModel):
+    event_type: str
+    detail_1: str = ""
+    detail_2: str = ""
+    session_id: str = ""
+    vw: int | None = None
+
+
+# What the page may log (Streamlit's _log_async calls); login_fail is logged by the server itself.
+CLIENT_EVENTS = {'login_success', 'logout', 'tab_view', 'constraint_submit', 'swap_search', 'swap_request_sent'}
+
+
+def _device(ua: str, vw: int | None) -> str:
+    """Same rule as appy.py's device capture: a mobile UA, or a viewport under 768px."""
+    mobile = any(x in ua for x in ("Android", "iPhone", "iPad", "Mobile", "webOS")) or (vw is not None and 0 < vw < 768)
+    return 'mobile' if mobile else 'desktop'
+
+
 def _day_note(ctx, emp: str, ds: str) -> str:
     """The note behind an absent day: a manual WSD note, else the approved request's note (e.g. "מילואים")."""
     note = daily.wsd_get_note(ctx, ds, emp)
@@ -182,7 +200,7 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
 
     def get_ctx() -> DataContext:
         store = store_factory()
-        store = CacheClearingStore(ReadOnlyStore(store) if settings.read_only else store, clear_cache)
+        store = CacheClearingStore(ReadOnlyStore(store) if settings.read_only else store, clear_cache, DataContext.FRAMES)
         with cache_lock:
             frames = {n: df.copy() for n, df in load_frames(store).items()}
         return DataContext.from_frames(frames, store=store, mailer=mailer)
@@ -236,11 +254,15 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
 
     # ── auth ───────────────────────────────────────────────────────────
     @app.post("/api/auth/login")
-    def login(body: LoginBody, response: Response, ctx: DataContext = Depends(get_ctx)):
+    def login(body: LoginBody, request: Request, response: Response, ctx: DataContext = Depends(get_ctx)):
         try:
             # No SHA-256 → bcrypt upgrade while Streamlit runs in parallel: it can only read SHA-256.
             who = staff.login(ctx, body.username, body.password, upgrade_hash=not settings.streamlit_parallel)
         except staff.AuthError as e:
+            ua = request.headers.get('user-agent', '')
+            reports.log_event(ctx.store, 'login_fail', body.username.strip()[:80], str(e),
+                              {'session_id': request.headers.get('x-session-id', '')[:64], 'ua': ua,
+                               'device_type': _device(ua, None)})
             raise HTTPException(401, str(e))
         response.set_cookie(session.COOKIE, session.sign(settings.session_secret, who['name']),
                             max_age=session.MAX_AGE, httponly=True, secure=settings.cookie_secure,
@@ -352,6 +374,19 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
             return {d: _gantt_json(absences.absence_gantt(ctx, y, m, dept_filter=d), ctx, y, m) for d in ([dept] if dept else mine)}
         return _gantt_json(absences.absence_gantt(ctx, y, m, dept_filter=dept), ctx, y, m)
 
+    @app.get("/api/absences/approved")
+    def absences_approved(me: Me = Depends(require(*ADMINS, 'מנהל מחלקה')), ctx: DataContext = Depends(get_ctx)):
+        """Approved requests (deletable from ניהול בקשות); a מנהל מחלקה gets only the depts they manage."""
+        scope = people.managed_depts(ctx, me.name) if me.role == 'מנהל מחלקה' else None
+        return absences.approved_rows(ctx, scope)
+
+    @app.get("/api/absences/history")
+    def absence_history(employee: str, _: Me = Depends(require('מנהל על')), ctx: DataContext = Depends(get_ctx)):
+        """One employee's day-absence requests, for the staff screen (Streamlit צוות → היעדרויות יומיות)."""
+        if people.staff_row(ctx, employee) is None:
+            raise HTTPException(404, "עובד/ת לא נמצא/ה")
+        return absences.my_absence_history(ctx, employee)
+
     @app.get("/api/absences/me/{ym}")
     def my_absences(ym: str, me: Me = Depends(require('מתמחה', 'רופא בכיר')), ctx: DataContext = Depends(get_ctx)):
         y, m = _ym(ym)
@@ -385,6 +420,31 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
                 "shift_counts": _shift_split(ctx, y, m),
                 "problems": reports.problem_report(ctx),
                 "fairness": reports.fairness(ctx)}          # all history, not this month (as in Streamlit)
+
+    @app.post("/api/reports/{ym}/scan")
+    def report_scan(ym: str, _: Me = Depends(require('מנהל על')), ctx: DataContext = Depends(get_ctx)):
+        """"🔄 הרץ סריקה עכשיו": runs daily_report.analyze_month and rewrites the daily_report sheet."""
+        y, m = _ym(ym)
+        reports.run_problem_scan(ctx, y, m)
+        return reports.problem_report(ctx)
+
+    @app.post("/api/events")
+    def event(body: EventBody, request: Request, me: Me = Depends(current_user), ctx: DataContext = Depends(get_ctx)):
+        """Usage log row (analytics_log), as Streamlit's log_event writes it. Never fails the page."""
+        if body.event_type not in CLIENT_EVENTS:
+            raise HTTPException(400, "אירוע לא מוכר")
+        ua = request.headers.get('user-agent', '')
+        am = admin.active_months(ctx)
+        reports.log_event(ctx.store, body.event_type, body.detail_1[:200], body.detail_2[:200],
+                          {'session_id': body.session_id[:64], 'user_name': me.name, 'user_role': me.role,
+                           'device_type': _device(ua, body.vw), 'ua': ua, 'vp_width': body.vw or '',
+                           'active_month': am['active_month']})
+        return {"ok": True}
+
+    @app.get("/api/reports/analytics/{ym}")
+    def analytics(ym: str, _: Me = Depends(require('מנהל על')), ctx: DataContext = Depends(get_ctx)):
+        y, m = _ym(ym)
+        return reports.analytics_summary(ctx, y, m)
 
     @app.get("/api/swaps/mine")
     def my_upcoming(me: Me = Depends(current_user), ctx: DataContext = Depends(get_ctx)):

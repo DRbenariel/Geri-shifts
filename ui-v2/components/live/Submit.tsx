@@ -4,7 +4,8 @@ import { CalendarPlus, ClockCounterClockwise, FloppyDisk, LockSimple, Moon, Sun 
 import { useApi } from '@/lib/api';
 import { DOW_FULL, HEB_MONTHS, dowOf } from '@/lib/mock';
 import { constraintCounters } from '@/lib/logic';
-import { monthDays, useMe, ymOf } from '@/lib/store';
+import { track } from '@/lib/analytics';
+import { monthDays, useMe, useStore, ymOf } from '@/lib/store';
 import { Bezel, Cta, Expander, Field, MarkMode, Note, PageHead, SaveBar } from '../ui';
 import { ConstraintCalendar } from '../tabs/Staff';
 import { Load, range, useAction } from './common';
@@ -37,7 +38,8 @@ function NightLive() {
           <ConstraintCalendar cons={cons} onToggle={toggle} special={special} rules={intern} y={y} m={m} />
           {errors.length > 0 && <Note kind="err">{errors.map((e) => <div key={e}>{e}</div>)}</Note>}
           <SaveBar changes={nChanged} label="שמור אילוצים ובקשות" busy={busy} disabled={errors.length > 0}
-            onSave={() => run(`/constraints/${ym}`, 'PUT', { blocked: listDays(cons, 'B'), wishes: listDays(cons, 'R') }, 'האילוצים נשמרו').then(q.reload).catch(() => {})} />
+            onSave={() => run(`/constraints/${ym}`, 'PUT', { blocked: listDays(cons, 'B'), wishes: listDays(cons, 'R') }, 'האילוצים נשמרו')
+              .then(() => { track('constraint_submit', String(listDays(cons, 'B').length), String(listDays(cons, 'R').length)); q.reload(); }).catch(() => {})} />
         </>
       )}</Load>
     </Bezel>
@@ -54,6 +56,7 @@ function DailyLive() {
   const q = useApi<{ calendar: MyCal; history: { id: string; start_date: string; end_date: string; type: string; status: string; approved_by: string; notes: string }[] }>(`/absences/me/${ym}`);
   const { run, busy } = useAction();
   const senior = me.type === 'רופא בכיר';
+  const { toast } = useStore();
   const saved = useMemo(() => {
     const out: Record<number, Pick> = {};
     if (q.data) for (const d of q.data.calendar.pending) out[d] = q.data.calendar.pending_types[String(d)] === 2 ? 'S' : 'V';
@@ -62,7 +65,7 @@ function DailyLive() {
   const [picks, setPicks] = useState<Record<number, Pick>>({});
   useEffect(() => setPicks(saved), [saved]);
   const [mode, setMode] = useState<'V' | 'S'>('V');
-  const [fut, setFut] = useState({ start: '', end: '', note: '' });
+  const [fut, setFut] = useState({ start: '', end: '', type: 'חופש עתידי', note: '' });
   return (
     <>
       <Bezel>
@@ -106,10 +109,12 @@ function DailyLive() {
         <div className="cols3">
           <Field label="מתאריך"><input className="input" type="date" value={fut.start} onChange={(e) => setFut({ ...fut, start: e.target.value })} /></Field>
           <Field label="עד תאריך"><input className="input" type="date" value={fut.end} onChange={(e) => setFut({ ...fut, end: e.target.value })} /></Field>
+          <Field label="סוג"><select className="input" value={fut.type} onChange={(e) => setFut({ ...fut, type: e.target.value })}>
+            {['חופש עתידי', 'חופש', '202', 'היעדרות אחרת'].map((t) => <option key={t}>{t}</option>)}</select></Field>
           <Field label="הערה"><input className="input" value={fut.note} onChange={(e) => setFut({ ...fut, note: e.target.value })} /></Field>
         </div>
         <Cta variant="teal" icon={<CalendarPlus size={16} />} disabled={busy || !fut.start || !fut.end || fut.end < fut.start}
-          onClick={() => run('/absences/future', 'POST', fut, 'בקשת החופש העתידי נשלחה').then(q.reload).catch(() => {})}>שלח בקשה</Cta>
+          onClick={() => run<{ no_dept_warning?: boolean }>('/absences/future', 'POST', fut, 'בקשת החופש העתידי נשלחה').then((r) => { if (r?.no_dept_warning) toast('לא נמצא שיבוץ מחלקה לחודש הזה בגאנט, ולכן הבקשה לא נשלחה במייל למנהל/ת מחלקה.', 'warn'); setFut({ start: '', end: '', type: 'חופש עתידי', note: '' }); q.reload(); }).catch(() => {})}>שלח בקשה</Cta>
       </Expander>
       <Bezel>
         <h2 className="sec"><ClockCounterClockwise size={22} />היסטוריית בקשות</h2>

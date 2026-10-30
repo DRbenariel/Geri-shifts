@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Check, Plus, Tray, Warning, X } from '@phosphor-icons/react';
+import { Check, ListChecks, Plus, Trash, Tray, Warning, X } from '@phosphor-icons/react';
 import { ApiError, useApi, type AbsGantt, type Pending } from '@/lib/api';
 import { DAILY_DEPTS, DOW_LETTER, dowOf } from '@/lib/mock';
 import { useMe, ymOf } from '@/lib/store';
@@ -121,6 +121,52 @@ function AddAbsenceLive({ onDone }: { onDone: () => void }) {
   );
 }
 
+interface Approved { id: string; employee: string; dept: string; start_date: string; end_date: string; type: string; approved_by: string; notes: string; future: boolean }
+
+/** Streamlit "תצוגת טבלה (כל הבקשות העתידיות שאושרו)" + "מחיקת בקשה מאושרת", as one list. */
+function ApprovedLive({ onChange }: { onChange: () => void }) {
+  const q = useApi<Approved[]>('/absences/approved');
+  const { run, busy } = useAction();
+  const [all, setAll] = useState(false);
+  const [del, setDel] = useState<Approved | null>(null);
+  const remove = (a: Approved) => run(`/absences/${a.id}`, 'DELETE', undefined, 'הבקשה נמחקה').then(() => { setDel(null); onChange(); }).catch(() => {});
+  return (
+    <Expander title="היעדרויות שאושרו" icon={<ListChecks size={20} />} badge={q.data ? <span className="badge b-mute">{q.data.filter((a) => all || a.future).length}</span> : undefined}>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <PillSeg value={all ? 'all' : 'future'} onChange={(v) => setAll(v === 'all')} options={[{ v: 'future', l: 'עתידיות' }, { v: 'all', l: 'כולן' }]} />
+      </div>
+      <Load q={q}>{(list) => {
+        const rows = list.filter((a) => all || a.future);
+        if (rows.length === 0) return <p className="muted">{all ? 'אין בקשות שאושרו.' : 'אין בקשות שאושרו לתאריכים עתידיים.'}</p>;
+        return (
+          <div className="tbl-wrap"><table className="t">
+            <thead><tr><th>מחלקה</th><th>עובד/ת</th><th>תאריכים</th><th>סוג</th><th>אושר ע״י</th><th>הערה</th><th aria-label="מחיקה" /></tr></thead>
+            <tbody>{rows.map((a) => (
+              <tr key={a.id}>
+                <td className="small">{a.dept}</td><td style={{ whiteSpace: 'nowrap' }}>{a.employee}</td><td className="num">{range(a.start_date, a.end_date)}</td>
+                <td><span className={`badge ${TYPE_BADGE[a.type] ?? 'b-mute'}`}>{a.type}</span></td>
+                <td className="small">{a.approved_by}</td><td className="muted small">{a.notes}</td>
+                <td><button className="iconbtn del" aria-label={`מחק את ההיעדרות של ${a.employee}`} title="מחק בקשה מאושרת" disabled={busy} onClick={() => setDel(a)}><Trash size={16} /></button></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        );
+      }}</Load>
+      <Modal open={!!del} onClose={() => setDel(null)}>
+        {del && <>
+          <h2 className="sec"><Trash size={22} />למחוק את הבקשה המאושרת?</h2>
+          <p style={{ marginBottom: 12 }}><b>{del.employee}</b> · {del.dept} · {range(del.start_date, del.end_date)} · {del.type}</p>
+          <Note kind="warn">המחיקה אינה הפיכה. הימים יחזרו להיות ימי עבודה בסידור.</Note>
+          <div className="row" style={{ marginTop: 16 }}>
+            <Cta variant="danger" icon={<Trash size={16} />} disabled={busy} onClick={() => remove(del)}>מחק בקשה</Cta>
+            <button className="btn" onClick={() => setDel(null)}>ביטול</button>
+          </div>
+        </>}
+      </Modal>
+    </Expander>
+  );
+}
+
 export default function LiveRequests() {
   const me = useMe();
   const manager = me.type === 'מנהל מחלקה';
@@ -139,6 +185,7 @@ export default function LiveRequests() {
       )}
       <Bezel><h2 className="sec"><Tray size={22} />בקשות ממתינות</h2><PendingList key={filter + tick} filter={filter} onChange={() => setTick((t) => t + 1)} /></Bezel>
       <GanttLive key={'g' + filter + tick} filter={filter} scope={scope} manager={manager} />
+      <ApprovedLive key={'a' + tick} onChange={() => setTick((t) => t + 1)} />
       <AddAbsenceLive onDone={() => setTick((t) => t + 1)} />
     </>
   );
