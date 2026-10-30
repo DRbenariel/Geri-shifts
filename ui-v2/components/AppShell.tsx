@@ -40,6 +40,14 @@ const TABS: { k: TabKey; he: string; short: string; I: ComponentType<IconProps>;
 
 const readHash = () => (typeof window === 'undefined' ? '' : window.location.hash.replace('#/', '').replace('#', ''));
 
+/** API_WRITE_SHEETS → the screens they open, for the read-only banner (analytics_log is silent logging). */
+const SHEET_SCREENS: Record<string, string> = {
+  requests: 'אילוצי לילה', absence_requests: 'בקשות היעדרות וסידור עבודה', schedule: 'סידור תורנויות והחלפות',
+  staff: 'צוות', dept_rotation: 'גאנט חודשי', settings: 'חודש פעיל', special_days: 'ימים מיוחדים',
+  konenut: 'כוננות', daily_report: 'סריקת בעיות', 'WSD_*': 'ייצוא ל-Sheets',
+};
+const openScreens = (sheets: string[]) => sheets.map((s) => SHEET_SCREENS[s]).filter(Boolean);
+
 export default function AppShell() {
   const { toasts, dismiss, me, live, logout } = useStore();
   const [hash, setHash] = useState('');
@@ -113,7 +121,9 @@ export default function AppShell() {
           )}
           <button className="btn mob-only out-m" onClick={out}><SignOut size={14} />התנתק</button>
         </div>
-        {me.readOnly && <div className="ro-banner">המערכת החדשה פתוחה כרגע לצפייה בלבד, על הנתונים האמיתיים. שינויים נעשים עדיין באפליקציה הקיימת.</div>}
+        {me.readOnly && <div className="ro-banner">{openScreens(me.writeSheets).length
+          ? <>פתוח כאן לעריכה: <b>{openScreens(me.writeSheets).join(', ')}</b>. כל השאר לצפייה בלבד, ושינויים בו נעשים עדיין באפליקציה הקיימת.</>
+          : 'המערכת החדשה פתוחה כרגע לצפייה בלבד, על הנתונים האמיתיים. שינויים נעשים עדיין באפליקציה הקיימת.'}</div>}
         <Page />
       </main>
 

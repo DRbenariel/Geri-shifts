@@ -174,11 +174,11 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
         cache['gen'] += 1
         cache['frames'] = None
 
-    def load_frames(store) -> dict:
+    def load_frames(store, fresh=False) -> dict:
         now = time.monotonic()
-        if cache['frames'] is not None and now - cache['at'] < settings.cache_seconds:
+        if not fresh and cache['frames'] is not None and now - cache['at'] < settings.cache_seconds:
             return cache['frames']
-        if cache['failed_at'] is not None and now - cache['failed_at'] < QUOTA_BACKOFF:
+        if not fresh and cache['failed_at'] is not None and now - cache['failed_at'] < QUOTA_BACKOFF:
             if cache['frames'] is not None:
                 return cache['frames']
             raise HTTPException(503, SHEETS_BUSY_MSG)
@@ -190,7 +190,7 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
             if e.response.status_code != 429:
                 raise
             cache['failed_at'] = time.monotonic()
-            if cache['frames'] is not None:
+            if cache['frames'] is not None and not fresh:
                 return cache['frames']
             raise HTTPException(503, SHEETS_BUSY_MSG)
         cache['failed_at'] = None
@@ -198,12 +198,25 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
             cache['frames'], cache['at'] = frames, time.monotonic()
         return frames
 
-    def get_ctx() -> DataContext:
+    # Every save writes the whole sheet from this request's frames, so a write built on a cached copy
+    # would drop rows another request (or another Cloud Run instance) saved meanwhile. Writes therefore
+    # read the Sheet fresh and run one at a time per instance; reads keep the shared cache.
+    write_lock = threading.Lock()
+    UNLOCKED = ("/api/auth/login", "/api/auth/logout", "/api/events")
+
+    def get_ctx(request: Request):
         store = store_factory()
-        store = CacheClearingStore(ReadOnlyStore(store) if settings.read_only else store, clear_cache, DataContext.FRAMES)
-        with cache_lock:
-            frames = {n: df.copy() for n, df in load_frames(store).items()}
-        return DataContext.from_frames(frames, store=store, mailer=mailer)
+        store = CacheClearingStore(ReadOnlyStore(store, settings.write_sheets) if settings.read_only else store, clear_cache, DataContext.FRAMES)
+        writing = request.method in ("POST", "PUT", "DELETE") and request.url.path not in UNLOCKED
+        if writing:
+            write_lock.acquire()
+        try:
+            with cache_lock:
+                frames = {n: df.copy() for n, df in load_frames(store, fresh=writing).items()}
+            yield DataContext.from_frames(frames, store=store, mailer=mailer)
+        finally:
+            if writing:
+                write_lock.release()
 
     def session_name(request: Request) -> str:
         name = session.verify(settings.session_secret, request.cookies.get(session.COOKIE))
@@ -225,11 +238,11 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
             return me
         return dep
 
-    # Read-only phase: refuse writes up front (the ReadOnlyStore below is the second line of defence),
-    # so e.g. a 38-second auto-schedule doesn't run only to fail at the save.
+    # Fully read-only: refuse writes up front, so e.g. a 38-second auto-schedule doesn't run only to fail
+    # at the save. With API_WRITE_SHEETS set the ReadOnlyStore alone decides, per sheet.
     @app.middleware("http")
     async def _read_only_gate(request: Request, call_next):
-        if (settings.read_only and request.method in ("POST", "PUT", "DELETE")
+        if (settings.read_only and not settings.write_sheets and request.method in ("POST", "PUT", "DELETE")
                 and request.url.path not in ("/api/auth/login", "/api/auth/logout")):
             return Plain({"detail": READ_ONLY_MSG}, status_code=403)
         return await call_next(request)
@@ -282,7 +295,8 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
                 "manage_depts": people.managed_depts(ctx, me.name) if me.role == 'מנהל מחלקה' else [],
                 "monthly_quota": row.get('monthly_quota', '') if row is not None else '',
                 "weekend_quota": row.get('weekend_quota', '') if row is not None else '',
-                "settings": admin.active_months(ctx), "read_only": settings.read_only}
+                "settings": admin.active_months(ctx), "read_only": settings.read_only,
+                "write_sheets": sorted(settings.write_sheets) if settings.read_only else None}
 
     @app.get("/api/me")
     def me(me: Me = Depends(current_user), ctx: DataContext = Depends(get_ctx)):
@@ -326,7 +340,7 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
         emps = people.grid_employees(ctx, dept, ym, include_user=include)
         grid = daily.dept_grid(ctx, dept, ym, m, emps, year=y)
         can_edit = me.role in ADMINS + ('מנהל מחלקה',)
-        grid['editable'] = can_edit and not settings.read_only
+        grid['editable'] = can_edit and settings.can_write('work_schedule_daily')
         # The "העברה זמנית" form (Streamlit: allow_temp_add on the admin and manager grids) shows by role, also
         # while read-only, so it can be reviewed; adding then gets the read-only notice like every other write.
         grid['transfer_candidates'] = daily.transfer_candidates(ctx, dept, ym) if can_edit else None
@@ -466,7 +480,7 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"ok": True, "read_only": settings.read_only}
+        return {"ok": True, "read_only": settings.read_only, "write_sheets": sorted(settings.write_sheets)}
 
     return app
 

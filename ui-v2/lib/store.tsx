@@ -14,7 +14,7 @@ interface Toast { id: number; msg: string; kind: ToastKind; action?: ToastAction
 /** The logged-in user, the same shape in demo and live mode. */
 export interface Me {
   name: string; type: Role; manage_depts: string[]; monthly_quota: number; weekend_quota: number;
-  tabs: TabKey[]; home: TabKey; settings: Settings; readOnly: boolean;
+  tabs: TabKey[]; home: TabKey; settings: Settings; readOnly: boolean; writeSheets: string[];
 }
 
 interface Store {
@@ -37,6 +37,7 @@ const fromApi = (r: MeResp): Me => ({
   name: r.name, type: r.role as Role, manage_depts: r.manage_depts,
   monthly_quota: Number(r.monthly_quota) || 0, weekend_quota: Number(r.weekend_quota) || 0,
   tabs: r.tabs as TabKey[], home: r.home as TabKey, settings: r.settings, readOnly: r.read_only,
+  writeSheets: r.write_sheets ?? [],
 });
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -94,7 +95,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const st = db.settings;
     me = s ? {
       name: s.name, type: s.type, manage_depts: s.manage_depts, monthly_quota: s.monthly_quota, weekend_quota: s.weekend_quota,
-      tabs: tabsForRole(s.type), home: homeTab(s.type), readOnly: false,
+      tabs: tabsForRole(s.type), home: homeTab(s.type), readOnly: false, writeSheets: [],
       settings: { ...st, active_year: yearOf(st.active_month), daily_active_year: yearOf(st.daily_active_month) },
     } : null;
   }

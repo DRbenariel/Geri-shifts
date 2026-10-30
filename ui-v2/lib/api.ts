@@ -59,6 +59,8 @@ export interface Settings { active_month: number; active_year: number; daily_act
 export interface MeResp {
   name: string; role: string; tabs: string[]; home: string; manage_depts: string[];
   monthly_quota: string | number; weekend_quota: string | number; settings: Settings; read_only: boolean;
+  /** Sheets opened for writing while the rest stays read-only (API_WRITE_SHEETS); null when fully writable. */
+  write_sheets?: string[] | null;
 }
 export interface NightSlot { dept: string; employee: string; is_manual: boolean; empty_reason: string }
 export interface NightCal {

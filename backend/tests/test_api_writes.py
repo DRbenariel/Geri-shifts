@@ -410,3 +410,51 @@ def test_analytics_append_keeps_the_sheet_cache():
     assert cleared == []
     s.write('schedule', build()['schedule'])
     assert cleared == [1]
+
+
+def test_write_sheets_open_one_screen_only(store):
+    """API_WRITE_SHEETS: the listed sheets take writes while everything else stays read-only."""
+    app = create_app(Settings(session_secret=SECRET, read_only=True, cookie_secure=False,
+                              write_sheets=frozenset({"absence_requests", "work_schedule_daily"})),
+                     store_factory=lambda: store)
+    c = TestClient(app)
+    as_(c, INTERNS[0])
+    assert c.get("/api/me").json()['write_sheets'] == ["absence_requests", "work_schedule_daily"]
+    before = len(store.read('absence_requests'))
+    ok = c.post("/api/absences/future", json={"start": "2027-02-01", "end": "2027-02-02", "type": "202", "note": ""})
+    assert ok.status_code == 200, ok.text
+    assert len(store.read('absence_requests')) == before + 1
+    r = c.post("/api/me/password", json={"current": PW, "new": "a", "confirm": "a"})
+    assert r.status_code == 403 and r.json()['detail'] == READ_ONLY_MSG
+    assert store.read('staff')['password'].iloc[0] == SHA
+    core_staff.use_legacy_hashes(False)
+
+
+def test_write_sheets_refuses_a_half_open_action():
+    from api.config import check_write_sheets
+    check_write_sheets(frozenset())
+    check_write_sheets(frozenset({"requests", "analytics_log", "WSD_*"}))
+    check_write_sheets(frozenset({"schedule", "swap_requests"}))
+    for half in ({"absence_requests"}, {"schedule"}, {"dept_rotation", "absence_requests"}):
+        with pytest.raises(RuntimeError):
+            check_write_sheets(frozenset(half))
+
+
+def test_sheet_allowed_prefix():
+    from api.config import sheet_allowed
+    assert sheet_allowed("WSD_שיקום_2026-11", {"WSD_*"})
+    assert not sheet_allowed("staff", {"WSD_*", "requests"})
+
+
+def test_two_instances_do_not_drop_each_others_saves(store):
+    """Writes read the Sheet fresh: instance B's cached copy must not wipe what instance A just saved."""
+    mk = lambda: TestClient(create_app(Settings(session_secret=SECRET, read_only=False, cookie_secure=False,
+                                                cache_seconds=60), store_factory=lambda: store))
+    a, b = mk(), mk()
+    as_(a, INTERNS[0]); as_(b, INTERNS[1])
+    b.get("/api/me")                                          # b now serves from its own cache
+    for c, note in ((a, "from-a"), (b, "from-b")):
+        r = c.post("/api/absences/future", json={"start": "2027-02-01", "end": "2027-02-02", "type": "202", "note": note})
+        assert r.status_code == 200, r.text
+    assert {"from-a", "from-b"} <= set(store.read('absence_requests')['notes'])
+    core_staff.use_legacy_hashes(False)

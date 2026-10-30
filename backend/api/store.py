@@ -10,10 +10,11 @@ class ReadOnlyError(PermissionError):
 
 
 class ReadOnlyStore:
-    """Passes reads through; refuses every write, so nothing reaches the live Sheet."""
+    """Passes reads through; refuses every write except to the sheets in `allowed` (API_WRITE_SHEETS)."""
 
-    def __init__(self, inner):
+    def __init__(self, inner, allowed=frozenset()):
         self._inner = inner
+        self._allowed = allowed
 
     def read(self, name):
         return self._inner.read(name)
@@ -28,10 +29,22 @@ class ReadOnlyStore:
     def titles(self):
         return self._inner.titles()
 
-    def _refuse(self, *a, **k):
-        raise ReadOnlyError(READ_ONLY_MSG)
+    def _gate(self, name):
+        from .config import sheet_allowed
+        if not sheet_allowed(name, self._allowed):
+            raise ReadOnlyError(READ_ONLY_MSG)
 
-    write = append_row = set_rtl = _refuse
+    def write(self, name, *a, **k):
+        self._gate(name)
+        return self._inner.write(name, *a, **k)
+
+    def append_row(self, name, *a, **k):
+        self._gate(name)
+        return self._inner.append_row(name, *a, **k)
+
+    def set_rtl(self, name, *a, **k):
+        self._gate(name)
+        return self._inner.set_rtl(name, *a, **k)
 
 
 class CacheClearingStore:
