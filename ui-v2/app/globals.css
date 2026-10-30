@@ -78,7 +78,7 @@ h3.sub { font-size: 16px; font-weight: 700; margin-bottom: 10px; }
 .btn.ok { background: var(--W); color: var(--Wt); } .btn.no { background: var(--B); color: var(--Bt); }
 .btn[disabled] { opacity: .4; cursor: not-allowed; }
 .iconbtn { width: 34px; height: 34px; border-radius: 50%; border: 0; background: rgba(14,26,31,.05); display: grid; place-items: center; }
-.iconbtn.del { color: var(--Bt); } .iconbtn.del:hover { background: var(--B); }
+.iconbtn.del { color: var(--danger); } .iconbtn.del:hover { background: var(--danger-soft); }
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; min-width: 0; }
 .field label { font-size: 13px; color: var(--muted); font-weight: 500; }
 .input, select.input, textarea.input { width: 100%; border: 0; border-radius: 14px; background: #F2F4F6; padding: 11px 14px; font-size: 15px; box-shadow: inset 0 0 0 1px transparent; transition: box-shadow .3s, background .3s; }

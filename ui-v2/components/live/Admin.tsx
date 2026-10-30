@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowsClockwise, ChartLineUp, Check, CheckCircle, FileXls, FloppyDisk, Lightning, LockSimple, LockSimpleOpen, Moon, Plus, Sun, Table, Trash, UserGear, UserMinus, UserPlus, Warning, WarningOctagon, X } from '@phosphor-icons/react';
+import { ArrowsClockwise, ChartLineUp, Check, CheckCircle, FileXls, FloppyDisk, Lightning, LockSimple, LockSimpleOpen, Moon, Plus, Sun, Table, Trash, UserGear, UserPlus, Warning, WarningOctagon, X } from '@phosphor-icons/react';
 import { ApiError, useApi, type Pending } from '@/lib/api';
 import { DAILY_DEPTS, DOW_FULL, HEB_MONTHS, ROLES, STAFF_DEPTS, dowOf, roleLabel } from '@/lib/mock';
 import { useMe, useStore, ymOf } from '@/lib/store';
@@ -293,7 +293,7 @@ export function LiveStaff() {
               const nm = String(r.name ?? '');
               return (
                 <tr key={i}>
-                  <td><button className="iconbtn del" aria-label={`מחק את ${nm || 'השורה'}`} title="מחק עובד/ת" onClick={() => setDel(i)}><UserMinus size={16} /></button></td>
+                  <td><button className="iconbtn del" aria-label={`מחק את ${nm || 'השורה'}`} title="מחק עובד/ת" onClick={() => setDel(i)}><Trash size={16} /></button></td>
                   <td><input className="input" value={nm} onChange={(e) => {
                     const v = e.target.value;
                     if (home.includes(nm)) setHome(home.map((h) => (h === nm ? v : h)));
@@ -327,7 +327,7 @@ export function LiveStaff() {
           </div>
           <Modal open={del !== null} onClose={() => setDel(null)}>
             {del !== null && rows[del] && <>
-              <h2 className="sec"><UserMinus size={22} />להסיר את {String(rows[del].name) || 'השורה'} מהצוות?</h2>
+              <h2 className="sec"><Trash size={22} />להסיר את {String(rows[del].name) || 'השורה'} מהצוות?</h2>
               <p className="muted" style={{ marginBottom: 12 }}>העובד/ת לא יוכל/תוכל להתחבר ולא יופיע/תופיע בשיבוצים הבאים. תורנויות, אילוצים והיעדרויות שכבר רשומים נשארים בגיליון.</p>
               <Note kind="info">ההסרה נשמרת רק בלחיצה על "שמור שינויים בצוות".</Note>
               <div className="row" style={{ marginTop: 16 }}>
