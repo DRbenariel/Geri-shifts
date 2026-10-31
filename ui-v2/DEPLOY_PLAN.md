@@ -135,6 +135,37 @@ Steps, in order (nothing written to the Sheet; `API_READ_ONLY=1` throughout):
 
 Decided by Ben (2026-10-26): hospital IT sign-off is not needed; "open in Sheets" keeps "anyone with the link" sharing; no forced password change from 1234.
 
+## Cutover day: the new UI takes over from Streamlit
+
+Prepared 2026-10-31, not yet run. Both steps go out together, so there is no time when both apps write.
+Run from the repo root in PowerShell, with `$env:CLOUDSDK_CONFIG = "D:/Projects/gcloud-config"`.
+
+1. **Close Streamlit.** In `appy.py` set `APP_MOVED = True` (top of the file). Commit on `main` and push. Streamlit Cloud redeploys and every page shows "המערכת עברה לכתובת חדשה" with the link, before login and before any Sheet access. Cherry-pick the same commit onto `ui-v2-mockup`. If the old page is still up after a few minutes, reboot the app from the Streamlit Cloud menu.
+2. **Open every write in the new API**, on one instance (two instances can still race between their fresh read and save). Passwords stay SHA-256 (`STREAMLIT_PARALLEL=1`) so a rollback still lets everyone into Streamlit:
+   ```
+   cp daily_report.py backend/
+   & "C:/Users/User/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin/gcloud.cmd" run deploy geri-api --source backend --region me-west1 --service-account scheduler-bot@gerishifts.iam.gserviceaccount.com --cpu 4 --memory 2Gi --min-instances 0 --timeout 300 --allow-unauthenticated --set-secrets SESSION_SECRET=SESSION_SECRET:latest,SPREADSHEET_URL=SPREADSHEET_URL:latest,GSHEETS_CREDENTIALS=GSHEETS_CREDENTIALS:latest --quiet --max-instances 1 --set-env-vars API_READ_ONLY=0,STREAMLIT_PARALLEL=1
+   ```
+   Check: `/api/health` answers `"read_only":false`, and the site's "צפייה בלבד" banner is gone.
+3. **Smoke test on the real Sheet** (about 10 minutes, each action undone straight away):
+   - Admin: add a special day and delete it.
+   - Work schedule: change one cell and change it back.
+   - Night schedule: assign one empty slot by hand and cancel it.
+   - Employee: submit a day absence; as the manager, reject it.
+   - Staff: open the table and save without changes (expect "נשמר").
+   - Reports: run the problem scan.
+4. **Tell the staff** the new address: https://geri-shifts.benariel.workers.dev (same user names and passwords).
+
+Known gap at cutover: **e-mail notifications are off** (B-9, paused). Managers see new requests in "ניהול בקשות"; employees see the decision in "הגשת בקשות".
+
+**Rollback** (minutes, no data lost: both apps use the same Sheet):
+```
+& "C:/Users/User/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin/gcloud.cmd" run deploy geri-api --source backend --region me-west1 --service-account scheduler-bot@gerishifts.iam.gserviceaccount.com --cpu 4 --memory 2Gi --min-instances 0 --timeout 300 --allow-unauthenticated --set-secrets SESSION_SECRET=SESSION_SECRET:latest,SPREADSHEET_URL=SPREADSHEET_URL:latest,GSHEETS_CREDENTIALS=GSHEETS_CREDENTIALS:latest --quiet --max-instances 2 --set-env-vars API_READ_ONLY=1,STREAMLIT_PARALLEL=1,API_WRITE_SHEETS=requests
+```
+then `APP_MOVED = False` in `appy.py`, push `main`. This returns to today's state: night constraints in the new UI (Streamlit keeps `CONSTRAINTS_MOVED = True`), everything else in Streamlit.
+
+**After a stable week (no rollback any more):** redeploy step 2 with `STREAMLIT_PARALLEL=0`. Each login then upgrades that user's password to bcrypt, which Streamlit cannot read, so from here a rollback needs a password reset (`reset_passwords.py`) for everyone who has logged in since.
+
 ## What Ben needs to do
 
 ### Now: the mockup on Cloudflare Workers (step 0)
