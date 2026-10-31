@@ -32,6 +32,9 @@ PNIM_COLORS = {"ורוד": "#fce7f3", "כחול": "#dbeafe"}
 CONSTRAINTS_MOVED = True
 NEW_UI_URL = "https://geri-shifts.benariel.workers.dev"
 CONSTRAINTS_MOVED_MSG = f"הגשת אילוצים ובקשות לילה עברה למערכת החדשה: [{NEW_UI_URL}]({NEW_UI_URL})"
+# Full cutover to the new UI (DEPLOY_PLAN "Cutover day"): True closes the whole app behind a
+# notice, before login and before any Sheet read or write. False keeps it running as today.
+APP_MOVED = False
 PNIM_ICONS  = {"ורוד": "🌸", "כחול": "🔵"}
 
 import ui_components # Modular UI components
@@ -55,6 +58,15 @@ def _year_for_month(month, today=None):
 # --- 1. עיצוב ו-CSS ---
 st.set_page_config(page_title="מערכת סידור עבודה", layout="wide")
 ui_components.setup_style()
+if APP_MOVED:
+    st.markdown(
+        f"<div style='direction:rtl;text-align:center;margin-top:12vh'>"
+        f"<h2>המערכת עברה לכתובת חדשה</h2>"
+        f"<p style='font-size:18px'>סידור התורנויות, סידור העבודה והבקשות נמצאים עכשיו כאן:</p>"
+        f"<p style='font-size:22px'><a href='{NEW_UI_URL}' target='_self'>{NEW_UI_URL}</a></p>"
+        f"<p>שם המשתמש והסיסמה לא השתנו.</p></div>",
+        unsafe_allow_html=True)
+    st.stop()
 
 # RTL global fix — must run on every render (ungated).
 # Uses st.html() which injects inline (not sandboxed) so <style> applies globally.
