@@ -1,0 +1,380 @@
+'use client';
+import { useEffect, useState } from 'react';
+import { ArrowsClockwise, Broom, CalendarCheck, Check, Coffee, FileArrowUp, MagicWand, MagnifyingGlass, Moon, PencilSimple, Prohibit, Question, Sparkle, Star, Sun, Trash, X } from '@phosphor-icons/react';
+import { useApi, type NightCal, type NightSlot } from '@/lib/api';
+import { DOW_FULL, HEB_MONTHS, dowOf } from '@/lib/mock';
+import { handoff } from '@/lib/logic';
+import { monthDays, useMe, useStore, ymOf } from '@/lib/store';
+import { Bezel, Cta, Kpi, Modal, Note, PageHead, PillSeg } from '../ui';
+import { Load, MonthPick, dmy, inSettingWindow, rollingMonths, useAction } from './common';
+
+const ORDER = ['שיקום', 'פנימית גריאטרית', 'שישי בוקר - שיקום (1)', 'שישי בוקר - שיקום (2)', 'שישי בוקר - פנימית (1)', 'שישי בוקר - פנימית (2)'];
+const kind = (dept: string) => (dept.startsWith('שישי') ? 'fr' : dept === 'שיקום' ? 'sh' : 'pn');
+const short = (dept: string) => (dept.startsWith('שישי') ? 'שישי' : dept === 'שיקום' ? 'שיקום' : 'פנימית');
+
+function Month({ y, m, cell }: { y: number; m: number; cell: (d: number, date: string) => React.ReactNode }) {
+  const lead = dowOf(y, m, 1);
+  return (
+    <div className="cal">
+      {DOW_FULL.map((h, i) => <div key={h} className={`h ${i >= 5 ? 'we' : ''}`}>{h}</div>)}
+      {Array.from({ length: lead }, (_, i) => <div key={'b' + i} className="day blank" />)}
+      {monthDays(y, m).map((d) => cell(d, ymOf(y, m) + `-${String(d).padStart(2, '0')}`))}
+    </div>
+  );
+}
+
+const MAIN = ['שיקום', 'פנימית גריאטרית'];
+
+interface SwapOpts {
+  current: string; direct: string[]; exchange: { name: string; dept: string }[];
+  mutual_cross: { b_name: string; b_date: string; b_dept: string }[];
+  circular: { b_name: string; b_date: string; b_dept: string; c_name: string; c_date: string; c_dept: string }[];
+  fail_reasons: Record<string, number>;
+}
+
+/** Streamlit "🤖 עוזר החלפות חכם": who can take this slot, and the swaps that free someone for it. */
+function SwapFinder({ date, dept, onDone }: { date: string; dept: string; onDone: () => void }) {
+  const q = useApi<SwapOpts>(`/swap-options?date=${date}&dept=${encodeURIComponent(dept)}`);
+  const { run, busy } = useAction();
+  const [direct, setDirect] = useState('');
+  const exec = (kind: string, option: object, msg: string) =>
+    run('/swap-options/execute', 'POST', { date, dept, kind, option }, msg).then(onDone).catch(() => {});
+  return (
+    <div style={{ width: '100%', marginTop: 10 }}>
+      <Load q={q}>{(o) => {
+        const none = !o.direct.length && !o.exchange.length && !o.mutual_cross.length && !o.circular.length;
+        return (
+          <div className="cardlist">
+            {none && <Note kind="info">לא נמצאו אפשרויות. {Object.entries(o.fail_reasons).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${k}: ${n}`).join(' · ')}</Note>}
+            {o.direct.length > 0 && (
+              <div className="row">
+                <span className="small"><b>מחליפים זמינים ({o.direct.length})</b></span>
+                <select className="input" style={{ flex: '1 1 150px' }} value={direct} onChange={(e) => setDirect(e.target.value)} aria-label="מחליף/ה">
+                  <option value="">בחר/י</option>{o.direct.map((n) => <option key={n}>{n}</option>)}</select>
+                <button className="btn ok" disabled={busy || !direct} onClick={() => exec('direct', { name: direct }, `שובץ/ה: ${direct}`)}><Check size={14} />בצע</button>
+              </div>
+            )}
+            {o.exchange.map((x) => (
+              <div key={'x' + x.name} className="row small"><span className="grow">החלפה באותו יום: <b>{x.name}</b> מ{x.dept} לכאן, {o.current.trim()} ל{x.dept}</span>
+                <button className="btn" disabled={busy} onClick={() => exec('exchange', x, 'ההחלפה בוצעה')}>בצע</button></div>
+            ))}
+            {o.mutual_cross.map((x) => (
+              <div key={'m' + x.b_name + x.b_date} className="row small"><span className="grow">ראש בראש: <b>{x.b_name}</b> לכאן, {o.current.trim()} ל-{dmy(x.b_date)} {x.b_dept}</span>
+                <button className="btn" disabled={busy} onClick={() => exec('mutual_cross', x, 'ההחלפה בוצעה')}>בצע</button></div>
+            ))}
+            {o.circular.map((x) => (
+              <div key={'c' + x.b_name + x.c_name + x.b_date + x.c_date} className="row small"><span className="grow">מעגלית: <b>{x.c_name}</b> לכאן, {o.current.trim()} ל-{dmy(x.b_date)}, {x.b_name} ל-{dmy(x.c_date)}</span>
+                <button className="btn" disabled={busy} onClick={() => exec('circular', x, 'ההחלפה בוצעה')}>בצע</button></div>
+            ))}
+          </div>
+        );
+      }}</Load>
+    </div>
+  );
+}
+const FRI = ORDER.slice(2);
+
+/** Manual override for one day (Streamlit "כלי שיבוץ ידני"): pick who works each slot, or clear it. */
+function DayEditor({ date, cal, onClose, onSaved }: { date: string; cal: NightCal; onClose: () => void; onSaved: () => void }) {
+  const people = useApi<{ name: string; type: string }[]>('/people');
+  const { run, busy } = useAction();
+  const rows = cal.slots[date] ?? [];
+  const cur = (dept: string) => rows.find((r) => r.dept === dept);
+  const special = cal.special_days.find((x) => x.date === date);
+  const friday = new Date(date).getDay() === 5 || special?.day_type === 'כמו שישי (ערב חג)' || rows.some((r) => r.dept.startsWith('שישי'));
+  const depts = friday ? [...MAIN, ...FRI] : MAIN;
+  const blocked = new Set((cal.requests?.[date] ?? []).filter((x) => x.status === 'אילוץ').map((x) => x.employee.trim()));
+  const [pick, setPick] = useState<Record<string, string>>({});
+  const [finder, setFinder] = useState<string | null>(null);
+  const assign = (dept: string) => run('/night/slot', 'PUT', { date, dept, employee: pick[dept] }, `שובץ/ה: ${pick[dept]}`).then(onSaved).catch(() => {});
+  const clear = (dept: string) => run('/night/slot', 'DELETE', { date, dept }, 'השיבוץ בוטל').then(onSaved).catch(() => {});
+  return (
+    <Modal open onClose={onClose}>
+      <h2 className="sec"><PencilSimple size={22} />שיבוץ ידני · {DOW_FULL[new Date(date).getDay()]} {dmy(date)}</h2>
+      <p className="muted small" style={{ marginBottom: 14 }}>שיבוץ ידני לא נדרס בהרצת שיבוץ אוטומטי. אי אפשר לשבץ מי שהגיש/ה אילוץ ליום הזה.</p>
+      <Load q={people}>{(list) => (
+        <div className="cardlist">
+          {depts.map((dept) => {
+            const c = cur(dept);
+            const has = !!c && c.employee !== '---';
+            return (
+              <div key={dept} className="rcard" style={{ flexWrap: 'wrap' }}>
+                <div className="main" style={{ minWidth: 150 }}><b>{dept}</b>
+                  <div className="meta">{has ? <>כרגע: {c!.employee.trim()}{c!.is_manual ? ' (ידני)' : ''}</> : 'לא משובץ'}</div></div>
+                <select className="input" style={{ flex: '1 1 160px' }} value={pick[dept] ?? ''} onChange={(e) => setPick({ ...pick, [dept]: e.target.value })} aria-label={`עובד/ת ל${dept}`}>
+                  <option value="">בחר/י עובד/ת</option>
+                  {['מתמחה', 'תורן חוץ'].map((t) => (
+                    <optgroup key={t} label={t}>{list.filter((p) => p.type === t).map((p) => (
+                      <option key={p.name} value={p.name} disabled={blocked.has(p.name)}>{p.name}{blocked.has(p.name) ? ' (אילוץ)' : ''}</option>))}</optgroup>
+                  ))}
+                </select>
+                <button className="btn ok" disabled={busy || !pick[dept]} onClick={() => assign(dept)}><Check size={14} />שבץ</button>
+                {has && <button className="btn no" disabled={busy} onClick={() => clear(dept)}><X size={14} />בטל שיבוץ</button>}
+                <button className="btn" aria-expanded={finder === dept} onClick={() => setFinder(finder === dept ? null : dept)}><MagnifyingGlass size={14} />החלפות</button>
+                {finder === dept && <SwapFinder date={date} dept={dept} onDone={onSaved} />}
+              </div>
+            );
+          })}
+        </div>
+      )}</Load>
+      <div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={onClose}>סגור</button></div>
+    </Modal>
+  );
+}
+
+/** Which month interns and externals submit night constraints for (settings.active_month). */
+function OpenMonth() {
+  const me = useMe();
+  const { refreshMe } = useStore();
+  const { run, busy } = useAction();
+  const cur = ymOf(me.settings.active_year, me.settings.active_month);
+  const opts = rollingMonths().filter((o) => inSettingWindow(o.v));
+  return (
+    <Bezel>
+      <h2 className="sec"><CalendarCheck size={22} />חודש פתוח להגשת אילוצים</h2>
+      <p className="muted small" style={{ marginBottom: 10 }}>המתמחים ותורני החוץ מגישים אילוצים ובקשות לחודש הזה.</p>
+      <select className="input" value={cur} disabled={busy} aria-label="חודש פתוח להגשה"
+        onChange={(e) => { const m = +e.target.value.slice(5); run('/settings/active_month', 'PUT', { month: m }, `החודש הפתוח להגשה עודכן ל${HEB_MONTHS[m - 1]}`).then(refreshMe).catch(() => {}); }}>
+        {!opts.some((o) => o.v === cur) && <option value={cur}>{HEB_MONTHS[me.settings.active_month - 1]} {me.settings.active_year}</option>}
+        {opts.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+      </select>
+    </Bezel>
+  );
+}
+
+function AdminNight() {
+  const me = useMe();
+  const [ym, setYm] = useState(ymOf(me.settings.active_year, me.settings.active_month));
+  const [y, m] = ym.split('-').map(Number);
+  const q = useApi<NightCal>(`/night/${ym}`);
+  const swaps = useApi<{ index: number; requester: string; requester_date: string; requester_dept: string; candidate: string; candidate_date: string; candidate_dept: string; swap_type: string }[]>('/swaps/pending');
+  const { run, busy } = useAction();
+  const [summary, setSummary] = useState<string[]>([]);
+  type Sugg = Record<string, string> & { desc: string };
+  const [suggest, setSuggest] = useState<Record<string, Sugg[]>>({});
+  const [askAuto, setAskAuto] = useState<null | boolean>(null);
+  const [askClear, setAskClear] = useState<null | 'auto' | 'all'>(null);
+  const [editDay, setEditDay] = useState<string | null>(null);
+  const clear = (mode: 'auto' | 'all') => {
+    setAskClear(null);
+    run(`/night/${ym}/clear`, 'POST', { mode }, mode === 'auto' ? 'השיבוצים האוטומטיים נמחקו' : 'כל הלוח לחודש נמחק').then(() => q.reload()).catch(() => {});
+  };
+  const auto = async (weekends: boolean) => {
+    setAskAuto(null);
+    try {
+      const r = await run<{ filled: number; total: number; messages: { text: string }[]; suggestions: { key: string; options: Sugg[] }[] }>(`/night/${ym}/auto`, 'POST', { only_weekends: weekends });
+      if (r) {
+        setSummary([`שובצו ${r.filled}/${r.total} משמרות`, ...r.messages.map((x) => x.text)]);
+        setSuggest(Object.fromEntries(r.suggestions.map((x) => [x.key, x.options])));
+        q.reload();
+      }
+    } catch { /* toast shown */ }
+  };
+  return (
+    <>
+      <PageHead eyebrow={`${HEB_MONTHS[m - 1]} ${y}`} title="סידור תורנויות"
+        actions={<>
+          <MonthPick value={ym} onChange={setYm} />
+          <Cta variant="light" icon={<FileArrowUp size={16} />} disabled={busy} onClick={() => run(`/night/${ym}/export-sheet`, 'POST', undefined, 'הגיליון Schedule_Export עודכן').catch(() => {})}>עדכן Schedule_Export</Cta>
+        </>} />
+      <Load q={q}>{(cal) => {
+        const empty = Object.entries(cal.slots).flatMap(([d, rows]) => rows.filter((r) => r.employee === '---').map((r) => ({ d, r })));
+        const filled = Object.values(cal.slots).flat().filter((r) => r.employee !== '---').length;
+        return (
+          <div className="split">
+            <div>
+              {empty.length > 0 && (
+                <Bezel>
+                  <Note kind="err"><b>{empty.length} משמרות לא שובצו.</b></Note>
+                  <div className="cardlist">
+                    {empty.map(({ d, r }) => {
+                      const opts = suggest[`${d}_${r.dept}`] ?? [];
+                      return (
+                        <div key={d + r.dept} className="rcard" style={{ flexWrap: 'wrap' }}>
+                          <div className="main"><b>{dmy(d)} · {r.dept}</b><div className="meta"><Question size={13} />{r.empty_reason || 'ללא סיבה רשומה'}</div></div>
+                          {opts.map((o, i) => (
+                            <button key={i} className="btn" disabled={busy} onClick={() => run('/night/suggestion', 'POST', { date: d, dept: r.dept, suggestion: o }, 'ההצעה בוצעה')
+                              .then(() => { setSuggest((x) => { const n = { ...x }; delete n[`${d}_${r.dept}`]; return n; }); q.reload(); }).catch(() => {})}>
+                              <Sparkle size={14} />בצע: {o.desc}</button>
+                          ))}
+                          <button className="btn" onClick={() => setEditDay(d)}><MagnifyingGlass size={14} />החלפות</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Bezel>
+              )}
+              <Bezel>
+                <div className="row" style={{ marginBottom: 12 }}>
+                  <h2 className="sec" style={{ margin: 0 }}>לוח החודש</h2><span className="grow" /><span className="muted small">{filled} משמרות משובצות</span>
+                </div>
+                <div className="row small muted" style={{ marginBottom: 12 }}>
+                  <span className="slot sh">שיקום</span><span className="slot pn">פנימית</span><span className="slot fr">שישי בוקר</span><span className="slot empty">חסר</span>
+                  <span className="mark"><Prohibit size={12} />חסימה</span><span className="mark"><Star size={12} weight="fill" />בקשה</span>
+                </div>
+                {cal.availability && !cal.availability.shown && <Note kind="info">לוח הזמינות היומי יוצג כשכל העובדים יגישו אילוצים.</Note>}
+                <p className="muted small" style={{ marginBottom: 10 }}><PencilSimple size={13} /> לחיצה על יום פותחת שיבוץ ידני.</p>
+                <Month y={y} m={m} cell={(d, date) => {
+                  const rows = [...(cal.slots[date] ?? [])].sort((a, b) => ORDER.indexOf(a.dept) - ORDER.indexOf(b.dept));
+                  const reqs = cal.requests?.[date] ?? [];
+                  const sp = cal.special_days.find((s) => s.date === date);
+                  const bl = reqs.filter((r) => r.status === 'אילוץ').map((r) => r.employee);
+                  const wi = reqs.filter((r) => r.status === 'בקשה').map((r) => r.employee);
+                  const av = cal.availability?.shown ? cal.availability.available[date] ?? [] : null;
+                  return (
+                    <div key={d} className={`day click ${dowOf(y, m, d) >= 5 ? 'we' : ''}`} role="button" tabIndex={0} aria-label={`שיבוץ ידני ל-${d}/${m}`}
+                      onClick={() => setEditDay(date)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditDay(date); } }}>
+                      <span className="num">{d}</span>
+                      {sp && <span className="sp" title={sp.day_type}>{sp.description}</span>}
+                      {rows.map((r) => r.employee === '---'
+                        ? <span key={r.dept} className="slot empty" title={`${r.dept}: ${r.empty_reason}`}><Question size={11} />{short(r.dept)} חסר</span>
+                        : <span key={r.dept} className={`slot ${kind(r.dept)}`} title={`${r.dept}: ${r.employee}${r.is_manual ? ' (ידני)' : ''}`}>{r.employee.trim()}</span>)}
+                      {(bl.length > 0 || wi.length > 0) && (
+                        <span className="who hide-m">
+                          {bl.map((e) => <span key={'b' + e} className="b"><Prohibit size={10} weight="bold" />{e}</span>)}
+                          {wi.map((e) => <span key={'r' + e} className="r"><Star size={10} weight="fill" />{e}</span>)}
+                        </span>
+                      )}
+                      {av && av.length > 0 && <span className="who hide-m"><span title={av.join(', ')}>✅ {av.length} זמינים</span></span>}
+                      {(bl.length > 0 || wi.length > 0) && (
+                        <span className="who-m mob-only">{bl.length > 0 && <span className="b"><Prohibit size={9} weight="bold" />{bl.length}</span>}{wi.length > 0 && <span className="r"><Star size={9} weight="fill" />{wi.length}</span>}</span>
+                      )}
+                    </div>
+                  );
+                }} />
+              </Bezel>
+              <Bezel>
+                <h2 className="sec"><ArrowsClockwise size={22} />בקשות החלפה ממתינות</h2>
+                <Load q={swaps}>{(list) => list.length === 0 ? <p className="muted">אין בקשות ממתינות.</p> : (
+                  <div className="cardlist">
+                    {list.map((s) => (
+                      <div key={s.index} className="rcard">
+                        <div className="main"><b>{s.requester}: {dmy(s.requester_date)} {s.requester_dept} ← {s.candidate}</b>
+                          <div className="meta">{s.swap_type === 'full' ? `בתמורה: ${s.candidate_date ? dmy(s.candidate_date) : ''} ${s.candidate_dept}` : s.swap_type === 'chain' ? 'החלפה משולשת' : 'כיסוי חד-צדדי'}</div></div>
+                        <button className="btn ok" disabled={busy} onClick={() => run(`/swaps/${s.index}/approve`, 'POST', undefined, 'הבקשה אושרה').then(() => { swaps.reload(); q.reload(); }).catch(() => {})}><Check size={14} />אשר</button>
+                        <button className="btn no" disabled={busy} onClick={() => run(`/swaps/${s.index}/reject`, 'POST', undefined, 'הבקשה נדחתה').then(swaps.reload).catch(() => {})}><X size={14} />דחה</button>
+                      </div>
+                    ))}
+                  </div>
+                )}</Load>
+              </Bezel>
+            </div>
+            <div>
+              <Bezel>
+                <h2 className="sec">שיבוץ אוטומטי</h2>
+                <div className="cardlist">
+                  <Cta variant="teal" icon={<MagicWand size={16} />} disabled={busy} onClick={() => setAskAuto(false)}>{busy ? 'משבץ... (עד דקה)' : 'שיבוץ אוטומטי מלא'}</Cta>
+                  <Cta variant="light" icon={<Coffee size={16} />} disabled={busy} onClick={() => setAskAuto(true)}>שיבוץ סופ&quot;שים בלבד</Cta>
+                </div>
+                {summary.length > 0 && <div style={{ marginTop: 14 }}><Note kind="ok">{summary.map((t) => <div key={t}>{t}</div>)}</Note></div>}
+              </Bezel>
+              <Bezel>
+                <h2 className="sec"><Broom size={22} />ניקוי החודש</h2>
+                <div className="cardlist">
+                  <Cta variant="light" icon={<Broom size={16} />} disabled={busy} onClick={() => setAskClear('auto')}>נקה שיבוצים אוטומטיים</Cta>
+                  <Cta variant="danger" icon={<Trash size={16} />} disabled={busy} onClick={() => setAskClear('all')}>נקה את כל הלוח</Cta>
+                </div>
+              </Bezel>
+              <OpenMonth />
+            </div>
+            {editDay && <DayEditor date={editDay} cal={cal} onClose={() => setEditDay(null)} onSaved={() => { q.reload(); setEditDay(null); }} />}
+            <Modal open={askClear !== null} onClose={() => setAskClear(null)}>
+              <h2 className="sec"><Trash size={22} />{askClear === 'all' ? `למחוק את כל הלוח של ${HEB_MONTHS[m - 1]}?` : `למחוק את השיבוצים האוטומטיים של ${HEB_MONTHS[m - 1]}?`}</h2>
+              <ul className="confirm-list">
+                {askClear === 'all'
+                  ? <li>כל <b>{filled}</b> המשמרות המשובצות יימחקו, כולל שיבוצים ידניים.</li>
+                  : <li><b>{Object.values(cal.slots).flat().filter((r) => !r.is_manual && r.employee !== '---').length}</b> שיבוצים אוטומטיים יימחקו. השיבוצים הידניים יישארו.</li>}
+                <li>אין ביטול אחרי המחיקה.</li>
+              </ul>
+              <div className="row">
+                <Cta variant="danger" icon={<Trash size={16} />} onClick={() => askClear && clear(askClear)}>מחק</Cta>
+                <button className="btn" onClick={() => setAskClear(null)}>ביטול</button>
+              </div>
+            </Modal>
+            <Modal open={askAuto !== null} onClose={() => setAskAuto(null)}>
+              <h2 className="sec"><MagicWand size={22} />{askAuto ? 'לשבץ אוטומטית את הסופ"שים?' : `לשבץ אוטומטית את ${HEB_MONTHS[m - 1]}?`}</h2>
+              <ul className="confirm-list">
+                <li><b>{Object.values(cal.slots).flat().filter((r) => r.is_manual && r.employee !== '---').length}</b> שיבוצים ידניים יישארו כמו שהם.</li>
+                <li><b>{Object.values(cal.slots).flat().filter((r) => !r.is_manual && r.employee !== '---').length}</b> שיבוצים אוטומטיים קיימים {askAuto ? 'בסופ"שים ' : ''}יחושבו מחדש.</li>
+                <li><b>{empty.length}</b> משמרות חסרות ינסו להתמלא.</li>
+                <li>ההרצה לוקחת עד דקה. בשלב הזה אין עדיין ביטול אחרי הרצה מול הגיליון.</li>
+              </ul>
+              <div className="row">
+                <Cta variant="teal" icon={<MagicWand size={16} />} onClick={() => auto(!!askAuto)}>הרץ שיבוץ</Cta>
+                <button className="btn" onClick={() => setAskAuto(null)}>ביטול</button>
+              </div>
+            </Modal>
+          </div>
+        );
+      }}</Load>
+    </>
+  );
+}
+
+function PersonalNight() {
+  const me = useMe();
+  const ym = ymOf(me.settings.active_year, me.settings.active_month);
+  const [y, m] = ym.split('-').map(Number);
+  const q = useApi<NightCal>(`/night/${ym}`);
+  const [view, setView] = useState<'grid' | 'list'>('grid');
+  useEffect(() => { if (window.matchMedia('(max-width: 767px)').matches) setView('list'); }, []);
+  const openSwap = (date: string, r: NightSlot) => { handoff.swapShift = `${date}|${r.dept}`; window.location.hash = '/settings'; };
+  return (
+    <>
+      <PageHead eyebrow={`${HEB_MONTHS[m - 1]} ${y}`} title="סידור תורנויות" sub="המשמרות שלך ומשמרות שעדיין לא אוישו" />
+      <Load q={q}>{(cal) => {
+        const mine = Object.entries(cal.slots).flatMap(([d, rows]) => rows.filter((r) => r.employee === me.name).map((r) => ({ d, r }))).sort((a, b) => a.d.localeCompare(b.d));
+        if (Object.keys(cal.slots).length === 0) return <Note kind="info">עדיין לא פורסם סידור לחודש זה.</Note>;
+        const nights = mine.filter((x) => !x.r.dept.startsWith('שישי'));
+        const today = new Date().toISOString().slice(0, 10);
+        const next = mine.find((x) => x.d >= today);
+        return (
+          <>
+            <div className="kpis">
+              <Kpi k="משמרות לילה החודש" v={nights.length} small={`מכסה ${me.monthly_quota}`} />
+              <Kpi k="מתוכן בסופ״ש" v={nights.filter((x) => [5, 6].includes(new Date(x.d).getDay())).length} small={`מכסה ${me.weekend_quota}`} />
+              {me.type === 'מתמחה' && <Kpi k="שישי בוקר" v={mine.length - nights.length} />}
+              <Kpi k="המשמרת הבאה" v={next ? `${DOW_FULL[new Date(next.d).getDay()]} ${dmy(next.d)}` : 'אין'} small={next ? next.r.dept : ''} />
+            </div>
+            <Bezel>
+              <div className="row" style={{ marginBottom: 16 }}>
+                <h2 className="sec" style={{ margin: 0 }}>{view === 'grid' ? 'לוח החודש' : 'המשמרות שלי'}</h2><span className="grow" />
+                <PillSeg value={view} onChange={setView} options={[{ v: 'list', l: 'הקרובות שלי' }, { v: 'grid', l: 'לוח' }]} />
+              </div>
+              {view === 'list' ? (mine.length === 0 ? <p className="muted">לא שובצת למשמרות החודש.</p> : (
+                <div className="cardlist">
+                  {mine.map(({ d, r }) => (
+                    <div key={d + r.dept} className="rcard">
+                      <span className={`slot ${kind(r.dept)}`}>{r.dept.startsWith('שישי') ? <Sun size={13} /> : <Moon size={13} />}</span>
+                      <div className="main"><b>{DOW_FULL[new Date(d).getDay()]} {dmy(d)}</b><div className="meta">{r.dept}</div></div>
+                      {d >= today && <button className="btn" onClick={() => openSwap(d, r)}><ArrowsClockwise size={14} />חפש החלפה</button>}
+                    </div>
+                  ))}
+                </div>
+              )) : (
+                <Month y={y} m={m} cell={(d, date) => {
+                  const rows = cal.slots[date] ?? [];
+                  const sp = cal.special_days.find((s) => s.date === date);
+                  return (
+                    <div key={d} className={`day ${dowOf(y, m, d) >= 5 ? 'we' : ''}`}>
+                      <span className="num">{d}</span>
+                      {sp && <span className="sp">{sp.description}</span>}
+                      {rows.map((r) => r.employee === '---'
+                        ? <span key={r.dept} className="slot empty"><Question size={11} />{short(r.dept)} חסר</span>
+                        : <button key={r.dept} className={`slot mine ${kind(r.dept)}`} onClick={() => openSwap(date, r)} title="חפש החלפה">{short(r.dept)}</button>)}
+                    </div>
+                  );
+                }} />
+              )}
+            </Bezel>
+          </>
+        );
+      }}</Load>
+    </>
+  );
+}
+
+export default function LiveNight() {
+  const me = useMe();
+  return me.type === 'מנהל על' ? <AdminNight /> : <PersonalNight />;
+}
