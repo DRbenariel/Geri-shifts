@@ -26,6 +26,12 @@ _HEB_MONTHS = ["ינואר","פברואר","מרץ","אפריל","מאי","יו�
 PNIM_DEPT   = "פנימית גריאטרית"
 PNIM_SIDES  = ["ורוד", "כחול"]
 PNIM_COLORS = {"ורוד": "#fce7f3", "כחול": "#dbeafe"}
+
+# Night constraints moved to the new UI (B-10, 2026-10-31): saving here is off so the two apps
+# never write the `requests` sheet at once. Set False to reopen it.
+CONSTRAINTS_MOVED = True
+NEW_UI_URL = "https://geri-shifts.benariel.workers.dev"
+CONSTRAINTS_MOVED_MSG = f"הגשת אילוצים ובקשות לילה עברה למערכת החדשה: [{NEW_UI_URL}]({NEW_UI_URL})"
 PNIM_ICONS  = {"ורוד": "🌸", "כחול": "🔵"}
 
 import ui_components # Modular UI components
@@ -7163,7 +7169,9 @@ elif role in ("מנהל/ת", "מנהל על"):
             
             st.divider()
             
-            if st.button("💾 שמור שינויים לעובד זה"):
+            if CONSTRAINTS_MOVED:
+                st.info(CONSTRAINTS_MOVED_MSG)
+            if st.button("💾 שמור שינויים לעובד זה", disabled=CONSTRAINTS_MOVED):
                 # בדיקת חפיפה (סתירה)
                 overlap = set(new_constraints).intersection(set(new_wishes))
                 if overlap:
@@ -8365,7 +8373,9 @@ else:
         _save_label = ("💾 שמור אילוצים ובקשות"
                        if (_has_changes or _is_empty_save)
                        else "אין שינויים לשמירה")
-        _save_disabled = not (_has_changes or _is_empty_save)
+        _save_disabled = not (_has_changes or _is_empty_save) or CONSTRAINTS_MOVED
+        if CONSTRAINTS_MOVED:
+            st.info(CONSTRAINTS_MOVED_MSG)
 
         if st.button(_save_label, type="primary",
                      use_container_width=True,
