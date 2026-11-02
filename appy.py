@@ -34,7 +34,7 @@ NEW_UI_URL = "https://geri-shifts.benariel.workers.dev"
 CONSTRAINTS_MOVED_MSG = f"הגשת אילוצים ובקשות לילה עברה למערכת החדשה: [{NEW_UI_URL}]({NEW_UI_URL})"
 # Full cutover to the new UI (DEPLOY_PLAN "Cutover day"): True closes the whole app behind a
 # notice, before login and before any Sheet read or write. False keeps it running as today.
-APP_MOVED = False
+APP_MOVED = True
 PNIM_ICONS  = {"ורוד": "🌸", "כחול": "🔵"}
 
 import ui_components # Modular UI components
