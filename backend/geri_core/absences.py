@@ -9,7 +9,7 @@ import pandas as pd
 
 from .constants import ABSENCE_TYPE_TO_STATUS
 from .context import daterange, now_str
-from .daily import derive_auto_status, pnim_side_groups, wsd_upsert
+from .daily import dept_grid, derive_auto_status, wsd_upsert
 from .days import to_date
 from .normalize import norm_dept, parse_manage_depts
 from .constants import DAILY_DEPTS_ALL, PNIM_DEPT
@@ -541,25 +541,39 @@ def absence_gantt(ctx, year, month, dept_filter=None) -> dict:
 
 
 def absence_roster(ctx, year, month, depts=None) -> dict:
-    """Everyone working in each dept this month, for the absence Gantt's rows (B-12).
+    """Everyone working in each dept this month and their status per day, for the absence Gantt (B-12, B-14).
 
-    {dept: [{'side': 'ורוד'|'כחול'|'', 'employees': [...]}]}: פנימית is split by dept_rotation.side
-    (people with no side, e.g. its managers, come last under ''); other depts are one group.
-    Day-specific transfers are left out: they belong to their home dept's roster.
+    {dept: {'groups': [{'side': 'ורוד'|'כחול'|'', 'employees': [...]}],
+            'days': {employee: {day: status}},        # the work grid's status (עובד, חופש, אחרי תורנות, ...)
+            'transfers': {employee: [day, ...]}}}      # here on a temporary transfer, only on those days
+    The rows and statuses come from the same dept_grid the work schedule shows, so a transfer into the
+    dept (e.g. one week in November) appears on exactly its days. פנימית is grouped by side; people with
+    no side (e.g. its managers) come last under ''.
     """
     ym = f"{year}-{month:02d}"
     out = {}
     for dept in (depts or DAILY_DEPTS_ALL):
         emps = grid_employees(ctx, dept, ym)
-        if not emps:
+        g = dept_grid(ctx, dept, ym, month, emps, year=year)
+        rows = list(g['rows'])
+        if not rows and not g['unassigned_side']:
             continue
+        days = {r['employee']: {c['day']: c['status'] for c in r['cells'] if not c['locked'] and c['status']}
+                for r in rows}
+        # dept_grid leaves out פנימית people with no side; the Gantt still lists them.
+        for emp in g['unassigned_side']:
+            st = {d: derive_auto_status(ctx, f"{ym}-{d:02d}", emp, daily_dept=dept)
+                  for d in range(1, calendar.monthrange(year, month)[1] + 1)}
+            days[emp] = {d: v for d, v in st.items() if v}
+        transfers = {r['employee']: r['transfer_days'] for r in rows if r['transfer_days'] is not None}
         if dept == PNIM_DEPT:
-            sides, _transfers, unassigned = pnim_side_groups(ctx, ym, emps)
-            groups = [{'side': s, 'employees': [e for e in sides[s] if e in emps]} for s in ('ורוד', 'כחול')]
-            groups.append({'side': '', 'employees': unassigned})
-            out[dept] = [g for g in groups if g['employees']]
+            groups = [{'side': sd, 'employees': [r['employee'] for r in rows if r['side'] == sd]}
+                      for sd in ('ורוד', 'כחול')]
+            groups.append({'side': '', 'employees': list(g['unassigned_side'])})
+            groups = [x for x in groups if x['employees']]
         else:
-            out[dept] = [{'side': '', 'employees': emps}]
+            groups = [{'side': '', 'employees': [r['employee'] for r in rows]}]
+        out[dept] = {'groups': groups, 'days': days, 'transfers': transfers}
     return out
 
 

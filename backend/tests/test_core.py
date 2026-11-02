@@ -208,6 +208,18 @@ def test_deleted_employee_left_in_gantt_gets_no_grid_row(ctx):
     assert gone not in [r['employee'] for r in g['rows']]
 
 
+def test_manager_editing_own_cell_is_not_a_transfer(ctx):
+    from geri_core import people
+    from geri_core.people import grid_employees
+    dept = "שיקום גריאטרי א'"
+    mgr = people.get_dept_managers(ctx, dept)[0]
+    daily.wsd_upsert(ctx, f"{YM}-09", mgr, dept, '', is_manual=True)      # took themselves off one day
+    assert mgr not in daily.incoming_transfers(ctx, dept, YM)
+    g = daily.dept_grid(ctx, dept, YM, MONTH, grid_employees(ctx, dept, YM))
+    row = next(r for r in g['rows'] if r['employee'] == mgr)
+    assert row['transfer_days'] is None and not any(c['locked'] for c in row['cells'])
+
+
 def test_temp_transfer_add_remove(ctx):
     daily.add_temp_transfer(ctx, f"{YM}-03", SENIORS[0], "שיקום גריאטרי ב'")
     assert 3 in daily.incoming_transfers(ctx, "שיקום גריאטרי ב'", YM)[SENIORS[0]]['days']

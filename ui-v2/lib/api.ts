@@ -85,6 +85,7 @@ export interface Pending {
   conflicts: { employee: string; start: string; end: string }[];
 }
 export interface AbsGantt { by_dept: Record<string, Record<string, [number, string][]>>; notes?: Record<string, Record<string, string>>;
-  /** Everyone in each dept this month, פנימית split by side ('' = no side), for the Gantt rows. */
-  roster?: Record<string, { side: string; employees: string[] }[]>;
+  /** Everyone working in each dept this month (פנימית split by side, '' = no side), their status per day
+   *  as the work grid shows it, and who is there on a temporary transfer (only on those days). */
+  roster?: Record<string, { groups: { side: string; employees: string[] }[]; days: Record<string, Record<string, string>>; transfers: Record<string, number[]> }>;
   conflicts: { dept: string; day: number; employees: string[] }[] }

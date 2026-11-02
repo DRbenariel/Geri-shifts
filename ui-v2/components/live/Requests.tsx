@@ -49,6 +49,9 @@ function PendingList({ filter, onChange }: { filter: string; onChange: () => voi
   );
 }
 
+// Short cell labels, as in the work grid (GRID_STATUS_LABEL_SHORT); OFF = statuses that count toward an overlap.
+const SHORT: Record<string, string> = { 'עובד': 'ע', 'חופש': 'ח', '202': '202', 'אחרי תורנות': 'א', 'אחר': '+', 'תורנות': 'ת' };
+const OFF = new Set(['חופש', '202', 'אחר', 'אחרי תורנות']);
 const SIDE_LABEL: Record<string, string> = { 'ורוד': 'צד ורוד', 'כחול': 'צד כחול', '-': 'ללא צד', '?': 'לא משובצים החודש' };
 const SIDE_CLASS: Record<string, string> = { 'ורוד': 'pink', 'כחול': 'blue' };
 
@@ -61,7 +64,7 @@ function GanttLive({ filter, scope, manager }: { filter: string; scope: string[]
   const { bind, node } = useDayTip();
   return (
     <Bezel>
-      <div className="row" style={{ marginBottom: 14 }}><h2 className="sec" style={{ margin: 0 }}>כל ההיעדרויות בחודש</h2><span className="grow" /><MonthPick value={ym} onChange={setYm} /></div>
+      <div className="row" style={{ marginBottom: 14 }}><h2 className="sec" style={{ margin: 0 }}>נוכחות והיעדרויות בחודש</h2><span className="grow" /><MonthPick value={ym} onChange={setYm} /></div>
       <Load q={q}>{(raw) => {
         // Managers get {dept: gantt}; admins one gantt across departments.
         const parts: AbsGantt[] = 'by_dept' in raw ? [raw as AbsGantt] : Object.values(raw as Record<string, AbsGantt>);
@@ -72,10 +75,10 @@ function GanttLive({ filter, scope, manager }: { filter: string; scope: string[]
         // "הנהלה", but their row is in the dept they manage).
         const absOf: Record<string, Record<number, string>> = {};
         for (const emps of Object.values(by)) for (const [e, items] of Object.entries(emps)) absOf[e] = { ...absOf[e], ...Object.fromEntries(items) };
-        const onRoster = new Set(Object.values(roster).flatMap((gs) => gs.flatMap((g) => g.employees)));
+        const onRoster = new Set(Object.values(roster).flatMap((r) => r.groups.flatMap((g) => g.employees)));
         // Everyone in the dept gets a row (פנימית by side); anyone absent but on no roster comes last.
         const groupsOf = (d: string) => {
-          const gs = (roster[d] ?? []).map((g) => ({ ...g }));
+          const gs = (roster[d]?.groups ?? []).map((g) => ({ ...g }));
           const extra = Object.keys(by[d] ?? {}).filter((e) => !onRoster.has(e));
           const sided = gs.some((g) => g.side);
           if (extra.length) gs.push({ side: sided ? '?' : '', employees: extra });
@@ -91,20 +94,22 @@ function GanttLive({ filter, scope, manager }: { filter: string; scope: string[]
             <div className="tbl-wrap"><table className="t abs-t">
               <thead><tr><th>עובד/ת</th>{days.map((x) => <th key={x} className="num">{x}<div className="muted small">{DOW_LETTER[dowOf(y, m, x)]}</div></th>)}</tr></thead>
               <tbody>{groupsOf(d).flatMap((g, _i, all) => {
+                // A day's status as the work grid has it (ע, ח, 202, א...); people off the roster: their absences only.
+                const stOf = (e: string, x: number): string | undefined => roster[d]?.days[e]?.[String(x)] ?? (onRoster.has(e) ? undefined : absOf[e]?.[x]);
                 // Two or more people of this dept off on the same day → red border.
-                const offOn = (x: number) => all.flatMap((gg) => gg.employees).filter((e) => absOf[e]?.[x]);
+                const offOn = (x: number) => all.flatMap((gg) => gg.employees).filter((e) => OFF.has(stOf(e, x) ?? ''));
                 return [
                 g.side && <tr key={'s' + g.side} className="abs-side"><td colSpan={days.length + 1}>
                   <span className={`side-h ${SIDE_CLASS[g.side] ?? ''}`}>{SIDE_LABEL[g.side] ?? g.side} · {g.employees.length}</span></td></tr>,
                 ...g.employees.map((emp) => {
-                const map = absOf[emp] ?? {};
-                return <tr key={emp}><td style={{ whiteSpace: 'nowrap' }}>{emp}</td>{days.map((x) => {
-                  const st = map[x];
+                const moved = roster[d]?.transfers[emp];
+                return <tr key={emp}><td style={{ whiteSpace: 'nowrap' }}>{emp}{moved && <span className="badge b-mute" style={{ marginInlineStart: 6 }}>העברה</span>}</td>{days.map((x) => {
+                  const st = stOf(emp, x);
                   if (!st) return <td key={x} />;
-                  const others = offOn(x).filter((o) => o !== emp);
+                  const others = OFF.has(st) ? offOn(x).filter((o) => o !== emp) : [];
                   const note = notes[emp]?.[String(x)];
                   const lines = [st, ...(note ? [note] : [])];
-                  return <td key={x} className={`gc ${STATUS_CLASS[st] ?? 'O'} ${others.length ? 'ov' : ''}`} {...bind(lines)}>{st === '202' ? '202' : st[0]}</td>;
+                  return <td key={x} className={`gc ${STATUS_CLASS[st] ?? 'O'} ${others.length ? 'ov' : ''}`} {...bind(lines)}>{SHORT[st] ?? st[0]}</td>;
                 })}</tr>;
               })];
               })}</tbody>

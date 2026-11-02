@@ -15,7 +15,7 @@ from .constants import (ABSENCE_TYPE_TO_STATUS, DAILY_DEPT_TO_FRIDAY_SHIFTS, DAI
                         PNIM_DEPT, PNIM_SIDES)
 from .days import is_functional_friday, is_functional_saturday, year_for_month
 from .normalize import make_initials, parse_manage_depts
-from .people import cycle_for_role, manual_statuses_for_role, staff_row
+from .people import cycle_for_role, get_dept_managers, manual_statuses_for_role, staff_row
 
 WSD_COLUMNS = ['date', 'employee', 'daily_dept', 'status', 'note', 'is_manual', 'side']
 
@@ -109,6 +109,10 @@ def incoming_transfers(ctx, dept, year_month) -> dict:
             members = set(dr[dmask]['employee'].astype(str).str.strip().tolist())
     except Exception:
         pass
+    # A dept's managers aren't in dept_rotation but work there every day: a manual edit of their own
+    # cell (e.g. taking a day off the board) is not a transfer. Streamlit's _incoming_transfers misses
+    # this and locks the manager's whole row but that one day.
+    members |= set(get_dept_managers(ctx, dept))
     for (date_str, emp), entry in ctx.wsd_index.items():
         if not entry.get('is_manual'):
             continue

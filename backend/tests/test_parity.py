@@ -44,7 +44,10 @@ def test_small_helpers(ctx, legacy):
     ns, _, _ = legacy
     for dept in DEPTS[1:]:
         assert people.get_dept_managers(ctx, dept) == ns['_get_dept_managers'](dept)
-        assert daily.incoming_transfers(ctx, dept, YM) == ns['_incoming_transfers'](dept, YM)
+        # Deliberate fix: a manager's manual edit in their own dept is not a transfer (Streamlit counts it as one).
+        mgrs = set(people.get_dept_managers(ctx, dept))
+        legacy_t = {e: r for e, r in ns['_incoming_transfers'](dept, YM).items() if e not in mgrs}
+        assert daily.incoming_transfers(ctx, dept, YM) == legacy_t
         for d in range(1, NDAYS + 1):
             ds = f"{YM}-{d:02d}"
             assert daily.get_night_duty(ctx, ds, dept) == ns['_get_night_duty'](ds, dept)
