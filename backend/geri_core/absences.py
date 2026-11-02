@@ -123,7 +123,7 @@ def _update_absence_status(ctx, req_id, new_status, responder_name) -> bool:
                 emp_email, f"בקשת היעדרות {verb}",
                 f"<div dir='rtl'><p>שלום {emp_name},</p>"
                 f"<p>בקשת ההיעדרות שלך לתאריכים {dates} <b>{verb}</b> על ידי {responder_name}.</p></div>")
-        # Super admins and the department's manager(s) hear about every decision; the responder
+        # The general managers (people.absence_notify_names) and the dept's manager(s) hear about every decision; the responder
         # (who just made it) and the requester (mailed above) are skipped.
         dept = str(row.get('dept_at_request', '')).strip() or emp_dept_for_date(ctx, emp_name, row.get('start_date', ''))
         r_resp = staff_row(ctx, responder_name)

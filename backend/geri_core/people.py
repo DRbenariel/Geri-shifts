@@ -145,12 +145,31 @@ def manager_email_for_dept(ctx, dept) -> str:
     return ""
 
 
+# Who besides the dept manager hears about every absence decision (Ben, 2026-11-02: the general
+# managers). Overridable without code through the settings sheet key below, comma-separated names.
+ABSENCE_NOTIFY_KEY = 'absence_notify_names'
+ABSENCE_NOTIFY_DEFAULT = 'שרה ברטולד, ציפי יעקב'
+
+
+def absence_notify_names(ctx) -> set:
+    raw = ABSENCE_NOTIFY_DEFAULT
+    try:
+        rows = ctx.settings[ctx.settings['key'] == ABSENCE_NOTIFY_KEY]
+        if not rows.empty:
+            raw = str(rows['value'].iloc[0])
+    except Exception:
+        pass
+    return {n.strip() for n in raw.split(',') if n.strip()}
+
+
 def absence_watchers(ctx, dept) -> list:
-    """E-mail addresses told about an absence decision: every מנהל על and every manager of `dept`."""
+    """E-mail addresses told about an absence decision: the named general managers and every manager of `dept`."""
+    named = absence_notify_names(ctx)
     out = []
     for _, sr in ctx.staff.iterrows():
         role = str(sr.get('type', '')).strip()
-        if role == 'מנהל על' or (role == 'מנהל מחלקה' and dept and dept in parse_manage_depts(sr.get('manage_depts', ''))):
+        if str(sr.get('name', '')).strip() in named or (
+                role == 'מנהל מחלקה' and dept and dept in parse_manage_depts(sr.get('manage_depts', ''))):
             email = str(sr.get('email', '')).strip()
             if email and email not in out:
                 out.append(email)

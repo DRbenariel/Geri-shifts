@@ -216,9 +216,15 @@ def test_temp_transfer_add_remove(ctx):
 
 
 # ── absences ─────────────────────────────────────────────────────────────────
-def test_absence_decision_mails_super_admins_and_dept_manager(ctx):
+def test_absence_decision_mails_general_managers_and_dept_manager(ctx):
+    from geri_core import people
     sup = ctx.staff['type'] == 'מנהל על'
     ctx.staff.loc[sup, 'email'] = 'super@example.org'
+    gm = ctx.staff[ctx.staff['type'] == 'מנהל/ת'].iloc[0]['name']
+    ctx.settings = pd.concat([ctx.settings, pd.DataFrame([{'key': people.ABSENCE_NOTIFY_KEY,
+                                                            'value': f"{ctx.staff[sup].iloc[0]['name']}, {gm}"}])])
+    ctx.staff.loc[ctx.staff['name'] == gm, 'email'] = 'gm@example.org'
+    other = ctx.staff[ctx.staff['type'] == 'רופא בכיר'].iloc[0]['name']   # has an address, not on the list
     rows = absences.submit_day_absences(ctx, INTERNS[0], 'מתמחה', YEAR, MONTH, [24], [])
     dept = rows[0]['dept_at_request']
     mgrs = [str(r['email']) for _, r in ctx.staff.iterrows()
@@ -230,6 +236,8 @@ def test_absence_decision_mails_super_admins_and_dept_manager(ctx):
     assert 'i0@example.org' in to                      # the requester
     assert set(mgrs) <= set(to)                        # the dept manager(s)
     assert 'super@example.org' not in to               # the responder is that super admin: not mailed
+    assert 'gm@example.org' in to                      # a named general manager
+    assert str(ctx.staff[ctx.staff['name'] == other].iloc[0]['email']) not in to
     ctx.mailer.sent.clear()
     absences.approve_request(ctx, rows[0]['id'], mgrs and ctx.staff[ctx.staff['email'] == mgrs[0]].iloc[0]['name'])
     to = [t for t, *_ in ctx.mailer.sent]
