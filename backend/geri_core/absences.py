@@ -9,10 +9,12 @@ import pandas as pd
 
 from .constants import ABSENCE_TYPE_TO_STATUS
 from .context import daterange, now_str
-from .daily import derive_auto_status, wsd_upsert
+from .daily import derive_auto_status, pnim_side_groups, wsd_upsert
 from .days import to_date
 from .normalize import norm_dept, parse_manage_depts
-from .people import emp_dept_for_date, employee_dept_for_month, manager_email_for_dept, staff_row
+from .constants import DAILY_DEPTS_ALL, PNIM_DEPT
+from .people import (absence_watchers, emp_dept_for_date, employee_dept_for_month, grid_employees,
+                     manager_email_for_dept, staff_row)
 
 ABSENCE_STATUSES_FOR_GANTT = {"חופש", "202", "אחר", "אחרי תורנות"}
 GANTT_ACTIVE_TYPES = ['מתמחה', 'רופא בכיר', 'מנהל מחלקה', 'מנהל/ת']
@@ -114,14 +116,25 @@ def _update_absence_status(ctx, req_id, new_status, responder_name) -> bool:
         emp_name = str(row.get('employee', '')).strip()
         r = staff_row(ctx, emp_name)
         emp_email = '' if r is None else str(r.get('email', '')).strip()
+        verb = "אושרה" if new_status == 'approved' else "נדחתה"
+        dates = f"<b>{row.get('start_date','')} – {row.get('end_date','')}</b> ({row.get('type','')})"
         if emp_email:
-            verb = "אושרה" if new_status == 'approved' else "נדחתה"
             ctx.send_email(
                 emp_email, f"בקשת היעדרות {verb}",
                 f"<div dir='rtl'><p>שלום {emp_name},</p>"
-                f"<p>בקשת ההיעדרות שלך לתאריכים "
-                f"<b>{row.get('start_date','')} – {row.get('end_date','')}</b> "
-                f"({row.get('type','')}) <b>{verb}</b> על ידי {responder_name}.</p></div>")
+                f"<p>בקשת ההיעדרות שלך לתאריכים {dates} <b>{verb}</b> על ידי {responder_name}.</p></div>")
+        # Super admins and the department's manager(s) hear about every decision; the responder
+        # (who just made it) and the requester (mailed above) are skipped.
+        dept = str(row.get('dept_at_request', '')).strip() or emp_dept_for_date(ctx, emp_name, row.get('start_date', ''))
+        r_resp = staff_row(ctx, responder_name)
+        skip = {emp_email, '' if r_resp is None else str(r_resp.get('email', '')).strip()}
+        for to in absence_watchers(ctx, dept):
+            if to not in skip:
+                ctx.send_email(
+                    to, f"בקשת היעדרות {verb}: {emp_name}",
+                    f"<div dir='rtl'><p>שלום,</p>"
+                    f"<p>בקשת ההיעדרות של <b>{emp_name}</b> ({dept or '—'}) לתאריכים {dates} "
+                    f"<b>{verb}</b> על ידי {responder_name}.</p></div>")
     except Exception:
         pass
     return True
@@ -525,6 +538,29 @@ def absence_gantt(ctx, year, month, dept_filter=None) -> dict:
             if len(es) >= 2:
                 conflicts[(dept_n, d)] = sorted(es)
     return {'by_dept': by_dept, 'conflicts': conflicts}
+
+
+def absence_roster(ctx, year, month, depts=None) -> dict:
+    """Everyone working in each dept this month, for the absence Gantt's rows (B-12).
+
+    {dept: [{'side': 'ורוד'|'כחול'|'', 'employees': [...]}]}: פנימית is split by dept_rotation.side
+    (people with no side, e.g. its managers, come last under ''); other depts are one group.
+    Day-specific transfers are left out: they belong to their home dept's roster.
+    """
+    ym = f"{year}-{month:02d}"
+    out = {}
+    for dept in (depts or DAILY_DEPTS_ALL):
+        emps = grid_employees(ctx, dept, ym)
+        if not emps:
+            continue
+        if dept == PNIM_DEPT:
+            sides, _transfers, unassigned = pnim_side_groups(ctx, ym, emps)
+            groups = [{'side': s, 'employees': [e for e in sides[s] if e in emps]} for s in ('ורוד', 'כחול')]
+            groups.append({'side': '', 'employees': unassigned})
+            out[dept] = [g for g in groups if g['employees']]
+        else:
+            out[dept] = [{'side': '', 'employees': emps}]
+    return out
 
 
 def employee_absence_history(ctx, employee) -> list:

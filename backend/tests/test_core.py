@@ -216,6 +216,26 @@ def test_temp_transfer_add_remove(ctx):
 
 
 # ── absences ─────────────────────────────────────────────────────────────────
+def test_absence_decision_mails_super_admins_and_dept_manager(ctx):
+    sup = ctx.staff['type'] == 'מנהל על'
+    ctx.staff.loc[sup, 'email'] = 'super@example.org'
+    rows = absences.submit_day_absences(ctx, INTERNS[0], 'מתמחה', YEAR, MONTH, [24], [])
+    dept = rows[0]['dept_at_request']
+    mgrs = [str(r['email']) for _, r in ctx.staff.iterrows()
+            if r['type'] == 'מנהל מחלקה' and dept in str(r['manage_depts'])]
+    assert mgrs
+    ctx.mailer.sent.clear()
+    absences.reject_request(ctx, rows[0]['id'], ctx.staff[sup].iloc[0]['name'])
+    to = [t for t, *_ in ctx.mailer.sent]
+    assert 'i0@example.org' in to                      # the requester
+    assert set(mgrs) <= set(to)                        # the dept manager(s)
+    assert 'super@example.org' not in to               # the responder is that super admin: not mailed
+    ctx.mailer.sent.clear()
+    absences.approve_request(ctx, rows[0]['id'], mgrs and ctx.staff[ctx.staff['email'] == mgrs[0]].iloc[0]['name'])
+    to = [t for t, *_ in ctx.mailer.sent]
+    assert 'super@example.org' in to and mgrs[0] not in to
+
+
 def test_employee_day_absence_submit(ctx):
     rows = absences.submit_day_absences(ctx, INTERNS[0], 'מתמחה', YEAR, MONTH, [24, 25], [26])
     assert {r['status'] for r in rows} == {'pending'} and len(rows) == 3

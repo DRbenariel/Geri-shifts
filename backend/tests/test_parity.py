@@ -131,7 +131,9 @@ def test_absence_approve_reject(ctx, legacy, verb):
     pd.testing.assert_frame_equal(ctx.absence_requests.drop(columns=drop).astype(str).reset_index(drop=True),
                                   st.session_state.absence_requests.drop(columns=drop).astype(str).reset_index(drop=True))
     pd.testing.assert_frame_equal(_wsd(ctx.work_schedule_daily), _wsd(st.session_state.work_schedule_daily))
-    assert [e[:2] for e in ctx.mailer.sent] == [e[:2] for e in io.emails]
+    # The new UI also tells super admins and the dept manager (B-13, subject ends in ': <name>'); Streamlit doesn't.
+    to_requester = [e[:2] for e in ctx.mailer.sent if ': ' not in e[1]]
+    assert to_requester == [e[:2] for e in io.emails]
     # status is now identical everywhere
     for emp in all_names(ctx):
         for d in range(1, NDAYS + 1):

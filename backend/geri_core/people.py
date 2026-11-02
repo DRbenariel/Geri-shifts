@@ -145,6 +145,18 @@ def manager_email_for_dept(ctx, dept) -> str:
     return ""
 
 
+def absence_watchers(ctx, dept) -> list:
+    """E-mail addresses told about an absence decision: every מנהל על and every manager of `dept`."""
+    out = []
+    for _, sr in ctx.staff.iterrows():
+        role = str(sr.get('type', '')).strip()
+        if role == 'מנהל על' or (role == 'מנהל מחלקה' and dept and dept in parse_manage_depts(sr.get('manage_depts', ''))):
+            email = str(sr.get('email', '')).strip()
+            if email and email not in out:
+                out.append(email)
+    return out
+
+
 def sort_employees_by_role(ctx, emp_list) -> list:
     """מנהל מחלקה → רופא בכיר → מתמחה → others (stable)."""
     try:

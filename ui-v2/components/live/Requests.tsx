@@ -49,6 +49,9 @@ function PendingList({ filter, onChange }: { filter: string; onChange: () => voi
   );
 }
 
+const SIDE_LABEL: Record<string, string> = { 'ורוד': 'צד ורוד', 'כחול': 'צד כחול', '-': 'ללא צד', '?': 'לא משובצים החודש' };
+const SIDE_CLASS: Record<string, string> = { 'ורוד': 'pink', 'כחול': 'blue' };
+
 function GanttLive({ filter, scope, manager }: { filter: string; scope: string[]; manager: boolean }) {
   const [ym, setYm] = useState(ymOf(new Date().getFullYear(), new Date().getMonth() + 1));
   const [y, m] = ym.split('-').map(Number);
@@ -63,25 +66,47 @@ function GanttLive({ filter, scope, manager }: { filter: string; scope: string[]
         // Managers get {dept: gantt}; admins one gantt across departments.
         const parts: AbsGantt[] = 'by_dept' in raw ? [raw as AbsGantt] : Object.values(raw as Record<string, AbsGantt>);
         const by: Record<string, Record<string, [number, string][]>> = Object.assign({}, ...parts.map((p) => p.by_dept));
-        const confMap = new Map(parts.flatMap((p) => p.conflicts.map((c) => [`${c.dept}|${c.day}`, c.employees] as const)));
         const notes: Record<string, Record<string, string>> = Object.assign({}, ...parts.map((p) => p.notes ?? {}));
-        const depts = Object.keys(by).filter((d) => !manager || scope.includes(d));
-        if (depts.length === 0) return <p className="muted">אין היעדרויות בחודש זה.</p>;
+        const roster: NonNullable<AbsGantt['roster']> = Object.assign({}, ...parts.map((p) => p.roster ?? {}));
+        // Absences per person, whichever dept the server filed them under (a manager's staff.dept is
+        // "הנהלה", but their row is in the dept they manage).
+        const absOf: Record<string, Record<number, string>> = {};
+        for (const emps of Object.values(by)) for (const [e, items] of Object.entries(emps)) absOf[e] = { ...absOf[e], ...Object.fromEntries(items) };
+        const onRoster = new Set(Object.values(roster).flatMap((gs) => gs.flatMap((g) => g.employees)));
+        // Everyone in the dept gets a row (פנימית by side); anyone absent but on no roster comes last.
+        const groupsOf = (d: string) => {
+          const gs = (roster[d] ?? []).map((g) => ({ ...g }));
+          const extra = Object.keys(by[d] ?? {}).filter((e) => !onRoster.has(e));
+          const sided = gs.some((g) => g.side);
+          if (extra.length) gs.push({ side: sided ? '?' : '', employees: extra });
+          // In a sided dept, people without a side get their own heading instead of trailing the blue side.
+          return sided ? gs.map((g) => (g.side ? g : { ...g, side: '-' })) : gs;
+        };
+        const depts = [...new Set([...Object.keys(roster), ...Object.keys(by)])]
+          .filter((d) => (!manager || scope.includes(d)) && groupsOf(d).length > 0);
+        if (depts.length === 0) return <p className="muted">אין עובדים או היעדרויות בחודש זה.</p>;
         return depts.map((d) => (
           <div key={d} style={{ marginBottom: 20 }}>
             <h3 className="sub">{d}</h3>
             <div className="tbl-wrap"><table className="t abs-t">
               <thead><tr><th>עובד/ת</th>{days.map((x) => <th key={x} className="num">{x}<div className="muted small">{DOW_LETTER[dowOf(y, m, x)]}</div></th>)}</tr></thead>
-              <tbody>{Object.entries(by[d]).map(([emp, items]) => {
-                const map = Object.fromEntries(items);
+              <tbody>{groupsOf(d).flatMap((g, _i, all) => {
+                // Two or more people of this dept off on the same day → red border.
+                const offOn = (x: number) => all.flatMap((gg) => gg.employees).filter((e) => absOf[e]?.[x]);
+                return [
+                g.side && <tr key={'s' + g.side} className="abs-side"><td colSpan={days.length + 1}>
+                  <span className={`side-h ${SIDE_CLASS[g.side] ?? ''}`}>{SIDE_LABEL[g.side] ?? g.side} · {g.employees.length}</span></td></tr>,
+                ...g.employees.map((emp) => {
+                const map = absOf[emp] ?? {};
                 return <tr key={emp}><td style={{ whiteSpace: 'nowrap' }}>{emp}</td>{days.map((x) => {
                   const st = map[x];
                   if (!st) return <td key={x} />;
-                  const others = (confMap.get(`${d}|${x}`) ?? []).filter((o) => o !== emp);
+                  const others = offOn(x).filter((o) => o !== emp);
                   const note = notes[emp]?.[String(x)];
                   const lines = [st, ...(note ? [note] : [])];
                   return <td key={x} className={`gc ${STATUS_CLASS[st] ?? 'O'} ${others.length ? 'ov' : ''}`} {...bind(lines)}>{st === '202' ? '202' : st[0]}</td>;
                 })}</tr>;
+              })];
               })}</tbody>
             </table></div>
           </div>
