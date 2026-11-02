@@ -90,7 +90,7 @@ function GanttLive({ filter, scope, manager }: { filter: string; scope: string[]
         if (depts.length === 0) return <p className="muted">אין עובדים או היעדרויות בחודש זה.</p>;
         return depts.map((d) => (
           <div key={d} style={{ marginBottom: 20 }}>
-            <h3 className="sub">{d}</h3>
+            <h3 className="sub">{d === '—' ? 'ללא שיבוץ מחלקתי' : d}</h3>
             <div className="tbl-wrap"><table className="t abs-t">
               <thead><tr><th>עובד/ת</th>{days.map((x) => <th key={x} className="num">{x}<div className="muted small">{DOW_LETTER[dowOf(y, m, x)]}</div></th>)}</tr></thead>
               <tbody>{groupsOf(d).flatMap((g, _i, all) => {

@@ -428,6 +428,17 @@ def register_writes(app, settings, get_ctx, current_user, require):
         admin.add_special_day(ctx, _iso(body.date), body.description.strip(), body.day_type)
         return {"ok": True}
 
+    @app.delete("/api/special-days")
+    def delete_special_by_key(date: str, description: str, _: Me = superadmin, ctx: DataContext = ctx_dep):
+        """By the day itself, not its list position: an index read before someone else's change
+        could point at a different day by the time it arrives."""
+        sd = ctx.special_days
+        hit = sd.index[(sd['date'].astype(str) == _iso(date)) & (sd['description'].astype(str).str.strip() == description.strip())]
+        if len(hit) == 0:
+            raise HTTPException(404, "היום לא נמצא")
+        admin.delete_special_day(ctx, hit[0])
+        return {"ok": True}
+
     @app.delete("/api/special-days/{idx}")
     def delete_special(idx: int, _: Me = superadmin, ctx: DataContext = ctx_dep):
         if idx not in ctx.special_days.index:

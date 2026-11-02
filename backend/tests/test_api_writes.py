@@ -404,12 +404,55 @@ def test_analytics_append_keeps_the_sheet_cache():
     from api.store import CacheClearingStore
     from geri_core import DataContext
     cleared = []
-    s = CacheClearingStore(MemoryStore(), lambda: cleared.append(1), DataContext.FRAMES)
+    s = CacheClearingStore(MemoryStore(), lambda sheet, df: cleared.append(sheet), DataContext.FRAMES)
     s.append_row('analytics_log', ['a'], header=['x'])
     s.write('WSD_x_2026-11', build()['staff'])
     assert cleared == []
     s.write('schedule', build()['schedule'])
-    assert cleared == [1]
+    assert cleared == ['schedule']
+
+
+class CountingStore(MemoryStore):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.reads = 0
+
+    def read(self, name):
+        self.reads += 1
+        return super().read(name)
+
+
+def test_reload_after_a_save_comes_from_the_cache():
+    """B-16: a save puts the written sheet into the cache; the reload right after it reads nothing."""
+    frames = build(); frames['staff']['password'] = SHA
+    st = CountingStore(frames)
+    c = TestClient(create_app(Settings(session_secret=SECRET, read_only=False, cookie_secure=False,
+                                       cache_seconds=60), store_factory=lambda: st))
+    as_(c, SUPER)
+    before = c.get('/api/special-days').json()
+    assert c.post('/api/special-days', json={'date': '2026-11-20', 'description': 'בדיקה',
+                                             'day_type': 'לידיעה בלבד'}).status_code == 200
+    reads = st.reads
+    after = c.get('/api/special-days').json()
+    assert st.reads == reads                                 # served from the cache
+    assert len(after) == len(before) + 1 and after[-1]['description'] == 'בדיקה'
+    assert after == clean(st.read('special_days'))           # and identical to what a fresh read returns
+    core_staff.use_legacy_hashes(False)
+
+
+def test_special_day_deleted_by_date_and_description(rw, store):
+    as_(rw, SUPER)
+    rw.post('/api/special-days', json={'date': '2026-11-20', 'description': 'א', 'day_type': 'לידיעה בלבד'})
+    rw.post('/api/special-days', json={'date': '2026-11-21', 'description': 'ב', 'day_type': 'לידיעה בלבד'})
+    r = rw.delete('/api/special-days', params={'date': '2026-11-20', 'description': 'א'})
+    assert r.status_code == 200, r.text
+    left = [(d['date'], d['description']) for d in rw.get('/api/special-days').json()]
+    assert ('2026-11-20', 'א') not in left and ('2026-11-21', 'ב') in left
+    assert rw.delete('/api/special-days', params={'date': '2026-11-20', 'description': 'א'}).status_code == 404
+
+
+def clean(df):
+    return df.to_dict('records')
 
 
 def test_write_sheets_open_one_screen_only(store):

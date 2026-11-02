@@ -220,6 +220,40 @@ def test_manager_editing_own_cell_is_not_a_transfer(ctx):
     assert row['transfer_days'] is None and not any(c['locked'] for c in row['cells'])
 
 
+def test_absence_without_rotation_is_not_a_transfer_and_delete_cleans_up(ctx):
+    """B-18: INTERNS[11] has no rotation this month; their legacy staff.dept must not pull them into a dept."""
+    from geri_core.constants import DAILY_DEPTS_ALL
+    emp = INTERNS[11]
+    assert not people_mod().employee_dept_for_month(ctx, emp, YM)
+    row = absences.add_preapproved_absence(ctx, emp, f"{YM}-23", f"{YM}-24", 'חופש', '', 'מנהל')
+    w = ctx.work_schedule_daily
+    mine = w[(w['employee'] == emp) & (w['date'].isin([f"{YM}-23", f"{YM}-24"]))]
+    assert len(mine) == 2 and set(mine['daily_dept']) == {''}
+    assert all(emp not in daily.incoming_transfers(ctx, d, YM) for d in DAILY_DEPTS_ALL)
+    g = absences.absence_gantt(ctx, YEAR, MONTH)
+    assert 23 in dict(g['by_dept']['—'][emp])                     # the "ללא שיבוץ מחלקתי" section
+    daily.wsd_upsert(ctx, f"{YM}-25", emp, '', 'אחר', is_manual=True)   # an unrelated manual edit
+    assert absences.delete_absence_request(ctx, row['id'])
+    w = ctx.work_schedule_daily
+    left = set(w[w['employee'] == emp]['date'])
+    assert f"{YM}-23" not in left and f"{YM}-24" not in left and f"{YM}-25" in left
+
+
+def test_day_off_rows_are_never_transfers(ctx):
+    dept = "פנימית גריאטרית"
+    outsider = next(e for e in INTERNS if people_mod().employee_dept_for_month(ctx, e, YM) not in ('', dept))
+    daily.wsd_upsert(ctx, f"{YM}-23", outsider, dept, 'חופש', is_manual=True)   # e.g. an old leftover row
+    days = lambda: daily.incoming_transfers(ctx, dept, YM).get(outsider, {'days': set()})['days']
+    assert 23 not in days()
+    daily.wsd_upsert(ctx, f"{YM}-24", outsider, dept, 'עובד', is_manual=True)   # a real transfer day
+    assert 24 in days() and 23 not in days()
+
+
+def people_mod():
+    from geri_core import people
+    return people
+
+
 def test_temp_transfer_add_remove(ctx):
     daily.add_temp_transfer(ctx, f"{YM}-03", SENIORS[0], "שיקום גריאטרי ב'")
     assert 3 in daily.incoming_transfers(ctx, "שיקום גריאטרי ב'", YM)[SENIORS[0]]['days']

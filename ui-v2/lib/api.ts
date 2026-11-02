@@ -51,7 +51,10 @@ export function useApi<T>(path: string | null) {
     finally { if (mine === seq.current) setLoading(false); }
   }, [path]);
   useEffect(() => { load(); }, [load]);
-  return { data, error, loading, reload: load };
+  // Optimistic update: show the change now, before the save and reload come back. It also retires
+  // any load already in flight, whose (older) answer would otherwise overwrite it.
+  const mutate = useCallback((fn: (d: T | null) => T | null) => { seq.current++; setLoading(false); setData(fn); }, []);
+  return { data, error, loading, reload: load, mutate };
 }
 
 // ---- Response shapes (geri_core view models) ----

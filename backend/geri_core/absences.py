@@ -140,6 +140,20 @@ def _update_absence_status(ctx, req_id, new_status, responder_name) -> bool:
     return True
 
 
+def _board_dept(ctx, emp, year_month) -> str:
+    """The dept whose day board an absence day belongs to: the Gantt rotation that month, or for a
+    מנהל מחלקה the dept they manage. Never the legacy staff.dept: an intern with no rotation that month
+    has no dept, and filing the day under staff.dept made them show up as a transfer into it."""
+    dept = employee_dept_for_month(ctx, emp, year_month)
+    if dept:
+        return dept
+    r = staff_row(ctx, emp)
+    if r is not None and str(r.get('type', '')).strip() == 'מנהל מחלקה':
+        mine = parse_manage_depts(r.get('manage_depts', ''))
+        return mine[0] if mine else ''
+    return ''
+
+
 def materialize_absence_to_wsd(ctx, employee, atype, start_date, end_date):
     """One manual WSD row per day of an approved absence (single save at the end)."""
     try:
@@ -151,7 +165,7 @@ def materialize_absence_to_wsd(ctx, employee, atype, start_date, end_date):
             sd, ed = ed, sd
         for cur in daterange(sd, ed):
             ds = cur.strftime('%Y-%m-%d')
-            wsd_upsert(ctx, ds, emp, emp_dept_for_date(ctx, emp, ds) or '', status,
+            wsd_upsert(ctx, ds, emp, _board_dept(ctx, emp, ds[:7]), status,
                        is_manual=True, note='', persist=False)
         ctx.save("work_schedule_daily", ctx.work_schedule_daily)
     except Exception:
@@ -184,12 +198,37 @@ def delete_absence_request(ctx, req_id) -> bool:
         m = df['id'].astype(str) == str(req_id)
         if not m.any():
             return False
+        row = df[m].iloc[0]
         new_df = df[~m].reset_index(drop=True)
         ctx.absence_requests = new_df
         ctx.save("absence_requests", new_df)
+        _unmaterialize(ctx, row)
         return True
     except Exception:
         return False
+
+
+def _unmaterialize(ctx, row):
+    """Undo materialize_absence_to_wsd for a deleted approved request: drop the employee's manual
+    rows in its date range that still carry its status. Other manual edits on those days stay."""
+    try:
+        if str(row.get('status', '')).strip() != 'approved':
+            return
+        emp = str(row.get('employee', '')).strip()
+        atype = str(row.get('type', '')).strip()
+        status = ABSENCE_TYPE_TO_STATUS.get(atype, atype) or "חופש"
+        sd, ed = str(row.get('start_date', ''))[:10], str(row.get('end_date', ''))[:10]
+        w = ctx.work_schedule_daily
+        if w.empty or not sd or not ed:
+            return
+        drop = ((w['employee'].astype(str).str.strip() == emp) & (w['date'].astype(str) >= min(sd, ed)) &
+                (w['date'].astype(str) <= max(sd, ed)) & (w['status'].astype(str).str.strip() == status) &
+                (w['is_manual'].astype(str).str.strip().str.lower() == 'true'))
+        if drop.any():
+            ctx.work_schedule_daily = w[~drop].reset_index(drop=True)
+            ctx.save("work_schedule_daily", ctx.work_schedule_daily)
+    except Exception:
+        pass
 
 
 def migrate_requests_on_dept_change(ctx, emp_name, old_dept, new_dept, year_month) -> int:

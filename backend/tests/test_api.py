@@ -138,12 +138,13 @@ def test_quota_error_is_not_retried_by_every_queued_request(store):
 def test_store_writes_clear_the_cache():
     from api.store import CacheClearingStore
     cleared = []
-    s = CacheClearingStore(MemoryStore(), lambda: cleared.append(1))
+    s = CacheClearingStore(MemoryStore(), lambda sheet, df: cleared.append((sheet, df is not None)))
     s.read('staff')
     assert cleared == []
     s.write('staff', build()['staff'])
     s.append_row('analytics_log', ['a'], header=['x'])
-    assert len(cleared) == 2
+    s.set_rtl('staff')                                   # formatting only: the cache is still right
+    assert cleared == [('staff', True), ('analytics_log', False)]
 
 
 def test_gsheet_read_many_pads_rows_and_skips_missing_tabs():

@@ -23,6 +23,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from geri_core import DataContext, GSheetStore
+from geri_core.normalize import clean_sheet_values
+from geri_core.store import to_sheet_values
 from geri_core import absences, admin, daily, exports, night, people, reports, staff
 from geri_core.constants import DAILY_DEPTS_ALL, default_tab_for_role, tabs_for_role
 
@@ -175,6 +177,19 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
         cache['gen'] += 1
         cache['frames'] = None
 
+    def on_write(sheet, df=None):
+        """A save replaces one whole sheet: put exactly what was written into the cache (as a read
+        would return it), so the reload right after a save doesn't re-read all ten sheets (~3 s).
+        The write itself started from a fresh read, so the rest of the cache is current too."""
+        with cache_lock:
+            if df is None or cache['frames'] is None:
+                clear_cache()
+                return
+            frames = dict(cache['frames'])
+            frames[sheet] = clean_sheet_values(to_sheet_values(df))
+            cache['gen'] += 1                     # a load that began before this write must not land
+            cache['frames'] = frames
+
     def load_frames(store, fresh=False) -> dict:
         now = time.monotonic()
         if not fresh and cache['frames'] is not None and now - cache['at'] < settings.cache_seconds:
@@ -207,7 +222,7 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
 
     def get_ctx(request: Request):
         store = store_factory()
-        store = CacheClearingStore(ReadOnlyStore(store, settings.write_sheets) if settings.read_only else store, clear_cache, DataContext.FRAMES)
+        store = CacheClearingStore(ReadOnlyStore(store, settings.write_sheets) if settings.read_only else store, on_write, DataContext.FRAMES)
         writing = request.method in ("POST", "PUT", "DELETE") and request.url.path not in UNLOCKED
         if writing:
             write_lock.acquire()

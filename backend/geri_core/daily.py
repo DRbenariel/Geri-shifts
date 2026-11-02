@@ -122,6 +122,10 @@ def incoming_transfers(ctx, dept, year_month) -> dict:
             continue
         if emp in members:
             continue
+        # A day off filed under a dept is never a move into it (an absence for someone with no
+        # rotation used to land under their legacy staff.dept and show as a transfer there).
+        if str(entry.get('status', '') or '').strip() in ('חופש', '202'):
+            continue
         try:
             day_int = int(str(date_str).split('-')[2])
         except Exception:

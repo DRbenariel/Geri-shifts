@@ -48,7 +48,8 @@ class ReadOnlyStore:
 
 
 class CacheClearingStore:
-    """Calls on_write after every successful write, so the API's shared Sheet cache is dropped."""
+    """Calls on_write(sheet, df) after every successful write to a cached sheet, so the API's shared
+    Sheet cache can take the written frame (df) or, when df is None (an appended row), be dropped."""
 
     def __init__(self, inner, on_write, cached=None):
         self._inner = inner
@@ -62,8 +63,9 @@ class CacheClearingStore:
     def _written(self, method, *a, **k):
         result = getattr(self._inner, method)(*a, **k)
         sheet = a[0] if a else k.get('name')
-        if self._cached is None or sheet in self._cached:
-            self._on_write()
+        if method != 'set_rtl' and (self._cached is None or sheet in self._cached):
+            df = (a[1] if len(a) > 1 else k.get('df')) if method == 'write' else None
+            self._on_write(sheet, df)
         return result
 
     def write(self, *a, **k):

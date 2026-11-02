@@ -91,6 +91,17 @@ function SpecialDays() {
   const { run, busy } = useAction();
   const [f, setF] = useState({ date: '', description: '', day_type: 'לידיעה בלבד' });
   const badge: Record<string, string> = { 'לידיעה בלבד': 'b-info', 'כמו שישי (ערב חג)': 'b-warn', 'כמו שבת (חג)': 'b-err' };
+  // The list changes at once; the save runs behind it, and a failure reloads the real list.
+  const add = () => {
+    const day = { ...f, description: f.description.trim() };
+    q.mutate((l) => [...(l ?? []), day]);
+    setF({ ...f, date: '', description: '' });
+    run('/special-days', 'POST', day, 'היום נוסף').then(q.reload, q.reload);
+  };
+  const remove = (s: { date: string; description: string }) => {
+    q.mutate((l) => (l ?? []).filter((x) => !(x.date === s.date && x.description === s.description)));
+    run(`/special-days?date=${s.date}&description=${encodeURIComponent(s.description)}`, 'DELETE', undefined, 'היום נמחק').then(q.reload, q.reload);
+  };
   return (
     <Bezel>
       <h2 className="sec"><CalendarPlus size={22} />ימים מיוחדים וחגים</h2>
@@ -99,12 +110,12 @@ function SpecialDays() {
         <Field label="תיאור"><input className="input" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></Field>
         <Field label="סוג יום"><select className="input" value={f.day_type} onChange={(e) => setF({ ...f, day_type: e.target.value })}><option>לידיעה בלבד</option><option>כמו שישי (ערב חג)</option><option>כמו שבת (חג)</option></select></Field>
       </div>
-      <Cta variant="teal" icon={<Plus size={16} />} disabled={busy || !f.date || !f.description.trim()} onClick={() => run('/special-days', 'POST', f, 'היום נוסף').then(q.reload).catch(() => {})}>הוסף יום</Cta>
+      <Cta variant="teal" icon={<Plus size={16} />} disabled={busy || !f.date || !f.description.trim()} onClick={add}>הוסף יום</Cta>
       <Load q={q}>{(list) => (
         <div className="tbl-wrap" style={{ marginTop: 18 }}><table className="t"><tbody>
-          {list.map((s, i) => ({ s, i })).sort((a, b) => a.s.date.localeCompare(b.s.date)).map(({ s, i }) => (
-            <tr key={i}><td className="num">{dmy(s.date)}</td><td>{s.description}</td><td><span className={`badge ${badge[s.day_type] ?? 'b-mute'}`}>{s.day_type}</span></td>
-              <td style={{ textAlign: 'left' }}><button className="iconbtn" aria-label="מחק" disabled={busy} onClick={() => { if (confirm(`למחוק את ${s.description}?`)) run(`/special-days/${i}`, 'DELETE', undefined, 'היום נמחק').then(q.reload).catch(() => {}); }}><Trash size={14} /></button></td></tr>
+          {[...list].sort((a, b) => a.date.localeCompare(b.date)).map((s) => (
+            <tr key={s.date + '|' + s.description}><td className="num">{dmy(s.date)}</td><td>{s.description}</td><td><span className={`badge ${badge[s.day_type] ?? 'b-mute'}`}>{s.day_type}</span></td>
+              <td style={{ textAlign: 'left' }}><button className="iconbtn" aria-label="מחק" onClick={() => { if (confirm(`למחוק את ${s.description}?`)) remove(s); }}><Trash size={14} /></button></td></tr>
           ))}
         </tbody></table></div>
       )}</Load>

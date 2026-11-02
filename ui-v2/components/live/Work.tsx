@@ -39,14 +39,14 @@ function GridView({ g, me, onCycle }: { g: Grid; me: string; onCycle: (r: GridRo
               return [
                 pnim && <div key={'h' + gr.k} className={`side-h ${gr.c}`}>{gr.l} · {rows.length}</div>,
                 ...rows.flatMap((r) => [
-                  <Person key={r.employee + wi} name={r.employee} role={r.transfer_days ? `${r.type} · העברה זמנית` : r.type} me={r.employee === me} />,
+                  <Person key={`p:${r.employee}`} name={r.employee} role={r.transfer_days ? `${r.type} · העברה זמנית` : r.type} me={r.employee === me} />,
                   ...wk.map((d, i) => {
-                    if (!d) return <span key={r.employee + i} />;
+                    if (!d) return <span key={`x:${r.employee}:${i}`} />;
                     const c = r.cells[d - 1];
-                    if (c.locked) return <button key={r.employee + i} className="cell locked" disabled title="מחוץ לימי ההעברה">-</button>;
+                    if (c.locked) return <button key={`c:${r.employee}:${i}`} className="cell locked" disabled title="מחוץ לימי ההעברה">-</button>;
                     const cls = c.blank_weekend ? 'E' : STATUS_CLASS[c.status ?? ''] ?? 'O';
                     return (
-                      <button key={r.employee + i} className={`cell ${cls}`} data-k={`${r.employee}|${d}`}
+                      <button key={`c:${r.employee}:${i}`} className={`cell ${cls}`} data-k={`${r.employee}|${d}`}
                         disabled={!g.editable || c.status === 'תורנות' || c.blank_weekend || i === 6}
                         onClick={(e) => onCycle(r, d, e.currentTarget.getBoundingClientRect())} title={`${r.employee} · ${d}/${g.month} · ${c.status || 'לא הוגדר'}${c.note ? ' · ' + c.note : ''}${c.manual ? ' (ידני)' : ''}`}>
                         {c.blank_weekend ? '' : c.label}{c.note && <span className="nt" />}

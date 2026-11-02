@@ -75,7 +75,7 @@ function SwapFinder({ date, dept, onDone }: { date: string; dept: string; onDone
 const FRI = ORDER.slice(2);
 
 /** Manual override for one day (Streamlit "כלי שיבוץ ידני"): pick who works each slot, or clear it. */
-function DayEditor({ date, cal, onClose, onSaved }: { date: string; cal: NightCal; onClose: () => void; onSaved: () => void }) {
+function DayEditor({ date, cal, onClose, onSaved, onPatch }: { date: string; cal: NightCal; onClose: () => void; onSaved: () => void; onPatch: (dept: string, employee: string | null) => void }) {
   const people = useApi<{ name: string; type: string }[]>('/people');
   const { run, busy } = useAction();
   const rows = cal.slots[date] ?? [];
@@ -86,8 +86,10 @@ function DayEditor({ date, cal, onClose, onSaved }: { date: string; cal: NightCa
   const blocked = new Set((cal.requests?.[date] ?? []).filter((x) => x.status === 'אילוץ').map((x) => x.employee.trim()));
   const [pick, setPick] = useState<Record<string, string>>({});
   const [finder, setFinder] = useState<string | null>(null);
-  const assign = (dept: string) => run('/night/slot', 'PUT', { date, dept, employee: pick[dept] }, `שובץ/ה: ${pick[dept]}`).then(onSaved).catch(() => {});
-  const clear = (dept: string) => run('/night/slot', 'DELETE', { date, dept }, 'השיבוץ בוטל').then(onSaved).catch(() => {});
+  // The modal closes and the calendar shows the change at once; the save (a few seconds) runs behind it.
+  // Either way the calendar is reloaded afterwards, so a refused save (e.g. a rule) shows the real slot again.
+  const assign = (dept: string) => { onPatch(dept, pick[dept]); onClose(); run('/night/slot', 'PUT', { date, dept, employee: pick[dept] }, `שובץ/ה: ${pick[dept]}`).then(onSaved, onSaved); };
+  const clear = (dept: string) => { onPatch(dept, null); onClose(); run('/night/slot', 'DELETE', { date, dept }, 'השיבוץ בוטל').then(onSaved, onSaved); };
   return (
     <Modal open onClose={onClose}>
       <h2 className="sec"><PencilSimple size={22} />שיבוץ ידני · {DOW_FULL[new Date(date).getDay()]} {dmy(date)}</h2>
@@ -155,6 +157,14 @@ function AdminNight() {
   const [askAuto, setAskAuto] = useState<null | boolean>(null);
   const [askClear, setAskClear] = useState<null | 'auto' | 'all'>(null);
   const [editDay, setEditDay] = useState<string | null>(null);
+  // Shows a manual assignment (or its removal) in the calendar before the save returns.
+  const patchSlot = (date: string, dept: string, employee: string | null) => q.mutate((c) => {
+    if (!c) return c;
+    const rows = c.slots[date] ?? [];
+    const slot = { dept, employee: employee ?? '---', is_manual: employee !== null, empty_reason: '' };
+    const next = rows.some((r) => r.dept === dept) ? rows.map((r) => (r.dept === dept ? { ...r, ...slot } : r)) : [...rows, slot];
+    return { ...c, slots: { ...c.slots, [date]: next } };
+  });
   const clear = (mode: 'auto' | 'all') => {
     setAskClear(null);
     run(`/night/${ym}/clear`, 'POST', { mode }, mode === 'auto' ? 'השיבוצים האוטומטיים נמחקו' : 'כל הלוח לחודש נמחק').then(() => q.reload()).catch(() => {});
@@ -277,7 +287,8 @@ function AdminNight() {
               </Bezel>
               <OpenMonth />
             </div>
-            {editDay && <DayEditor date={editDay} cal={cal} onClose={() => setEditDay(null)} onSaved={() => { q.reload(); setEditDay(null); }} />}
+            {editDay && <DayEditor date={editDay} cal={cal} onClose={() => setEditDay(null)} onSaved={() => { q.reload(); setEditDay(null); }}
+              onPatch={(dept, employee) => patchSlot(editDay, dept, employee)} />}
             <Modal open={askClear !== null} onClose={() => setAskClear(null)}>
               <h2 className="sec"><Trash size={22} />{askClear === 'all' ? `למחוק את כל הלוח של ${HEB_MONTHS[m - 1]}?` : `למחוק את השיבוצים האוטומטיים של ${HEB_MONTHS[m - 1]}?`}</h2>
               <ul className="confirm-list">
