@@ -137,7 +137,7 @@ Decided by Ben (2026-10-26): hospital IT sign-off is not needed; "open in Sheets
 
 ## Cutover day: the new UI takes over from Streamlit
 
-Prepared 2026-10-31, not yet run. Both steps go out together, so there is no time when both apps write.
+**Done 2026-11-02** (Streamlit `APP_MOVED = True` on `main`; API revision `geri-api-00015-sts`, `API_READ_ONLY=0`, `STREAMLIT_PARALLEL=1`, max 1 instance). Prepared 2026-10-31. Both steps go out together, so there is no time when both apps write.
 Run from the repo root in PowerShell, with `$env:CLOUDSDK_CONFIG = "D:/Projects/gcloud-config"`.
 
 1. **Close Streamlit.** In `appy.py` set `APP_MOVED = True` (top of the file). Commit on `main` and push. Streamlit Cloud redeploys and every page shows "המערכת עברה לכתובת חדשה" with the link, before login and before any Sheet access. Cherry-pick the same commit onto `ui-v2-mockup`. If the old page is still up after a few minutes, reboot the app from the Streamlit Cloud menu.
