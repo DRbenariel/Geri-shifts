@@ -133,7 +133,7 @@ function AddEmployeeLive({ onDone }: { onDone: () => void }) {
   const { run, busy } = useAction();
   const blank = { name: '', type: 'מתמחה', email: '', dept: 'שיקום', monthly_quota: 6, weekend_quota: 1, only_home: false, manage_depts: [] as string[] };
   const [f, setF] = useState(blank);
-  const add = () => run('/staff', 'POST', { ...f, name: f.name.trim(), manage_depts: f.type === 'מנהל מחלקה' ? f.manage_depts : [] },
+  const add = () => run('/staff', 'POST', { ...f, name: f.name.trim(), dept: f.type === 'תורן חוץ' ? f.dept : '', manage_depts: f.type === 'מנהל מחלקה' ? f.manage_depts : [] },
     `${f.name.trim()} נוסף/ה. סיסמה ראשונית: 1234`).then(() => { setF(blank); onDone(); }).catch(() => {});
   return (
     <Expander title="הוספת עובד/ת" icon={<UserPlus size={20} />}>
@@ -141,7 +141,8 @@ function AddEmployeeLive({ onDone }: { onDone: () => void }) {
         <Field label="שם מלא"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
         <Field label="תפקיד"><select className="input" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>{ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}</select></Field>
         <Field label="אימייל (להתראות)"><input className="input" type="email" dir="ltr" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
-        <Field label="מחלקה"><select className="input" value={f.dept} onChange={(e) => setF({ ...f, dept: e.target.value })}>{STAFF_DEPTS.map((d) => <option key={d}>{d}</option>)}</select></Field>
+        {/* Only an external night doctor's dept is entered here; everyone else's comes from the Gantt or their role. */}
+        {f.type === 'תורן חוץ' && <Field label="מחלקה (תורנויות)"><select className="input" value={f.dept} onChange={(e) => setF({ ...f, dept: e.target.value })}>{STAFF_DEPTS.map((d) => <option key={d}>{d}</option>)}</select></Field>}
         <Field label="מכסה חודשית"><input className="input" type="number" min={0} value={f.monthly_quota} onChange={(e) => setF({ ...f, monthly_quota: +e.target.value })} /></Field>
         <Field label="מכסת סופ״ש"><input className="input" type="number" min={0} value={f.weekend_quota} onChange={(e) => setF({ ...f, weekend_quota: +e.target.value })} /></Field>
       </div>
@@ -254,7 +255,7 @@ function EmployeeManager() {
 }
 
 export function LiveStaff() {
-  const q = useApi<{ columns: string[]; rows: SRow[]; only_home: string[] }>('/staff');
+  const q = useApi<{ columns: string[]; rows: SRow[]; only_home: string[]; dept_month: string; derived_dept: Record<string, string | null> }>('/staff');
   const { run, busy } = useAction();
   // Each row keeps the name it was loaded with, so a rename keeps that person's password on the server.
   const [rows, setRows] = useState<(SRow & { _original_name: string })[]>([]);
@@ -285,9 +286,9 @@ export function LiveStaff() {
           <div className="row" style={{ marginBottom: 14 }}>
             <h2 className="sec" style={{ margin: 0 }}>טבלת צוות <span className="badge b-mute">{rows.length}</span></h2>
           </div>
-          <Note kind="warn">שמירה כאן כותבת את כל טבלת הצוות. שינוי שנעשה בינתיים ישירות בגיליון או ב-Streamlit יידרס.</Note>
+          <Note kind="warn">שמירה כאן כותבת את כל טבלת הצוות. שינוי שנעשה בינתיים ישירות בגיליון יידרס.</Note>
           <div className="tbl-wrap"><table className="t">
-            <thead><tr><th aria-label="מחיקה" /><th>שם</th><th>תפקיד</th><th>מחלקה</th><th>מכסה</th><th>סופ״ש</th><th>אימייל</th><th>מחלקות בניהולו/ה</th>
+            <thead><tr><th aria-label="מחיקה" /><th>שם</th><th>תפקיד</th><th>מחלקה{q.data && <div className="muted small" style={{ fontWeight: 400 }}>לפי גאנט {HEB_MONTHS[Number(q.data.dept_month.slice(5)) - 1]}</div>}</th><th>מכסה</th><th>סופ״ש</th><th>אימייל</th><th>מחלקות בניהולו/ה</th>
               <th>מוגבל/ת למחלקת הבית</th>{has('recurring_absent_days') && <th>ימי היעדרות קבועים</th>}{has('manual_schedule_only') && <th>שיבוץ ידני בלבד</th>}</tr></thead>
             <tbody>{rows.map((r, i) => {
               const nm = String(r.name ?? '');
@@ -302,9 +303,22 @@ export function LiveStaff() {
                   <td><select className="input" style={{ minWidth: 128 }} value={String(r.type ?? '')} onChange={(e) => upd(i, { type: e.target.value })}>
                     {!ROLES.includes(String(r.type) as never) && <option value={String(r.type ?? '')}>{String(r.type ?? '')}</option>}
                     {ROLES.map((x) => <option key={x} value={x}>{roleLabel(x)}</option>)}</select></td>
-                  <td><select className="input" style={{ minWidth: 150 }} value={String(r.dept ?? '')} onChange={(e) => upd(i, { dept: e.target.value })}>
-                    {!STAFF_DEPTS.includes(String(r.dept)) && <option value={String(r.dept ?? '')}>{String(r.dept ?? '') || '-'}</option>}
-                    {STAFF_DEPTS.map((x) => <option key={x}>{x}</option>)}</select></td>
+                  <td>{(() => {
+                    // Derived (Ben, 2026-11-03): admins הנהלה, a dept manager their managed dept(s), interns and
+                    // seniors this month's Gantt. Only an external night doctor's dept is still set here.
+                    const t = String(r.type ?? '');
+                    if (t === 'מנהל/ת' || t === 'מנהל על') return <span>הנהלה</span>;
+                    if (t === 'מנהל מחלקה') return <span>{deptsOf(r.manage_depts).join(', ') || '-'}</span>;
+                    if (t === 'מתמחה' || t === 'רופא בכיר') {
+                      const g = q.data?.derived_dept[r._original_name || nm];
+                      return g ? <span>{g}</span> : <span className="muted small">ללא שיבוץ בגאנט</span>;
+                    }
+                    return (
+                      <select className="input" style={{ minWidth: 150 }} value={String(r.dept ?? '')} onChange={(e) => upd(i, { dept: e.target.value })}>
+                        {!STAFF_DEPTS.includes(String(r.dept)) && <option value={String(r.dept ?? '')}>{String(r.dept ?? '') || '-'}</option>}
+                        {STAFF_DEPTS.map((x) => <option key={x}>{x}</option>)}</select>
+                    );
+                  })()}</td>
                   <td><input className="input" type="number" min={0} value={String(r.monthly_quota ?? '')} onChange={(e) => upd(i, { monthly_quota: e.target.value })} style={{ width: 70 }} /></td>
                   <td><input className="input" type="number" min={0} value={String(r.weekend_quota ?? '')} onChange={(e) => upd(i, { weekend_quota: e.target.value })} style={{ width: 70 }} /></td>
                   <td><input className="input" dir="ltr" value={String(r.email ?? '')} onChange={(e) => upd(i, { email: e.target.value })} style={{ minWidth: 170 }} /></td>

@@ -27,7 +27,9 @@ def absence_conflicts(ctx, employee, dept, start_date, end_date, absence_df=None
     try:
         emp_n = str(employee).strip()
         dept_n = str(dept or '').strip()
-        filter_by_dept = bool(dept_n)
+        if not dept_n:
+            return out          # no dept this month (outside the depts): nobody to overlap with
+        filter_by_dept = True
         sd = to_date(start_date)
         ed = to_date(end_date)
         if ed < sd:
@@ -54,14 +56,8 @@ def absence_conflicts(ctx, employee, dept, start_date, end_date, absence_df=None
             if exclude_id is not None and str(r.get('id', '')) == str(exclude_id):
                 continue
             if filter_by_dept:
-                other_dept = emp_dept_for_date(ctx, r['_emp'], r_sd)
-                if not other_dept:
-                    raw = r.get('dept_at_request')
-                    try:
-                        other_dept = '' if pd.isna(raw) else str(raw).strip()
-                    except TypeError:
-                        other_dept = str(raw or '').strip()
-                if other_dept and str(other_dept).strip() != dept_n:
+                # The Gantt decides, not the dept saved with the request (it can be stale).
+                if emp_dept_for_date(ctx, r['_emp'], r_sd) != dept_n:
                     continue
             out.append({'employee': r['_emp'], 'start': r_sd, 'end': r_ed,
                         'type': str(r.get('type', '') or ''),
@@ -141,17 +137,8 @@ def _update_absence_status(ctx, req_id, new_status, responder_name) -> bool:
 
 
 def _board_dept(ctx, emp, year_month) -> str:
-    """The dept whose day board an absence day belongs to: the Gantt rotation that month, or for a
-    מנהל מחלקה the dept they manage. Never the legacy staff.dept: an intern with no rotation that month
-    has no dept, and filing the day under staff.dept made them show up as a transfer into it."""
-    dept = employee_dept_for_month(ctx, emp, year_month)
-    if dept:
-        return dept
-    r = staff_row(ctx, emp)
-    if r is not None and str(r.get('type', '')).strip() == 'מנהל מחלקה':
-        mine = parse_manage_depts(r.get('manage_depts', ''))
-        return mine[0] if mine else ''
-    return ''
+    """The dept whose day board an absence day belongs to (the Gantt; see emp_dept_for_date)."""
+    return emp_dept_for_date(ctx, emp, f"{year_month}-01")
 
 
 def materialize_absence_to_wsd(ctx, employee, atype, start_date, end_date):
@@ -229,6 +216,40 @@ def _unmaterialize(ctx, row):
             ctx.save("work_schedule_daily", ctx.work_schedule_daily)
     except Exception:
         pass
+
+
+def sync_requests_to_gantt(ctx, year_month) -> int:
+    """Bring one month in line with its Gantt: every pending/approved request starting that month gets
+    the Gantt dept (and that dept's manager e-mail), and every manual חופש/202 day of that month is
+    filed under it. Runs after each Gantt save, including a dept added where there was none (B-20)."""
+    ym = str(year_month)
+    changed = 0
+    ar = ctx.absence_requests.copy()
+    if not ar.empty and 'id' in ar.columns:
+        m = (ar['start_date'].astype(str).str.startswith(ym) & ar['status'].astype(str).isin(['pending', 'approved']))
+        for i in ar.index[m]:
+            dept = emp_dept_for_date(ctx, ar.at[i, 'employee'], str(ar.at[i, 'start_date']))
+            if str(ar.at[i, 'dept_at_request'] or '').strip() != dept:
+                ar.at[i, 'dept_at_request'] = dept
+                ar.at[i, 'manager_email'] = manager_email_for_dept(ctx, dept)
+                changed += 1
+        if changed:
+            ctx.absence_requests = ar
+            ctx.save("absence_requests", ar)
+    wsd = ctx.work_schedule_daily.copy()
+    if not wsd.empty and 'date' in wsd.columns:
+        wm = (wsd['date'].astype(str).str.startswith(ym) & (wsd['is_manual'].astype(str).str.lower() == 'true') &
+              wsd['status'].astype(str).isin(['חופש', '202']))
+        moved = False
+        for i in wsd.index[wm]:
+            dept = emp_dept_for_date(ctx, wsd.at[i, 'employee'], str(wsd.at[i, 'date']))
+            if str(wsd.at[i, 'daily_dept'] or '').strip() != dept:
+                wsd.at[i, 'daily_dept'] = dept
+                moved = True
+        if moved:
+            ctx.work_schedule_daily = wsd
+            ctx.save("work_schedule_daily", wsd)
+    return changed
 
 
 def migrate_requests_on_dept_change(ctx, emp_name, old_dept, new_dept, year_month) -> int:

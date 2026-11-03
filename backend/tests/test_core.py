@@ -249,6 +249,48 @@ def test_day_off_rows_are_never_transfers(ctx):
     assert 24 in days() and 23 not in days()
 
 
+def test_no_gantt_dept_means_no_overlap(ctx):
+    """B-20: INTERNS[11] has no Gantt row this month; their legacy staff.dept must not make an overlap."""
+    P = people_mod()
+    loner = INTERNS[11]
+    assert P.emp_dept_for_date(ctx, loner, f"{YM}-01") == ''
+    other = next(e for e in INTERNS if P.employee_dept_for_month(ctx, e, YM))
+    absences.add_preapproved_absence(ctx, other, f"{YM}-26", f"{YM}-26", 'חופש', '', 'מנהל')
+    row = absences.add_preapproved_absence(ctx, loner, f"{YM}-26", f"{YM}-26", 'חופש', '', 'מנהל')
+    assert row['dept_at_request'] == ''
+    assert absences.absence_conflicts(ctx, loner, '', f"{YM}-26", f"{YM}-26") == []
+    dept = P.emp_dept_for_date(ctx, other, f"{YM}-26")
+    assert all(c['employee'] != loner for c in absences.absence_conflicts(ctx, 'x', dept, f"{YM}-26", f"{YM}-26"))
+
+
+def test_gantt_save_files_the_months_requests_under_their_new_dept(ctx):
+    """B-20: a request made while the person had no dept takes the dept the Gantt later gives them."""
+    loner = INTERNS[11]
+    row = absences.add_preapproved_absence(ctx, loner, f"{YM}-27", f"{YM}-27", 'חופש', '', 'מנהל')
+    assert row['dept_at_request'] == ''
+    rows = admin.gantt_rows(ctx, YM)
+    assign = {r['name']: r['dept'] or '— לא שובץ —' for r in rows}
+    sides = {r['name']: r['side'] or 'ורוד' for r in rows}
+    assign[loner] = "שיקום גריאטרי ב'"
+    admin.save_gantt(ctx, YM, assign, sides)
+    ar = ctx.absence_requests
+    assert ar[ar['id'] == row['id']].iloc[0]['dept_at_request'] == "שיקום גריאטרי ב'"
+    w = ctx.work_schedule_daily
+    assert set(w[(w['employee'] == loner) & (w['date'] == f"{YM}-27")]['daily_dept']) == {"שיקום גריאטרי ב'"}
+
+
+def test_staff_dept_column_is_derived(ctx):
+    P = people_mod()
+    lab = lambda n: P.staff_dept_label(ctx, P.staff_row(ctx, n), YM)
+    admin_name = ctx.staff[ctx.staff['type'] == 'מנהל/ת'].iloc[0]['name']
+    mgr = ctx.staff[ctx.staff['type'] == 'מנהל מחלקה'].iloc[0]
+    assert lab(admin_name) == 'הנהלה'
+    assert lab(mgr['name']) == ', '.join(P.parse_manage_depts(mgr['manage_depts']))
+    assert lab(INTERNS[11]) == ''                                  # no Gantt row this month
+    assert lab(INTERNS[0]) == P.employee_dept_for_month(ctx, INTERNS[0], YM)
+    assert lab(EXTERNALS[0]) is None                               # external: stored dept stays editable
+
+
 def people_mod():
     from geri_core import people
     return people
@@ -392,7 +434,7 @@ def test_gantt_save_validates_and_migrates(ctx):
     assign[INTERNS[0]] = 'פנימית גריאטרית'                 # שיקום א' → פנימית: pending request migrates
     sides[INTERNS[0]] = 'כחול'
     out = admin.save_gantt(ctx, YM, assign, sides)
-    assert out['migrated'] == 1
+    assert out['migrated'] >= 1          # every request of the month now carries its Gantt dept (B-20)
     req = ctx.absence_requests[(ctx.absence_requests['employee'] == INTERNS[0]) &
                                (ctx.absence_requests['status'] == 'pending')].iloc[0]
     assert req['dept_at_request'] == 'פנימית גריאטרית'

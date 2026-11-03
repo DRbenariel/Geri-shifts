@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 
-from .absences import migrate_requests_on_dept_change
+from .absences import sync_requests_to_gantt
 from .constants import (HEB_MONTHS, KONENUT_ELIGIBLE_TYPES, MANUAL_PLANT_ONLY_MANAGERS, PNIM_DEPT,
                         PNIM_SIDES, SHEET_COLUMNS, SPECIAL_DAY_TYPES, UNASSIGNED)
 from .days import year_for_month
@@ -198,8 +198,6 @@ def save_gantt(ctx, year_month, assignments: dict, sides: dict) -> dict:
     if errors:
         raise ValueError("\n".join(errors))
     dr, existing, _ = _dr_month(ctx, year_month)
-    changes = [(e, existing[e], nd) for e, nd in assignments.items()
-               if e in existing and existing[e] and nd != UNASSIGNED and existing[e] != nd]
     other = dr[dr['year_month'] != year_month] if not dr.empty else pd.DataFrame(
         columns=['employee', 'year_month', 'daily_dept', 'side'])
     new_rows = [{'employee': e, 'year_month': year_month, 'daily_dept': d,
@@ -210,8 +208,7 @@ def save_gantt(ctx, year_month, assignments: dict, sides: dict) -> dict:
     new_dr = norm_dr(pd.concat([other, preserved, pd.DataFrame(new_rows)], ignore_index=True))
     ctx.dept_rotation = new_dr
     ctx.save("dept_rotation", new_dr)
-    migrated = sum(migrate_requests_on_dept_change(ctx, e, o, n, year_month) for e, o, n in changes)
-    return {'saved': len(new_rows), 'migrated': migrated}
+    return {'saved': len(new_rows), 'migrated': sync_requests_to_gantt(ctx, year_month)}
 
 
 def gantt_summary(ctx, year_month) -> dict:

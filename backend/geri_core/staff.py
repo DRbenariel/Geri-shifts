@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 
 import pandas as pd
 
 from .constants import DEFAULT_PASSWORD
 from .normalize import is_true
+from .people import staff_dept_label
 
 try:
     import bcrypt
@@ -106,7 +108,10 @@ def staff_view(ctx) -> dict:
     valid = [n for n in sf['name'].tolist() if str(n).strip() and n != '---']
     homes = [n for n in sf[sf['only_home_dept']]['name'].dropna().tolist() if n in valid]
     rows = sf[cols].astype(object).where(pd.notna(sf[cols]), '').to_dict('records')
-    return {'columns': cols, 'rows': rows, 'only_home': homes}
+    # The dept column is derived (Ben, 2026-11-03): {name: label} for this month; None = stored dept stays editable.
+    ym = date.today().strftime('%Y-%m')
+    derived = {str(r['name']).strip(): staff_dept_label(ctx, r, ym) for r in rows}
+    return {'columns': cols, 'rows': rows, 'only_home': homes, 'dept_month': ym, 'derived_dept': derived}
 
 
 def add_employee(ctx, name, type_, dept, monthly_quota=6, weekend_quota=1, only_home=False,

@@ -36,7 +36,17 @@ def test_dept_resolution(ctx, legacy):
     ns, _, _ = legacy
     for emp in all_names(ctx) + ['לא קיים']:
         for ym in ('2026-10', YM, '2026-12'):
-            assert people.emp_dept_for_date(ctx, emp, ym + '-01') == ns['_emp_dept_for_date'](emp, ym + '-01')
+            # Deliberate change (B-20): with no Gantt row the dept is the managed one for a מנהל מחלקה,
+            # else none; Streamlit fell back to the legacy staff.dept.
+            mine = people.employee_dept_for_month(ctx, emp, ym)
+            row = people.staff_row(ctx, emp)
+            if mine:
+                expect = ns['_emp_dept_for_date'](emp, ym + '-01')
+            elif row is not None and row['type'] == 'מנהל מחלקה':
+                expect = (people.parse_manage_depts(row['manage_depts']) or [''])[0]
+            else:
+                expect = ''
+            assert people.emp_dept_for_date(ctx, emp, ym + '-01') == expect
             assert people.emp_night_dept(ctx, emp, ym) == ns['_emp_night_dept'](emp, ym)
 
 
@@ -111,12 +121,17 @@ def test_find_swap_candidates(ctx, legacy):
 
 def test_absence_conflicts(ctx, legacy):
     ns, _, _ = legacy
+    # Deliberate change (B-20): an overlap needs both people in the same Gantt dept; no dept = no overlap.
+    # Streamlit treated "no dept" as overlapping everyone and fell back to the stale saved dept.
     for _, r in ctx.absence_requests.iterrows():
         emp = r['employee']
         dept = people.emp_dept_for_date(ctx, emp, r['start_date'])
-        for d in (dept, '', 'שיקום'):
-            assert (absences.absence_conflicts(ctx, emp, d, r['start_date'], r['end_date'], exclude_id=r['id']) ==
-                    ns['_absence_conflicts'](emp, d, r['start_date'], r['end_date'], exclude_id=r['id']))
+        assert absences.absence_conflicts(ctx, emp, '', r['start_date'], r['end_date'], exclude_id=r['id']) == []
+        got = absences.absence_conflicts(ctx, emp, dept, r['start_date'], r['end_date'], exclude_id=r['id'])
+        assert all(people.emp_dept_for_date(ctx, c['employee'], c['start']) == dept for c in got)
+        legacy_same = [c for c in ns['_absence_conflicts'](emp, dept, r['start_date'], r['end_date'], exclude_id=r['id'])
+                       if people.emp_dept_for_date(ctx, c['employee'], c['start']) == dept] if dept else []
+        assert got == legacy_same
     c = absences.absence_conflicts(ctx, 'x', "שיקום גריאטרי א'", f"{YM}-01", f"{YM}-30")
     assert absences.format_conflict_question(c) == ns['_format_absence_conflict_question'](c)
 

@@ -34,7 +34,10 @@ def get_user_email(ctx, user_name) -> str:
 
 
 def emp_dept_for_date(ctx, employee, date_str_or_obj) -> str:
-    """Gantt-canonical daily_dept for (employee, year-month of date); staff.dept fallback."""
+    """The Gantt's daily_dept for (employee, year-month of date). With no Gantt row that month: a
+    מנהל מחלקה gets the dept they manage, anyone else none (''). Never the legacy staff.dept (Ben,
+    2026-11-03: the Gantt is the only source); falling back to it put interns who sit outside the
+    depts into פנימית and raised false absence overlaps (B-20)."""
     try:
         emp_n = str(employee).strip()
         if not emp_n:
@@ -52,10 +55,11 @@ def emp_dept_for_date(ctx, employee, date_str_or_obj) -> str:
                 if dd:
                     return dd
         sf = ctx.staff
-        if not sf.empty and 'name' in sf.columns and 'dept' in sf.columns:
+        if not sf.empty and 'name' in sf.columns:
             srow = sf[sf['name'].astype(str).str.strip() == emp_n]
-            if not srow.empty:
-                return str(srow.iloc[0].get('dept', '') or '').strip()
+            if not srow.empty and str(srow.iloc[0].get('type', '')).strip() == 'מנהל מחלקה':
+                mine = parse_manage_depts(srow.iloc[0].get('manage_depts', ''))
+                return mine[0] if mine else ""
     except Exception:
         pass
     return ""
@@ -160,6 +164,20 @@ def absence_notify_names(ctx) -> set:
     except Exception:
         pass
     return {n.strip() for n in raw.split(',') if n.strip()}
+
+
+def staff_dept_label(ctx, emp_row, year_month) -> str | None:
+    """What the צוות screen shows as a person's dept (Ben, 2026-11-03): admins "הנהלה", a dept manager
+    their managed dept(s), interns and seniors this month's Gantt dept ('' = none). None = not derived:
+    external night doctors keep the dept stored in the staff sheet, which the night schedule uses."""
+    role = str(emp_row.get('type', '')).strip()
+    if role in ('מנהל/ת', 'מנהל על'):
+        return 'הנהלה'
+    if role == 'מנהל מחלקה':
+        return ', '.join(parse_manage_depts(emp_row.get('manage_depts', '')))
+    if role in ('מתמחה', 'רופא בכיר'):
+        return employee_dept_for_month(ctx, str(emp_row.get('name', '')).strip(), year_month)
+    return None
 
 
 def absence_watchers(ctx, dept) -> list:
