@@ -65,6 +65,10 @@ def test_small_helpers(ctx, legacy):
     names = all_names(ctx)
     assert people.sort_employees_by_role(ctx, names) == ns['_sort_employees_by_role'](names)
     for emp in names:
+        # Deliberate change: מנהל מחלקה can also be marked חופש / 202 / אחר (Streamlit allowed only ריק/עובד).
+        if people.staff_type(ctx, emp) == 'מנהל מחלקה':
+            assert people.manual_statuses_for_role(ctx, emp) == ["", "עובד", "חופש", "202", "אחר"]
+            continue
         assert people.cycle_for_role(ctx, emp) == ns['_cycle_for_role'](emp)
         assert people.manual_statuses_for_role(ctx, emp) == ns['_manual_statuses_for_role'](emp)
 

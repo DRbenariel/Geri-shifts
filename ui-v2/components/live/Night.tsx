@@ -261,7 +261,7 @@ function AdminNight() {
                       <div key={s.index} className="rcard">
                         <div className="main"><b>{s.requester}: {dmy(s.requester_date)} {s.requester_dept} ← {s.candidate}</b>
                           <div className="meta">{s.swap_type === 'full' ? `בתמורה: ${s.candidate_date ? dmy(s.candidate_date) : ''} ${s.candidate_dept}` : s.swap_type === 'chain' ? 'החלפה משולשת' : 'כיסוי חד-צדדי'}</div></div>
-                        <button className="btn ok" disabled={busy} onClick={() => run(`/swaps/${s.index}/approve`, 'POST', undefined, 'הבקשה אושרה').then(() => { swaps.reload(); q.reload(); }).catch(() => {})}><Check size={14} />אשר</button>
+                        <button className="btn ok" disabled={busy} onClick={() => run(`/swaps/${s.index}/approve`, 'POST', undefined, 'הבקשה אושרה').then(() => { swaps.reload(); q.reload(); }).catch(() => {})}><Check size={14} />לאשר/י</button>
                         <button className="btn no" disabled={busy} onClick={() => run(`/swaps/${s.index}/reject`, 'POST', undefined, 'הבקשה נדחתה').then(swaps.reload).catch(() => {})}><X size={14} />דחה</button>
                       </div>
                     ))}

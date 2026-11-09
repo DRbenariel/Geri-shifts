@@ -23,7 +23,7 @@ export const codeToHe = (c: Code) => (c === 'E' ? '' : STATUS[c].he);
 
 /** Manual-cycle order per role (appy.py:1718, _cycle_for_role 1787). */
 export function cycleFor(role: Role): Code[] {
-  if (role === 'מנהל מחלקה') return ['E', 'W'];
+  if (role === 'מנהל מחלקה') return ['E', 'W', 'V', 'S', 'O'];
   if (role === 'רופא בכיר') return ['W', 'V', 'A', 'O', 'E'];
   return ['W', 'V', 'S', 'A', 'O', 'E'];
 }

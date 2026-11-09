@@ -3,6 +3,7 @@ import pandas as pd
 
 from .constants import (DAILY_DEPTS_ALL, GRID_STATUS_CYCLE, GRID_STATUS_CYCLE_MANAGER,
                         GRID_STATUS_CYCLE_SENIOR, MANUAL_PLANT_ONLY_MANAGERS, MANUAL_STATUSES,
+                        MANUAL_STATUSES_MANAGER,
                         PNIM_DEPT, PNIM_SIDES, ROLE_ORDER, UNASSIGNED)
 from .normalize import norm_dept, parse_manage_depts
 
@@ -108,7 +109,7 @@ def cycle_for_role(ctx, emp) -> dict:
 def manual_statuses_for_role(ctx, emp) -> list:
     t = staff_type(ctx, emp)
     if t == 'מנהל מחלקה':
-        return ["", "עובד"]
+        return MANUAL_STATUSES_MANAGER
     if t == 'רופא בכיר':
         return ["עובד", "חופש", "אחרי תורנות", "אחר"]
     return MANUAL_STATUSES

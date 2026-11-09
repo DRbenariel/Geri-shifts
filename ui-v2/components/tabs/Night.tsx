@@ -151,7 +151,7 @@ function SwapRequests() {
                   <span>נשלח {s.created_at}</span>
                 </div>
               </div>
-              <button className="btn ok" onClick={() => act(s.id, true)}><Check size={14} />אשר</button>
+              <button className="btn ok" onClick={() => act(s.id, true)}><Check size={14} />לאשר/י</button>
               <button className="btn no" onClick={() => act(s.id, false)}><X size={14} />דחה</button>
             </div>
           ))}

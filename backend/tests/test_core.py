@@ -175,8 +175,10 @@ def test_cycle_cell_per_role(ctx):
     assert daily.cycle_cell(ctx, d, INTERNS[3], "שיקום גריאטרי א'") == '202'
     assert daily.cycle_cell(ctx, f"{YM}-02", SENIORS[3], 'פנימית גריאטרית') in ('חופש',)
     assert daily.cycle_cell(ctx, f"{YM}-02", SENIORS[3], 'פנימית גריאטרית') == 'אחרי תורנות'   # no 202 for seniors
-    assert daily.cycle_cell(ctx, f"{YM}-02", 'יעל כרמי', "שיקום גריאטרי א'") == ''          # manager toggles
-    assert daily.cycle_cell(ctx, f"{YM}-02", 'יעל כרמי', "שיקום גריאטרי א'") == 'עובד'
+    # manager (planted עובד in own dept): עובד→חופש→202→אחר→ריק→עובד
+    for want in ('חופש', '202', 'אחר', '', 'עובד'):
+        assert daily.cycle_cell(ctx, f"{YM}-02", 'יעל כרמי', "שיקום גריאטרי א'") == want
+    daily.set_cell(ctx, d, 'יעל כרמי', "שיקום גריאטרי א'", '202', '')   # popover allows 202 for managers
     with pytest.raises(ValueError):
         daily.set_cell(ctx, d, SENIORS[3], 'פנימית גריאטרית', '202', '')
     daily.set_cell(ctx, d, INTERNS[3], "שיקום גריאטרי א'", 'אחר', ' קורס ')
