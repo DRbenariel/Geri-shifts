@@ -177,7 +177,7 @@ function PerEmployee() {
         return (
           <div key={a.id} className="rcard" style={{ marginBottom: 10 }}>
             <div className="main"><b>{fmtRange(a.start_date, a.end_date)} · {a.type}</b><div className="meta">{conf.length ? `חפיפה עם ${conf.map((c) => c.employee).join(', ')}` : 'אין חפיפה'}</div></div>
-            <button className="btn ok" onClick={() => { mutate((x) => { x.absences.find((q) => q.id === a.id)!.status = 'approved'; }); toast('אושר'); }}><Check size={14} />{conf.length ? 'כן, אשר למרות החפיפה' : 'אשר'}</button>
+            <button className="btn ok" onClick={() => { mutate((x) => { x.absences.find((q) => q.id === a.id)!.status = 'approved'; }); toast('אושר'); }}><Check size={14} />{conf.length ? 'כן, לאשר/י למרות החפיפה' : 'לאשר/י'}</button>
             <button className="btn no" onClick={() => { mutate((x) => { x.absences.find((q) => q.id === a.id)!.status = 'rejected'; }); toast('נדחה', 'info'); }}><X size={14} />דחה</button>
           </div>
         );

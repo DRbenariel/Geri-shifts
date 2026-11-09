@@ -202,7 +202,7 @@ function EmployeeAbsences({ name }: { name: string }) {
             <div className="main"><b>{range(a.start_date, a.end_date)} · {a.type}</b>
               {a.notes && <div className="meta">&quot;{a.notes}&quot;</div>}
               {a.conflicts.length > 0 && <div className="meta" style={{ color: 'var(--danger)' }}><Warning size={14} weight="fill" />חפיפה עם {a.conflicts.map((c) => c.employee).join(', ')}</div>}</div>
-            <button className="btn ok" disabled={busy} onClick={() => approve(a.id)}><Check size={14} />אשר</button>
+            <button className="btn ok" disabled={busy} onClick={() => approve(a.id)}><Check size={14} />לאשר/י</button>
             <button className="btn no" disabled={busy} onClick={() => run(`/absences/${a.id}/reject`, 'POST', undefined, 'הבקשה נדחתה').then(reload).catch(() => {})}><X size={14} />דחה</button>
           </div>
         ))}</div>
@@ -219,7 +219,7 @@ function EmployeeAbsences({ name }: { name: string }) {
         <h2 className="sec"><Warning size={22} />יש חפיפה</h2>
         <p style={{ whiteSpace: 'pre-line', marginBottom: 16 }}>{ask?.question}</p>
         <div className="row">
-          <Cta onClick={() => ask && approve(ask.id, true)}>כן, אשר למרות החפיפה</Cta>
+          <Cta onClick={() => ask && approve(ask.id, true)}>כן, לאשר/י למרות החפיפה</Cta>
           <button className="btn" onClick={() => setAsk(null)}>ביטול</button>
         </div>
       </Modal>

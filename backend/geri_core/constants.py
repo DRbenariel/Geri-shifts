@@ -52,7 +52,17 @@ GRID_STATUS_CYCLE = {
     "אחר": "",
     "תורנות": "חופש",
 }
-GRID_STATUS_CYCLE_MANAGER = {"": "עובד", "עובד": ""}
+# מנהל מחלקה: blank (not planted) by default; can also be marked חופש / 202 / אחר.
+MANUAL_STATUSES_MANAGER = ["", "עובד", "חופש", "202", "אחר"]
+GRID_STATUS_CYCLE_MANAGER = {
+    "": "עובד",
+    "עובד": "חופש",
+    "חופש": "202",
+    "202": "אחר",
+    "אחר": "",
+    "תורנות": "חופש",
+    "אחרי תורנות": "חופש",
+}
 GRID_STATUS_CYCLE_SENIOR = {
     "": "עובד",
     "עובד": "חופש",
