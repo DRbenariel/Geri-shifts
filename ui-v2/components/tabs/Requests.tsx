@@ -32,9 +32,9 @@ function Pending({ filter, scope }: { filter: string; scope: string[] }) {
               {conf.length > 0 && <div className="meta" style={{ color: 'var(--danger)' }}><Warning size={14} weight="fill" />חפיפה עם {conf.map((c) => `${c.employee} (${fmtRange(c.start_date, c.end_date)})`).join(', ')}</div>}
             </div>
             {conf.length === 0
-              ? <button className="btn ok" onClick={() => decide(a, true)}><Check size={14} />לאשר/י</button>
+              ? <button className="btn ok" onClick={() => decide(a, true)}><Check size={14} />אישור</button>
               : <button className="btn ok" onClick={() => decide(a, true)} title="יש חפיפה עם היעדרות מאושרת"><Check size={14} />כן, אשר למרות החפיפה</button>}
-            <button className="btn no" onClick={() => decide(a, false)}><X size={14} />דחה</button>
+            <button className="btn no" onClick={() => decide(a, false)}><X size={14} />דחייה</button>
           </div>
         );
       })}

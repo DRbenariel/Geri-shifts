@@ -30,8 +30,8 @@ function PendingList({ filter, onChange }: { filter: string; onChange: () => voi
                   <div className="meta"><span>{a.dept_canonical || a.dept_at_request || '—'}</span>{a.notes && <span>&quot;{a.notes}&quot;</span>}</div>
                   {a.conflicts.length > 0 && <div className="meta" style={{ color: 'var(--danger)' }}><Warning size={14} weight="fill" />חפיפה עם {a.conflicts.map((c) => c.employee).join(', ')}</div>}
                 </div>
-                <button className="btn ok" disabled={busy} onClick={() => approve(a.id)}><Check size={14} />לאשר/י</button>
-                <button className="btn no" disabled={busy} onClick={() => run(`/absences/${a.id}/reject`, 'POST', undefined, 'הבקשה נדחתה').then(() => { q.reload(); onChange(); }).catch(() => {})}><X size={14} />דחה</button>
+                <button className="btn ok" disabled={busy} onClick={() => approve(a.id)}><Check size={14} />אישור</button>
+                <button className="btn no" disabled={busy} onClick={() => run(`/absences/${a.id}/reject`, 'POST', undefined, 'הבקשה נדחתה').then(() => { q.reload(); onChange(); }).catch(() => {})}><X size={14} />דחייה</button>
               </div>
             ))}
           </div>
@@ -40,7 +40,7 @@ function PendingList({ filter, onChange }: { filter: string; onChange: () => voi
           <h2 className="sec"><Warning size={22} />יש חפיפה</h2>
           <p style={{ whiteSpace: 'pre-line', marginBottom: 16 }}>{ask?.question}</p>
           <div className="row">
-            <Cta onClick={() => ask && approve(ask.id, true)}>כן, לאשר/י למרות החפיפה</Cta>
+            <Cta onClick={() => ask && approve(ask.id, true)}>כן, אישור למרות החפיפה</Cta>
             <button className="btn" onClick={() => setAsk(null)}>ביטול</button>
           </div>
         </Modal>
