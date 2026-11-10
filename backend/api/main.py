@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from geri_core import DataContext, GSheetStore
 from geri_core.normalize import clean_sheet_values
 from geri_core.store import to_sheet_values
-from geri_core import absences, admin, daily, exports, night, people, reports, staff
+from geri_core import absences, admin, daily, exports, night, people, reports, scheduling, staff
 from geri_core.constants import DAILY_DEPTS_ALL, default_tab_for_role, tabs_for_role
 
 from . import session
@@ -325,6 +325,13 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
         y, m = _ym(ym)
         # Non-admins get only their own rows and unfilled slots; blockers/wishers stay admin-only.
         return night.night_calendar(ctx, y, m, me.name, is_admin=me.role == 'מנהל על')
+
+    @app.get("/api/night/{ym}/auto-plan")
+    def night_auto_plan(ym: str, only_weekends: bool = False, _: Me = Depends(require('מנהל על')),
+                        ctx: DataContext = Depends(get_ctx)):
+        """Counts for the auto-schedule confirmation box (keep or recompute the automatic assignments)."""
+        y, m = _ym(ym)
+        return scheduling.auto_plan(ctx, y, m, only_weekends)
 
     @app.get("/api/swaps/pending")
     def swaps_pending(_: Me = Depends(require('מנהל על')), ctx: DataContext = Depends(get_ctx)):

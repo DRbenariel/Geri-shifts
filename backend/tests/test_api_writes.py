@@ -259,6 +259,25 @@ def test_temp_transfer_roundtrip(rw, store):
         assert ro.get(f"/api/work/{mine}/2026-11").json()['transfer_candidates'] is None
 
 
+def test_auto_run_keeps_existing_auto_rows_unless_asked(rw, store):
+    as_(rw, SUPER)
+    month = lambda: (lambda s: s[s['date'].astype(str).str.startswith('2026-11') & (s['employee'] != '---')])(store.read('schedule'))
+    is_auto = lambda df: df[df['is_manual'].astype(str).str.upper() != 'TRUE']
+    keys = lambda df: set(zip(df['date'].astype(str), df['dept'], df['employee']))
+    assert rw.post("/api/night/2026-11/auto", json={"only_weekends": True}).status_code == 200   # makes auto rows
+    before = month()
+    plan = rw.get("/api/night/2026-11/auto-plan").json()
+    assert plan['auto'] == len(is_auto(before)) > 0 and plan['to_fill_recompute'] >= plan['to_fill_keep']
+    assert rw.post("/api/night/2026-11/auto", json={}).status_code == 200            # default: keep
+    assert keys(is_auto(before)) <= keys(month())
+    # Recompute forgets only the automatic rows; manual ones stay.
+    from geri_core import DataContext, scheduling
+    ctx = DataContext.from_frames({n: store.read(n) for n in DataContext.FRAMES}, store=store)
+    scheduling.drop_auto_rows(ctx, 2026, 11)
+    after = scheduling.auto_plan(ctx, 2026, 11)
+    assert after['auto'] == 0 and after['manual'] == plan['manual'] and after['to_fill_keep'] == after['to_fill_recompute']
+
+
 def test_clear_month_auto_keeps_manual(rw, store):
     as_(rw, SUPER)
     assert rw.put("/api/night/slot", json={"date": "2026-11-05", "dept": "שיקום", "employee": EXTERNALS[0]}).status_code == 200

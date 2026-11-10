@@ -69,6 +69,41 @@ def _initial_state(ctx, staff_df, year, month):
     return new_schedule, work_load, weekends_worked, last_assignment, wed_counts, thu_counts, msg
 
 
+def _is_manual(v) -> bool:
+    return v is True or str(v).strip().upper() == 'TRUE'
+
+
+def _run_dates(ctx, year, month, only_weekends):
+    days = [date(year, month, d) for d in range(1, calendar.monthrange(year, month)[1] + 1)]
+    return [d for d in days if is_functional_weekend(d, ctx.special_days)] if only_weekends else days
+
+
+def auto_plan(ctx, year, month, only_weekends=False) -> dict:
+    """What a run would touch, for its confirmation box: the manual and automatic assignments on its dates, and
+    how many פנימית/שיקום slots it would try to fill if the automatic ones are kept or recomputed."""
+    dates = {str(d) for d in _run_dates(ctx, year, month, only_weekends)}
+    s = ctx.schedule
+    rows = [] if s.empty else [r for r in s.to_dict('records') if str(r['date']) in dates and r['employee'] not in ('---', '')]
+    manual = [r for r in rows if _is_manual(r.get('is_manual'))]
+    auto = [r for r in rows if not _is_manual(r.get('is_manual'))]
+    main = ("פנימית גריאטרית", "שיקום")
+    slots = len(dates) * len(main)
+    taken = lambda rs: len({(str(r['date']), r['dept']) for r in rs if r['dept'] in main})
+    return {'manual': len(manual), 'auto': len(auto),
+            'to_fill_keep': slots - taken(rows), 'to_fill_recompute': slots - taken(manual)}
+
+
+def drop_auto_rows(ctx, year, month, only_weekends=False) -> None:
+    """For a run that recomputes the automatic assignments: forget them (on a weekends-only run, only on its
+    dates) in memory. The run then saves the whole month in one write, so nothing is lost if it fails."""
+    dates = {str(d) for d in _run_dates(ctx, year, month, only_weekends)}
+    s = ctx.schedule
+    if s.empty:
+        return
+    drop = s['date'].astype(str).isin(dates) & ~s.get('is_manual', pd.Series(False, index=s.index)).map(_is_manual)
+    ctx.schedule = s[~drop].reset_index(drop=True)
+
+
 def _friday_post_pass(ctx, staff_df, new_schedule, work_load, all_dates):
     """Derive the 4 שישי בוקר slots per functional Friday (identical in both schedulers)."""
     req = ctx.requests

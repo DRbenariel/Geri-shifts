@@ -124,6 +124,7 @@ class SpecialDayBody(BaseModel):
 
 class AutoBody(BaseModel):
     only_weekends: bool = False
+    recompute_auto: bool = False     # False: existing automatic assignments stay; only empty slots are filled
 
 
 class ClearBody(BaseModel):
@@ -451,6 +452,8 @@ def register_writes(app, settings, get_ctx, current_user, require):
     def auto(ym: str, body: AutoBody, _: Me = superadmin, ctx: DataContext = ctx_dep):
         y, m = _ym(ym)
         workers = max(1, min(4, os.cpu_count() or 1))     # match the instance's vCPUs (DEPLOY_PLAN)
+        if body.recompute_auto:
+            scheduling.drop_auto_rows(ctx, y, m, body.only_weekends)
         r = scheduling.run_smart_scheduling_cp(ctx, y, m, only_weekends=body.only_weekends, num_workers=workers)
         return {"method": r.method, "filled": r.filled, "total": r.total, "fallback": r.fallback,
                 "messages": [{"level": lv, "text": t} for lv, t in r.messages],

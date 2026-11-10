@@ -5,7 +5,7 @@ import { useApi, type NightCal, type NightSlot } from '@/lib/api';
 import { DOW_FULL, HEB_MONTHS, dowOf } from '@/lib/mock';
 import { handoff } from '@/lib/logic';
 import { monthDays, useMe, useStore, ymOf } from '@/lib/store';
-import { Bezel, Cta, Kpi, Modal, Note, PageHead, PillSeg } from '../ui';
+import { Bezel, Cta, Field, Kpi, Modal, Note, PageHead, PillSeg } from '../ui';
 import { Load, MonthPick, dmy, inSettingWindow, rollingMonths, useAction } from './common';
 
 const ORDER = ['שיקום', 'פנימית גריאטרית', 'שישי בוקר - שיקום (1)', 'שישי בוקר - שיקום (2)', 'שישי בוקר - פנימית (1)', 'שישי בוקר - פנימית (2)'];
@@ -144,6 +144,38 @@ function OpenMonth() {
   );
 }
 
+/** Before an auto run: what stays, and whether the existing automatic assignments are kept (default) or recomputed. */
+function AutoConfirm({ ym, month, weekends, onRun, onCancel }: { ym: string; month: string; weekends: boolean; onRun: (recompute: boolean) => void; onCancel: () => void }) {
+  const q = useApi<{ manual: number; auto: number; to_fill_keep: number; to_fill_recompute: number }>(`/night/${ym}/auto-plan?only_weekends=${weekends}`);
+  const [recompute, setRecompute] = useState(false);
+  const where = weekends ? 'בסופ"שים ' : '';
+  return (
+    <>
+      <h2 className="sec"><MagicWand size={22} />{weekends ? 'לשבץ אוטומטית את הסופ"שים?' : `לשבץ אוטומטית את ${month}?`}</h2>
+      <Load q={q}>{(p) => (
+        <>
+          {p.auto > 0 && (
+            <Field label={`${p.auto} שיבוצים אוטומטיים קיימים ${where}`}>
+              <PillSeg value={recompute ? 'r' : 'k'} onChange={(v) => setRecompute(v === 'r')}
+                options={[{ v: 'k', l: 'להשאיר כמו שהם' }, { v: 'r', l: 'לחשב מחדש' }]} />
+            </Field>
+          )}
+          <ul className="confirm-list">
+            <li><b>{p.manual}</b> שיבוצים ידניים {where}יישארו כמו שהם.</li>
+            {p.auto > 0 && <li><b>{p.auto}</b> שיבוצים אוטומטיים {recompute ? 'יחושבו מחדש' : 'יישארו כמו שהם'}.</li>}
+            <li><b>{recompute ? p.to_fill_recompute : p.to_fill_keep}</b> משמרות פנימית/שיקום {where}ישובצו.</li>
+            <li>ההרצה לוקחת עד דקה. בשלב הזה אין עדיין ביטול אחרי הרצה מול הגיליון.</li>
+          </ul>
+        </>
+      )}</Load>
+      <div className="row">
+        <Cta variant="teal" icon={<MagicWand size={16} />} disabled={!q.data} onClick={() => onRun(recompute)}>הרץ שיבוץ</Cta>
+        <button className="btn" onClick={onCancel}>ביטול</button>
+      </div>
+    </>
+  );
+}
+
 function AdminNight() {
   const me = useMe();
   const [ym, setYm] = useState(ymOf(me.settings.active_year, me.settings.active_month));
@@ -169,10 +201,10 @@ function AdminNight() {
     setAskClear(null);
     run(`/night/${ym}/clear`, 'POST', { mode }, mode === 'auto' ? 'השיבוצים האוטומטיים נמחקו' : 'כל הלוח לחודש נמחק').then(() => q.reload()).catch(() => {});
   };
-  const auto = async (weekends: boolean) => {
+  const auto = async (weekends: boolean, recompute: boolean) => {
     setAskAuto(null);
     try {
-      const r = await run<{ filled: number; total: number; messages: { text: string }[]; suggestions: { key: string; options: Sugg[] }[] }>(`/night/${ym}/auto`, 'POST', { only_weekends: weekends });
+      const r = await run<{ filled: number; total: number; messages: { text: string }[]; suggestions: { key: string; options: Sugg[] }[] }>(`/night/${ym}/auto`, 'POST', { only_weekends: weekends, recompute_auto: recompute });
       if (r) {
         setSummary([`שובצו ${r.filled}/${r.total} משמרות`, ...r.messages.map((x) => x.text)]);
         setSuggest(Object.fromEntries(r.suggestions.map((x) => [x.key, x.options])));
@@ -303,17 +335,7 @@ function AdminNight() {
               </div>
             </Modal>
             <Modal open={askAuto !== null} onClose={() => setAskAuto(null)}>
-              <h2 className="sec"><MagicWand size={22} />{askAuto ? 'לשבץ אוטומטית את הסופ"שים?' : `לשבץ אוטומטית את ${HEB_MONTHS[m - 1]}?`}</h2>
-              <ul className="confirm-list">
-                <li><b>{Object.values(cal.slots).flat().filter((r) => r.is_manual && r.employee !== '---').length}</b> שיבוצים ידניים יישארו כמו שהם.</li>
-                <li><b>{Object.values(cal.slots).flat().filter((r) => !r.is_manual && r.employee !== '---').length}</b> שיבוצים אוטומטיים קיימים {askAuto ? 'בסופ"שים ' : ''}יחושבו מחדש.</li>
-                <li><b>{empty.length}</b> משמרות חסרות ינסו להתמלא.</li>
-                <li>ההרצה לוקחת עד דקה. בשלב הזה אין עדיין ביטול אחרי הרצה מול הגיליון.</li>
-              </ul>
-              <div className="row">
-                <Cta variant="teal" icon={<MagicWand size={16} />} onClick={() => auto(!!askAuto)}>הרץ שיבוץ</Cta>
-                <button className="btn" onClick={() => setAskAuto(null)}>ביטול</button>
-              </div>
+              {askAuto !== null && <AutoConfirm ym={ym} month={HEB_MONTHS[m - 1]} weekends={askAuto} onRun={(rc) => auto(askAuto, rc)} onCancel={() => setAskAuto(null)} />}
             </Modal>
           </div>
         );
