@@ -105,7 +105,8 @@ function DayEditor({ date, cal, onClose, onSaved, onPatch }: { date: string; cal
                   <div className="meta">{has ? <>כרגע: {c!.employee.trim()}{c!.is_manual ? ' (ידני)' : ''}</> : 'לא משובץ'}</div></div>
                 <select className="input" style={{ flex: '1 1 160px' }} value={pick[dept] ?? ''} onChange={(e) => setPick({ ...pick, [dept]: e.target.value })} aria-label={`עובד/ת ל${dept}`}>
                   <option value="">בחר/י עובד/ת</option>
-                  {['מתמחה', 'תורן חוץ'].map((t) => (
+                  {/* A senior doctor can also be put on a night shift by hand (their day-schedule work doesn't affect it). */}
+                  {['מתמחה', 'תורן חוץ', 'רופא בכיר'].map((t) => (
                     <optgroup key={t} label={t}>{list.filter((p) => p.type === t).map((p) => (
                       <option key={p.name} value={p.name} disabled={blocked.has(p.name)}>{p.name}{blocked.has(p.name) ? ' (אילוץ)' : ''}</option>))}</optgroup>
                   ))}
