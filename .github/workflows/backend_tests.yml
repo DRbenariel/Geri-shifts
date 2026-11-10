@@ -1,0 +1,31 @@
+name: Backend core tests
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'appy.py'
+      - '.github/workflows/backend_tests.yml'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      # Parity tests run the original appy.py functions next to geri_core, so a
+      # change to appy.py that the port doesn't mirror shows up here.
+      - name: Run tests
+        working-directory: backend
+        run: python -m pytest tests -q
