@@ -106,7 +106,7 @@ export default function AppShell() {
             <t.I size={22} weight={t.k === route ? 'fill' : 'light'} />{t.he}
           </a>
         ))}
-        <button className="out" onClick={out}><SignOut size={16} /> התנתק</button>
+        <button className="out" onClick={out}><SignOut size={16} /> התנתק/י</button>
       </aside>
       <main className="page" key={route + me.name}>
         <div className="statusbar">
@@ -119,7 +119,7 @@ export default function AppShell() {
               הגשות היעדרות ל{HEB_MONTHS[s.daily_active_month - 1]}: <b>{s.daily_requests_open ? 'פתוחות' : 'סגורות'}</b>
             </span>
           )}
-          <button className="btn mob-only out-m" onClick={out}><SignOut size={14} />התנתק</button>
+          <button className="btn mob-only out-m" onClick={out}><SignOut size={14} />התנתק/י</button>
         </div>
         {me.readOnly && <div className="ro-banner">{openScreens(me.writeSheets).length
           ? <>פתוח כאן לעריכה: <b>{openScreens(me.writeSheets).join(', ')}</b>. כל השאר לצפייה בלבד, ושינויים בו נעשים עדיין באפליקציה הקיימת.</>

@@ -14,7 +14,7 @@ export function Failed({ error, retry }: { error: ApiError; retry: () => void })
   return (
     <Note kind="err">
       {error.message}{' '}
-      <button className="btn" style={{ marginInlineStart: 8 }} onClick={retry}><ArrowClockwise size={14} />נסה שוב</button>
+      <button className="btn" style={{ marginInlineStart: 8 }} onClick={retry}><ArrowClockwise size={14} />ניסיון חוזר</button>
     </Note>
   );
 }

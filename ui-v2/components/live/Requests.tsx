@@ -132,7 +132,7 @@ function AddAbsenceLive({ onDone }: { onDone: () => void }) {
     catch (e) { if ((e as ApiError).status === 409) setAsk((e as ApiError).message); }
   };
   return (
-    <Expander title="הוסף היעדרות לעובד/ת" icon={<Plus size={20} />}>
+    <Expander title="הוספת היעדרות לעובד/ת" icon={<Plus size={20} />}>
       <Load q={people}>{(list) => (
         <>
           <div className="cols3">
@@ -144,7 +144,7 @@ function AddAbsenceLive({ onDone }: { onDone: () => void }) {
             <Field label="הערה"><input className="input" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></Field>
           </div>
           {ask && <Note kind="warn"><div style={{ whiteSpace: 'pre-line' }}>{ask}</div></Note>}
-          <Cta variant="teal" icon={<Check size={16} />} disabled={busy || !f.employee || !f.start || !f.end} onClick={() => send(!!ask)}>{ask ? 'כן, הוסף למרות החפיפה' : 'הוסף היעדרות מאושרת'}</Cta>
+          <Cta variant="teal" icon={<Check size={16} />} disabled={busy || !f.employee || !f.start || !f.end} onClick={() => send(!!ask)}>{ask ? 'כן, הוספה למרות החפיפה' : 'הוספת היעדרות מאושרת'}</Cta>
         </>
       )}</Load>
     </Expander>
@@ -176,7 +176,7 @@ function ApprovedLive({ onChange }: { onChange: () => void }) {
                 <td className="small">{a.dept}</td><td style={{ whiteSpace: 'nowrap' }}>{a.employee}</td><td className="num">{range(a.start_date, a.end_date)}</td>
                 <td><span className={`badge ${TYPE_BADGE[a.type] ?? 'b-mute'}`}>{a.type}</span></td>
                 <td className="small">{a.approved_by}</td><td className="muted small">{a.notes}</td>
-                <td><button className="iconbtn del" aria-label={`מחק את ההיעדרות של ${a.employee}`} title="מחק בקשה מאושרת" disabled={busy} onClick={() => setDel(a)}><Trash size={16} /></button></td>
+                <td><button className="iconbtn del" aria-label={`מחיקת ההיעדרות של ${a.employee}`} title="מחיקת בקשה מאושרת" disabled={busy} onClick={() => setDel(a)}><Trash size={16} /></button></td>
               </tr>
             ))}</tbody>
           </table></div>
@@ -188,7 +188,7 @@ function ApprovedLive({ onChange }: { onChange: () => void }) {
           <p style={{ marginBottom: 12 }}><b>{del.employee}</b> · {del.dept} · {range(del.start_date, del.end_date)} · {del.type}</p>
           <Note kind="warn">המחיקה אינה הפיכה. הימים יחזרו להיות ימי עבודה בסידור.</Note>
           <div className="row" style={{ marginTop: 16 }}>
-            <Cta variant="danger" icon={<Trash size={16} />} disabled={busy} onClick={() => remove(del)}>מחק בקשה</Cta>
+            <Cta variant="danger" icon={<Trash size={16} />} disabled={busy} onClick={() => remove(del)}>מחיקת בקשה</Cta>
             <button className="btn" onClick={() => setDel(null)}>ביטול</button>
           </div>
         </>}

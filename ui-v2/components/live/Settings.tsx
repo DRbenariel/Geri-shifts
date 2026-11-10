@@ -19,7 +19,7 @@ function Password() {
         <Field label="סיסמה נוכחית"><input className="input" type="password" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} autoComplete="current-password" /></Field>
         <Field label="סיסמה חדשה"><input className="input" type="password" value={f.new} onChange={(e) => setF({ ...f, new: e.target.value })} autoComplete="new-password" /></Field>
         <Field label="אימות סיסמה חדשה"><input className="input" type="password" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} autoComplete="new-password" /></Field>
-        <Cta type="submit" icon={<Key size={16} />} disabled={busy}>עדכן סיסמה</Cta>
+        <Cta type="submit" icon={<Key size={16} />} disabled={busy}>עדכון סיסמה</Cta>
       </form>
     </Bezel>
   );

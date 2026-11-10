@@ -93,7 +93,7 @@ function DeptGridLive({ dept, ym, me }: { dept: string; ym: string; me: string }
     const req = status === null ? run('/work/cell', 'DELETE', body(r, d)) : run('/work/cell', 'PUT', { ...body(r, d), status, note: note ?? prev.note });
     req.then(() => {
       q.reload();
-      toast(`${first(r.employee)} · ${d}/${q.data?.month ?? ''}: ${prev.status || 'לא הוגדר'} ← ${status === null ? 'חישוב אוטומטי' : status || 'לא הוגדר'}`, 'info', { label: 'בטל', fn: undoFor(r, d) });
+      toast(`${first(r.employee)} · ${d}/${q.data?.month ?? ''}: ${prev.status || 'לא הוגדר'} ← ${status === null ? 'חישוב אוטומטי' : status || 'לא הוגדר'}`, 'info', { label: 'ביטול', fn: undoFor(r, d) });
     }).catch(() => {});
   };
   return (
@@ -150,7 +150,7 @@ function TransferForm({ g, candidates, onDone }: { g: Grid; candidates: string[]
         {pnim && <Field label="צד"><select className="input" value={f.side} onChange={(e) => setF({ ...f, side: e.target.value })}>
           <option value="ורוד">צד ורוד</option><option value="כחול">צד כחול</option></select></Field>}
       </div>
-      <Cta variant="teal" icon={<Plus size={16} />} disabled={busy || !f.employee || f.date < first || f.date > last} onClick={add}>הוסף</Cta>
+      <Cta variant="teal" icon={<Plus size={16} />} disabled={busy || !f.employee || f.date < first || f.date > last} onClick={add}>הוספה</Cta>
       {list.length > 0 && (
         <>
           <h3 className="sub" style={{ marginTop: 18 }}>העברות זמניות בחודש זה</h3>
@@ -159,7 +159,7 @@ function TransferForm({ g, candidates, onDone }: { g: Grid; candidates: string[]
             return (
               <div key={t.emp + t.d} className="rcard">
                 <div className="main"><b>{t.emp}</b><div className="meta">{dmy(ds)}{pnim && t.side ? ` · צד ${t.side}` : ''}</div></div>
-                <button className="btn no" disabled={busy} onClick={() => run('/work/transfer', 'DELETE', body(t.emp, ds), 'ההעברה הוסרה').then(onDone).catch(() => {})}><X size={14} />הסר</button>
+                <button className="btn no" disabled={busy} onClick={() => run('/work/transfer', 'DELETE', body(t.emp, ds), 'ההעברה הוסרה').then(onDone).catch(() => {})}><X size={14} />הסרה</button>
               </div>
             );
           })}</div>

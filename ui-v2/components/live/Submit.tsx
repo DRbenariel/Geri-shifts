@@ -37,7 +37,7 @@ function NightLive() {
         <>
           <ConstraintCalendar cons={cons} onToggle={toggle} special={special} rules={intern} y={y} m={m} />
           {errors.length > 0 && <Note kind="err">{errors.map((e) => <div key={e}>{e}</div>)}</Note>}
-          <SaveBar changes={nChanged} label="שמור אילוצים ובקשות" busy={busy} disabled={errors.length > 0}
+          <SaveBar changes={nChanged} label="שמירת אילוצים ובקשות" busy={busy} disabled={errors.length > 0}
             onSave={() => run(`/constraints/${ym}`, 'PUT', { blocked: listDays(cons, 'B'), wishes: listDays(cons, 'R') }, 'האילוצים נשמרו')
               .then(() => { track('constraint_submit', String(listDays(cons, 'B').length), String(listDays(cons, 'R').length)); q.reload(); }).catch(() => {})} />
         </>
@@ -100,7 +100,7 @@ function DailyLive() {
                 })}
               </div>
               <p className="muted small" style={{ margin: '10px 0' }}>לחיצה על יום מסמנת {mode === 'V' ? 'חופש' : '202'}, ולחיצה נוספת מבטלת.</p>
-              <SaveBar changes={nDirty} label="שמור בקשות היעדרות" onSave={save} disabled={!open} busy={busy} />
+              <SaveBar changes={nDirty} label="שמירת בקשות היעדרות" onSave={save} disabled={!open} busy={busy} />
             </>
           );
         }}</Load>
@@ -114,7 +114,7 @@ function DailyLive() {
           <Field label="הערה"><input className="input" value={fut.note} onChange={(e) => setFut({ ...fut, note: e.target.value })} /></Field>
         </div>
         <Cta variant="teal" icon={<CalendarPlus size={16} />} disabled={busy || !fut.start || !fut.end || fut.end < fut.start}
-          onClick={() => run<{ no_dept_warning?: boolean }>('/absences/future', 'POST', fut, 'בקשת החופש העתידי נשלחה').then((r) => { if (r?.no_dept_warning) toast('לא נמצא שיבוץ מחלקה לחודש הזה בגאנט, ולכן הבקשה לא נשלחה במייל למנהל/ת מחלקה.', 'warn'); setFut({ start: '', end: '', type: 'חופש עתידי', note: '' }); q.reload(); }).catch(() => {})}>שלח בקשה</Cta>
+          onClick={() => run<{ no_dept_warning?: boolean }>('/absences/future', 'POST', fut, 'בקשת החופש העתידי נשלחה').then((r) => { if (r?.no_dept_warning) toast('לא נמצא שיבוץ מחלקה לחודש הזה בגאנט, ולכן הבקשה לא נשלחה במייל למנהל/ת מחלקה.', 'warn'); setFut({ start: '', end: '', type: 'חופש עתידי', note: '' }); q.reload(); }).catch(() => {})}>שליחת בקשה</Cta>
       </Expander>
       <Bezel>
         <h2 className="sec"><ClockCounterClockwise size={22} />היסטוריית בקשות</h2>

@@ -406,7 +406,7 @@ def submit_future_absence(ctx, user_name, start, end, atype, note) -> dict:
         ctx.send_email(
             mgr_email, f"בקשת חופש עתידי: {user_name}",
             f"<div dir='rtl'><p>שלום,</p>"
-            f"<p>עובד <b>{user_name}</b> ({fut_dept or '—'}) הגיש בקשת חופש עתידי:</p>"
+            f"<p>התקבלה בקשת חופש עתידי מ-<b>{user_name}</b> ({fut_dept or '—'}):</p>"
             f"<ul><li>סוג: {atype}</li>"
             f"<li>תאריכים: {row['start_date']} – {row['end_date']}</li>"
             f"<li>הערה: {note or '—'}</li></ul>"

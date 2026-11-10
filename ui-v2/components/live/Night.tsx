@@ -358,7 +358,7 @@ function PersonalNight() {
                     <div key={d + r.dept} className="rcard">
                       <span className={`slot ${kind(r.dept)}`}>{r.dept.startsWith('שישי') ? <Sun size={13} /> : <Moon size={13} />}</span>
                       <div className="main"><b>{DOW_FULL[new Date(d).getDay()]} {dmy(d)}</b><div className="meta">{r.dept}</div></div>
-                      {d >= today && <button className="btn" onClick={() => openSwap(d, r)}><ArrowsClockwise size={14} />חפש החלפה</button>}
+                      {d >= today && <button className="btn" onClick={() => openSwap(d, r)}><ArrowsClockwise size={14} />חיפוש החלפה</button>}
                     </div>
                   ))}
                 </div>
@@ -372,7 +372,7 @@ function PersonalNight() {
                       {sp && <span className="sp">{sp.description}</span>}
                       {rows.map((r) => r.employee === '---'
                         ? <span key={r.dept} className="slot empty"><Question size={11} />{short(r.dept)} חסר</span>
-                        : <button key={r.dept} className={`slot mine ${kind(r.dept)}`} onClick={() => openSwap(date, r)} title="חפש החלפה">{short(r.dept)}</button>)}
+                        : <button key={r.dept} className={`slot mine ${kind(r.dept)}`} onClick={() => openSwap(date, r)} title="חיפוש החלפה">{short(r.dept)}</button>)}
                     </div>
                   );
                 }} />
