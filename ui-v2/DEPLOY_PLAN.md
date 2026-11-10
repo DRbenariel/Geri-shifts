@@ -129,7 +129,7 @@ Steps, in order (nothing written to the Sheet; `API_READ_ONLY=1` throughout):
    - The first revision took 14–21 s per request: it re-authenticated and read the 10 sheets one by one (~20 Sheets calls) even for a 401. Fixed in `d6ac5cf`: cookie checked before any read, one shared store, one `values.batchGet` (output verified identical on all 10 live sheets). Now a no-session request takes ~0.13 s, a Sheet load ~1–2 s.
    - Every request still loads all sheets on the same service account as Streamlit (60 reads/min per user). Add a short cache, cleared on writes, before the pilot (step 8).
 6. Point the Worker at it: `npx wrangler secret put API_ORIGIN` (the run.app URL), redeploy. The site switches to live mode by itself.
-   - **Done 2026-10-26:** `API_ORIGIN` is a plain var in `wrangler.jsonc` (not a secret, and a dashboard var would be dropped by the next Workers Builds deploy). Pushing `ui-v2-mockup` deploys it.
+   - **Done 2026-10-26:** `API_ORIGIN` is a plain var in `wrangler.jsonc` (not a secret, and a dashboard var would be dropped by the next Workers Builds deploy). Pushing `main` deploys it (`ui-v2-mockup` until 2026-11-10).
 7. Ben logs in with his normal name and password and reviews every tab on real data (read-only). Watch: response time from Israel, Sheets read quota (each request loads all sheets: add a short cache if slow), cost after a few days.
 8. Only after Ben approves: turn writes on screen by screen (`API_READ_ONLY=0`), Streamlit stays primary until the pilot ends (Rollout steps 2–5).
 
@@ -166,6 +166,7 @@ then `APP_MOVED = False` in `appy.py`, push `main`. This returns to today's stat
 
 Redeploys with step 2's command:
 - 2026-11-10: `geri-api-00018-nfc`, manager statuses חופש/202/אחר, PR #5.
+- 2026-11-10: `geri-api-00019-9w6`, auto schedule keeps or recomputes existing automatic assignments; neutral future-leave email.
 
 **After a stable week (no rollback any more):** redeploy step 2 with `STREAMLIT_PARALLEL=0`. Each login then upgrades that user's password to bcrypt, which Streamlit cannot read, so from here a rollback needs a password reset (`reset_passwords.py`) for everyone who has logged in since.
 
@@ -179,7 +180,7 @@ Redeploys with step 2's command:
    - Build command: `npm run build`
    - Deploy command: `npx wrangler deploy` (reads `ui-v2/wrangler.jsonc`)
    - Path (root directory): `ui-v2`
-   - Branch: `ui-v2-mockup`. `main` has no `ui-v2/` folder yet, so a build from it fails. If setup offers no branch picker, change it afterwards in Settings → Build → Branch control.
+   - Branch: `main` since 2026-11-10 (PR #6 merged `ui-v2-mockup` into it). Before that it was `ui-v2-mockup`, while `main` had no `ui-v2/` folder. Changed in Settings → Build → Branch control.
    - Build watch paths (Settings → Build, after the first build): include `ui-v2/*`, so commits to `appy.py` don't trigger builds.
 4. The `*.workers.dev` link is **public by default**. The mockup holds only fictional data, but to restrict it, put **Cloudflare Access** in front (Zero Trust free plan, up to 50 users, email one-time PIN). ~~Required before any real data goes through it.~~ **Ben decided (2026-10-26) to skip Access:** anyone with the link may reach the login screen, as with Streamlit today; the API's login, role checks and read-only mode protect the data.
 

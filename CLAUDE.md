@@ -245,6 +245,7 @@ if st.session_state.pop('show_xyz_success', False):
 
 ## Git / GitHub
 - Remote: `https://github.com/DRbenariel/Geri-shifts.git` (branch: `main`)
+- Since 2026-11-10 everything lives on `main`: `appy.py` (Streamlit, closed), `ui-v2/` and `backend/`. Pushing `main` deploys `ui-v2/` through Cloudflare Workers Builds; the API on Cloud Run is deployed by hand (`ui-v2/DEPLOY_PLAN.md`, "Cutover day", step 2). The old `ui-v2-mockup` branch is retired.
 - GitHub Actions: `.github/workflows/daily_report.yml` — runs `daily_report.py` daily at 10:00 IL via `GSHEETS_CREDENTIALS` secret (service account JSON stored as repo secret).
 
 ## Do not touch
