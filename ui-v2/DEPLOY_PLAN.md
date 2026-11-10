@@ -164,6 +164,9 @@ E-mail (B-9, set up 2026-11-02): the API sends from Ben's Gmail (`SMTP_USER` / `
 ```
 then `APP_MOVED = False` in `appy.py`, push `main`. This returns to today's state: night constraints in the new UI (Streamlit keeps `CONSTRAINTS_MOVED = True`), everything else in Streamlit.
 
+Redeploys with step 2's command:
+- 2026-11-10: `geri-api-00018-nfc`, manager statuses חופש/202/אחר, PR #5.
+
 **After a stable week (no rollback any more):** redeploy step 2 with `STREAMLIT_PARALLEL=0`. Each login then upgrades that user's password to bcrypt, which Streamlit cannot read, so from here a rollback needs a password reset (`reset_passwords.py`) for everyone who has logged in since.
 
 ## What Ben needs to do
