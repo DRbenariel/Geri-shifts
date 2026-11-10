@@ -77,6 +77,10 @@ const FRI = ORDER.slice(2);
 /** Manual override for one day (Streamlit "כלי שיבוץ ידני"): pick who works each slot, or clear it. */
 function DayEditor({ date, cal, onClose, onSaved, onPatch }: { date: string; cal: NightCal; onClose: () => void; onSaved: () => void; onPatch: (dept: string, employee: string | null) => void }) {
   const people = useApi<{ name: string; type: string }[]>('/people');
+  const staffQ = useApi<{ rows: Record<string, unknown>[] }>('/staff');
+  const nightSeniors = new Set((staffQ.data?.rows ?? [])
+    .filter((r) => String(r.type ?? '').trim() === 'רופא בכיר' && Number(r.monthly_quota) > 0)
+    .map((r) => String(r.name ?? '').trim()));
   const { run, busy } = useAction();
   const rows = cal.slots[date] ?? [];
   const cur = (dept: string) => rows.find((r) => r.dept === dept);
@@ -105,9 +109,10 @@ function DayEditor({ date, cal, onClose, onSaved, onPatch }: { date: string; cal
                   <div className="meta">{has ? <>כרגע: {c!.employee.trim()}{c!.is_manual ? ' (ידני)' : ''}</> : 'לא משובץ'}</div></div>
                 <select className="input" style={{ flex: '1 1 160px' }} value={pick[dept] ?? ''} onChange={(e) => setPick({ ...pick, [dept]: e.target.value })} aria-label={`עובד/ת ל${dept}`}>
                   <option value="">בחר/י עובד/ת</option>
-                  {/* A senior doctor can also be put on a night shift by hand (their day-schedule work doesn't affect it). */}
+                  {/* A senior doctor with a night quota (staff sheet) can also be put on a night shift by hand;
+                      their day-schedule work doesn't affect it. */}
                   {['מתמחה', 'תורן חוץ', 'רופא בכיר'].map((t) => (
-                    <optgroup key={t} label={t}>{list.filter((p) => p.type === t).map((p) => (
+                    <optgroup key={t} label={t}>{list.filter((p) => p.type === t && (t !== 'רופא בכיר' || nightSeniors.has(p.name))).map((p) => (
                       <option key={p.name} value={p.name} disabled={blocked.has(p.name)}>{p.name}{blocked.has(p.name) ? ' (אילוץ)' : ''}</option>))}</optgroup>
                   ))}
                 </select>
