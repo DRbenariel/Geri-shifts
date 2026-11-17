@@ -2,7 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { DB, initialDB } from './logic';
 import type { Role } from './mock';
-import { api, detectLive, type MeResp, type Settings } from './api';
+import { api, detectBackend, type MeResp, type Settings } from './api';
 import { track } from './analytics';
 import { homeTab, tabsForRole, type TabKey } from './roles';
 import { daysIn } from './mock';
@@ -25,6 +25,9 @@ interface Store {
   toasts: Toast[];
   /** null while checking for a backend; true = real data via /api, false = demo data. */
   live: boolean | null;
+  /** The backend is configured but did not answer: show an error, never the demo. */
+  down: boolean;
+  retry: () => void;
   me: Me | null;
   login: (name: string, password?: string) => Promise<string | null>;
   logout: () => void;
@@ -44,15 +47,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [db, setDb] = useState<DB>(initialDB);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [live, setLive] = useState<boolean | null>(null);
+  const [down, setDown] = useState(false);
   const [liveMe, setLiveMe] = useState<Me | null>(null);
   const [demoName, setDemoName] = useState<string | null>(null);
 
-  useEffect(() => {
-    detectLive().then(async (ok) => {
-      setLive(ok);
+  const connect = useCallback(() => {
+    setDown(false); setLive(null);
+    detectBackend().then(async (b) => {
+      if (b === 'down') { setDown(true); return; }
+      const ok = b === 'live';
       if (ok) { try { setLiveMe(fromApi(await api<MeResp>('/me'))); } catch { /* not logged in */ } }
+      setLive(ok);
     });
   }, []);
+  useEffect(() => { connect(); }, [connect]);
 
   const mutate = useCallback((fn: (d: DB) => void) => {
     setDb((prev) => { const next = structuredClone(prev); fn(next); return next; });
@@ -99,7 +107,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       settings: { ...st, active_year: yearOf(st.active_month), daily_active_year: yearOf(st.daily_active_month) },
     } : null;
   }
-  return <Ctx.Provider value={{ db, mutate, toast, dismiss, toasts, live, me, login, logout, refreshMe }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ db, mutate, toast, dismiss, toasts, live, down, retry: connect, me, login, logout, refreshMe }}>{children}</Ctx.Provider>;
 }
 export function useStore() {
   const s = useContext(Ctx);

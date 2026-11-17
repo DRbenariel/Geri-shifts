@@ -49,7 +49,7 @@ const SHEET_SCREENS: Record<string, string> = {
 const openScreens = (sheets: string[]) => sheets.map((s) => SHEET_SCREENS[s]).filter(Boolean);
 
 export default function AppShell() {
-  const { toasts, dismiss, me, live, logout } = useStore();
+  const { toasts, dismiss, me, live, down, retry, logout } = useStore();
   const [hash, setHash] = useState('');
   const navRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -81,6 +81,13 @@ export default function AppShell() {
           {t.action && <button className="toast-act" onClick={() => { t.action!.fn(); dismiss(t.id); }}>{t.action.label}</button>}
         </div>
       ))}
+    </div>
+  );
+  if (down) return (
+    <div className="boot boot-down" role="alert">
+      <h1>המערכת אינה זמינה כרגע</h1>
+      <p className="muted">השרת לא ענה. נסה/י שוב בעוד מספר שניות.</p>
+      <button type="button" className="btn" onClick={retry}>ניסיון חוזר</button>
     </div>
   );
   if (live === null) return <div className="boot" aria-busy="true" />;
