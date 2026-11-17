@@ -7,7 +7,7 @@ import { useMe, useStore, ymOf } from '@/lib/store';
 import { Bezel, Cta, Expander, Field, Kpi, Modal, Note, PageHead, Person, PillSeg, SaveBar, useTip } from '../ui';
 import { ConstraintCalendar } from '../tabs/Staff';
 import { HBars, VBars } from '../tabs/Reports';
-import { Load, MonthPick, dmy, inSettingWindow, range, useAction, useDownload } from './common';
+import { isExpired, Load, MonthPick, dmy, inSettingWindow, range, useAction, useDownload } from './common';
 
 // ── גאנט חודשי ───────────────────────────────────────────────────────────────
 interface GRow { name: string; type: string; options: string[]; dept: string | null; invalid_existing: boolean; side: string; manual_schedule_only: boolean }
@@ -192,7 +192,7 @@ function EmployeeAbsences({ name }: { name: string }) {
     try { await run(`/absences/${id}/approve`, 'POST', { force }, 'הבקשה אושרה'); setAsk(null); reload(); }
     catch (e) { if ((e as ApiError).status === 409) setAsk({ id, question: (e as ApiError).message }); }
   };
-  const mine = (pend.data ?? []).filter((a) => a.employee.trim() === name);
+  const mine = (pend.data ?? []).filter((a) => a.employee.trim() === name && !isExpired(a));
   return (
     <>
       <h3 className="sub">ממתינות לאישור ({mine.length})</h3>
@@ -212,7 +212,7 @@ function EmployeeAbsences({ name }: { name: string }) {
         <div className="tbl-wrap"><table className="t"><thead><tr><th>תאריכים</th><th>סוג</th><th>סטטוס</th><th>אושר ע״י</th><th>הערה</th></tr></thead>
           <tbody>{[...rows].sort((a, b) => b.start_date.localeCompare(a.start_date)).map((a) => (
             <tr key={a.id}><td>{range(a.start_date, a.end_date)}</td><td>{a.type}</td>
-              <td><span className={`badge ${a.status === 'approved' ? 'b-ok' : a.status === 'pending' ? 'b-warn' : 'b-err'}`}>{a.status === 'approved' ? 'אושר' : a.status === 'pending' ? 'ממתין' : 'נדחה'}</span></td>
+              <td><span className={`badge ${a.status === 'approved' ? 'b-ok' : isExpired(a) ? 'b-mute' : a.status === 'pending' ? 'b-warn' : 'b-err'}`}>{a.status === 'approved' ? 'אושר' : isExpired(a) ? 'לא טופלה' : a.status === 'pending' ? 'ממתין' : 'נדחה'}</span></td>
               <td>{a.approved_by}</td><td className="muted">{a.notes}</td></tr>))}</tbody></table></div>
       )}</Load>
       <Modal open={!!ask} onClose={() => setAsk(null)}>

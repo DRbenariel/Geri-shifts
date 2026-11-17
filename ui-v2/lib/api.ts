@@ -25,14 +25,36 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
   return data as T;
 }
 
-/** True when a backend answers /api/health; the static demo has none, so it stays on mock data. */
-export async function detectLive(): Promise<boolean> {
+export type Backend = 'live' | 'demo' | 'down';
+
+/** One health probe. 'demo' only when no backend is configured at all (the Worker's "no backend" 404, or a
+ *  static host/dev server with no /api); every other failure (5xx, 429, timeout, network) is 'down'. */
+async function probe(): Promise<Backend> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 25000);
   try {
-    const r = await fetch('/api/health', { credentials: 'same-origin' });
-    if (!r.ok) return false;
-    const j = await r.json();
-    return j?.ok === true;
-  } catch { return false; }
+    const r = await fetch('/api/health', { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
+    const text = await r.text();
+    let j: { ok?: boolean; detail?: string } | null = null;
+    try { j = text ? JSON.parse(text) : null; } catch { /* HTML page */ }
+    if (r.ok && j?.ok === true) return 'live';
+    if (r.status === 404 && (j?.detail === 'no backend' || j === null)) return 'demo';
+    return 'down';
+  } catch { return 'down'; }
+  finally { clearTimeout(timer); }
+}
+
+/** Live, demo or down. A configured backend that fails (Cloud Run cold start, 429 at max instances, a network
+ *  blip) is retried, and never silently replaced by the demo data. */
+export async function detectBackend(): Promise<Backend> {
+  const waits = [0, 1500, 3000, 6000];
+  let last: Backend = 'down';
+  for (const w of waits) {
+    if (w) await new Promise((res) => setTimeout(res, w));
+    last = await probe();
+    if (last !== 'down') return last;
+  }
+  return last;
 }
 
 /** GET with loading/error state; `reload` refetches. path=null skips the request. */

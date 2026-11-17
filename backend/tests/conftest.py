@@ -18,6 +18,14 @@ class RecMailer:
         self.sent.append((to, subject, body))
 
 
+@pytest.fixture(autouse=True)
+def _fixed_today(monkeypatch):
+    # The fixtures' requests are dated in 2026-11; pin "today" before them so none count as expired.
+    from datetime import date
+    from geri_core import absences
+    monkeypatch.setattr(absences, '_today_il', lambda: date(2026, 11, 1))
+
+
 @pytest.fixture
 def frames():
     return build()

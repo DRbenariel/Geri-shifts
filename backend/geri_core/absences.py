@@ -4,6 +4,7 @@ from __future__ import annotations
 import calendar
 import uuid
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -13,7 +14,7 @@ from .daily import dept_grid, derive_auto_status, wsd_upsert
 from .days import to_date
 from .normalize import norm_dept, parse_manage_depts
 from .constants import DAILY_DEPTS_ALL, PNIM_DEPT
-from .people import (absence_watchers, emp_dept_for_date, employee_dept_for_month, grid_employees,
+from .people import (absence_watchers, dept_managers, emp_dept_for_date, employee_dept_for_month, grid_employees,
                      manager_email_for_dept, staff_row)
 
 ABSENCE_STATUSES_FOR_GANTT = {"חופש", "202", "אחר", "אחרי תורנות"}
@@ -314,7 +315,37 @@ def add_preapproved_absence(ctx, employee, start, end, atype, note, approver) ->
     ctx.absence_requests = df
     ctx.save("absence_requests", df)
     materialize_absence_to_wsd(ctx, employee, atype, row['start_date'], row['end_date'])
+    _notify_dept_managers_of_added(ctx, row, approver)
     return row
+
+
+def _notify_dept_managers_of_added(ctx, row, approver):
+    """Added by someone who does not manage the employee's dept (an admin, another dept's manager):
+    tell that dept's manager(s), so they learn of it. Never raises."""
+    try:
+        dept = str(row.get('dept_at_request', '')).strip()
+        mgrs = dept_managers(ctx, dept)
+        approver = str(approver).strip()
+        if not mgrs or approver in {n for n, _ in mgrs}:
+            return
+        emp = str(row.get('employee', '')).strip()
+        sd, ed = row['start_date'], row['end_date']
+        dates = sd if sd == ed else f"{sd} – {ed}"
+        r_app = staff_row(ctx, approver)
+        skip = {'' if r_app is None else str(r_app.get('email', '')).strip()}
+        note = f" · הערה: {row['notes']}" if row.get('notes') else ''
+        sent = set()
+        for _, to in mgrs:
+            if to and to not in skip and to not in sent:
+                sent.add(to)
+                ctx.send_email(
+                    to, f"נוספה היעדרות מאושרת: {emp}",
+                    f"<div dir='rtl'><p>שלום,</p>"
+                    f"<p>{approver} הוסיף/ה היעדרות מאושרת ל<b>{emp}</b> ({dept}):</p>"
+                    f"<p><b>{dates}</b> ({row.get('type', '')}){note}</p>"
+                    f"<p>ההיעדרות כבר מופיעה בסידור העבודה.</p></div>")
+    except Exception:
+        pass
 
 
 def submit_day_absences(ctx, user_name, role, year, month, vac_days, days_202, requests_open=True) -> list:
@@ -486,15 +517,26 @@ def manager_scope(ctx, user_name):
     return depts, norm, emps
 
 
-def pending_requests(ctx, dept_filter=None, manager=None) -> list:
+def _today_il() -> date:
+    return datetime.now(ZoneInfo('Asia/Jerusalem')).date()
+
+
+def pending_requests(ctx, dept_filter=None, manager=None, today=None) -> list:
     """Pending list with conflicts. Admin filters by dept_at_request; a manager sees
-    requests whose dept is theirs OR whose employee was ever rostered in their depts."""
+    requests whose dept is theirs OR whose employee was ever rostered in their depts.
+    A request whose last day has passed (end_date < today, Israel time) is left out: it can no longer matter."""
     ar = ctx.absence_requests.copy()
     if ar.empty or 'status' not in ar.columns:
         return []
     ar['status'] = ar['status'].astype(str).str.lower()
     ar['dept_at_request'] = ar['dept_at_request'].astype(str)
     pen = ar[ar['status'] == 'pending']
+    if not pen.empty:
+        today_s = (today or _today_il()).isoformat()
+        end = pen['end_date'].astype(str).str[:10] if 'end_date' in pen.columns else pd.Series('', index=pen.index)
+        start = pen['start_date'].astype(str).str[:10] if 'start_date' in pen.columns else pd.Series('', index=pen.index)
+        last = end.where(end.str.strip() != '', start)
+        pen = pen[(last.str.strip() == '') | (last >= today_s)]
     if manager is not None:
         _, norm, emps = manager_scope(ctx, manager)
         dm = pen['dept_at_request'].str.strip().apply(norm_dept).isin(norm)
