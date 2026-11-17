@@ -4,6 +4,7 @@ from __future__ import annotations
 import calendar
 import uuid
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -486,15 +487,26 @@ def manager_scope(ctx, user_name):
     return depts, norm, emps
 
 
-def pending_requests(ctx, dept_filter=None, manager=None) -> list:
+def _today_il() -> date:
+    return datetime.now(ZoneInfo('Asia/Jerusalem')).date()
+
+
+def pending_requests(ctx, dept_filter=None, manager=None, today=None) -> list:
     """Pending list with conflicts. Admin filters by dept_at_request; a manager sees
-    requests whose dept is theirs OR whose employee was ever rostered in their depts."""
+    requests whose dept is theirs OR whose employee was ever rostered in their depts.
+    A request whose last day has passed (end_date < today, Israel time) is left out: it can no longer matter."""
     ar = ctx.absence_requests.copy()
     if ar.empty or 'status' not in ar.columns:
         return []
     ar['status'] = ar['status'].astype(str).str.lower()
     ar['dept_at_request'] = ar['dept_at_request'].astype(str)
     pen = ar[ar['status'] == 'pending']
+    if not pen.empty:
+        today_s = (today or _today_il()).isoformat()
+        end = pen['end_date'].astype(str).str[:10] if 'end_date' in pen.columns else pd.Series('', index=pen.index)
+        start = pen['start_date'].astype(str).str[:10] if 'start_date' in pen.columns else pd.Series('', index=pen.index)
+        last = end.where(end.str.strip() != '', start)
+        pen = pen[(last.str.strip() == '') | (last >= today_s)]
     if manager is not None:
         _, norm, emps = manager_scope(ctx, manager)
         dm = pen['dept_at_request'].str.strip().apply(norm_dept).isin(norm)

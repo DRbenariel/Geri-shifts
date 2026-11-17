@@ -8,7 +8,7 @@ import { track } from '@/lib/analytics';
 import { monthDays, useMe, useStore, ymOf } from '@/lib/store';
 import { Bezel, Cta, Expander, Field, MarkMode, Note, PageHead, SaveBar } from '../ui';
 import { ConstraintCalendar } from '../tabs/Staff';
-import { Load, range, useAction } from './common';
+import { isExpired, Load, range, useAction } from './common';
 
 type Cons = Record<number, 'B' | 'R'>;
 const listDays = (c: Cons, v: 'B' | 'R') => Object.entries(c).filter(([, x]) => x === v).map(([d]) => +d).sort((a, b) => a - b);
@@ -121,7 +121,7 @@ function DailyLive() {
         <Load q={q}>{({ history }) => history.length === 0 ? <p className="muted small">עדיין לא הגשת בקשות.</p> : (
           <div className="tbl-wrap"><table className="t"><thead><tr><th>תאריכים</th><th>סוג</th><th>סטטוס</th><th>אושר ע״י</th><th>הערה</th></tr></thead>
             <tbody>{[...history].sort((a, b) => b.start_date.localeCompare(a.start_date)).map((a) => <tr key={a.id}><td>{range(a.start_date, a.end_date)}</td><td>{a.type}</td>
-              <td><span className={`badge ${a.status === 'approved' ? 'b-ok' : a.status === 'pending' ? 'b-warn' : 'b-err'}`}>{a.status === 'approved' ? 'אושר' : a.status === 'pending' ? 'ממתין' : 'נדחה'}</span></td>
+              <td><span className={`badge ${a.status === 'approved' ? 'b-ok' : isExpired(a) ? 'b-mute' : a.status === 'pending' ? 'b-warn' : 'b-err'}`}>{a.status === 'approved' ? 'אושר' : isExpired(a) ? 'לא טופלה' : a.status === 'pending' ? 'ממתין' : 'נדחה'}</span></td>
               <td>{a.approved_by}</td><td className="muted">{a.notes}</td></tr>)}</tbody></table></div>
         )}</Load>
       </Bezel>

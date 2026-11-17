@@ -364,6 +364,18 @@ def test_future_and_preapproved(ctx):
     assert daily.derive_auto_status(ctx, f"{YM}-23", INTERNS[1]) == 'אחר'
 
 
+def test_pending_hides_requests_whose_last_day_passed(ctx):
+    from datetime import date, timedelta
+    ids = lambda t: {p['id'] for p in absences.pending_requests(ctx, today=t)}
+    every = ids(date(2026, 11, 1))
+    later = ids(date(2026, 12, 31))
+    assert len(every) == 3 and later < every
+    for p in absences.pending_requests(ctx, today=date(2026, 11, 1)):
+        last = (p.get('end_date') or p['start_date'])[:10]
+        assert p['id'] in ids(date.fromisoformat(last))
+        assert p['id'] not in ids(date.fromisoformat(last) + timedelta(days=1))
+
+
 def test_pending_scope_for_manager_and_conflicts(ctx):
     allp = absences.pending_requests(ctx)
     assert len(allp) == 3

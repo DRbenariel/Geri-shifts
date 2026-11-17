@@ -101,6 +101,11 @@ export function useDownload() {
 
 export const enc = encodeURIComponent;
 export const dmy = (ds: string) => { const [, m, d] = ds.split('-'); return `${+d}/${+m}`; };
+/** Today as YYYY-MM-DD in local (Israel) time. */
+export const todayIso = () => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
+/** A pending request whose last day has passed: no longer shown for approval. */
+export const isExpired = (a: { status?: string; start_date: string; end_date?: string }) =>
+  (a.status ?? 'pending') === 'pending' && ((a.end_date || a.start_date) ?? '').slice(0, 10) < todayIso() && !!(a.end_date || a.start_date);
 export const range = (a: string, b: string) => (a === b ? dmy(a) : `${dmy(a)} - ${dmy(b)}`);
 // Daily statuses (Hebrew, from geri_core) → the colour classes the grid already uses.
 export const STATUS_CLASS: Record<string, string> = { 'עובד': 'W', 'חופש': 'V', '202': 'S', 'אחרי תורנות': 'A', 'אחר': 'O', 'תורנות': 'T', '': 'E' };

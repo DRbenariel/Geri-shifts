@@ -5,7 +5,7 @@ import { ApiError, useApi, type AbsGantt, type Pending } from '@/lib/api';
 import { DAILY_DEPTS, DOW_LETTER, dowOf } from '@/lib/mock';
 import { useMe, ymOf } from '@/lib/store';
 import { Bezel, Cta, Expander, Field, Modal, Note, PageHead, Person, PillSeg, useDayTip } from '../ui';
-import { Load, MonthPick, range, STATUS_CLASS, useAction } from './common';
+import { isExpired, Load, MonthPick, range, STATUS_CLASS, useAction } from './common';
 
 const TYPE_BADGE: Record<string, string> = { 'חופש': 'b-info', '202': 'b-warn', 'חופש עתידי': 'b-teal', 'היעדרות אחרת': 'b-mute' };
 
@@ -18,7 +18,7 @@ function PendingList({ filter, onChange }: { filter: string; onChange: () => voi
     catch (e) { if ((e as ApiError).status === 409) setAsk({ id, question: (e as ApiError).message }); }
   };
   return (
-    <Load q={q}>{(list) => (
+    <Load q={q}>{(all) => { const list = all.filter((a) => !isExpired(a)); return (
       <>
         {list.length === 0 ? <p className="muted">אין בקשות ממתינות.</p> : (
           <div className="cardlist">
@@ -45,7 +45,7 @@ function PendingList({ filter, onChange }: { filter: string; onChange: () => voi
           </div>
         </Modal>
       </>
-    )}</Load>
+    ); }}</Load>
   );
 }
 
