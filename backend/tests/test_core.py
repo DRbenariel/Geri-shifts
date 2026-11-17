@@ -556,3 +556,20 @@ def test_wsd_write_keeps_other_years(frames):
     legacy_like = DataContext.load(MemoryStore(frames), wsd_year_prefix='2026')
     daily.wsd_upsert(legacy_like, f"{YM}-02", INTERNS[2], 'פנימית גריאטרית', 'אחר')
     assert '2027-01-05' not in legacy_like.store.sheets['work_schedule_daily']['date'].tolist()   # the bug
+
+
+def test_preapproved_by_outsider_mails_the_dept_manager(ctx):
+    """An approved absence added by someone who does not manage the employee's dept (an admin, another
+    dept's manager) is mailed to that dept's manager(s); added by the dept's own manager, nobody is mailed."""
+    emp = INTERNS[0]
+    dept = people_mod().emp_dept_for_date(ctx, emp, f"{YM}-25")
+    mgrs = people_mod().dept_managers(ctx, dept)
+    assert mgrs
+    ctx.mailer.sent.clear()
+    absences.add_preapproved_absence(ctx, emp, f"{YM}-25", f"{YM}-25", 'חופש', 'x', 'מנהל')
+    to = [t for t, *_ in ctx.mailer.sent]
+    assert sorted(to) == sorted({e for _, e in mgrs if e})
+    assert emp in ctx.mailer.sent[0][1] and f"{YM}-25" in ctx.mailer.sent[0][2]
+    ctx.mailer.sent.clear()
+    absences.add_preapproved_absence(ctx, emp, f"{YM}-26", f"{YM}-26", 'חופש', '', mgrs[0][0])
+    assert ctx.mailer.sent == []

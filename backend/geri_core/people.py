@@ -181,6 +181,17 @@ def staff_dept_label(ctx, emp_row, year_month) -> str | None:
     return None
 
 
+def dept_managers(ctx, dept) -> list:
+    """(name, email) of every מנהל מחלקה whose manage_depts includes dept."""
+    out = []
+    if not dept:
+        return out
+    for _, sr in ctx.staff.iterrows():
+        if str(sr.get('type', '')).strip() == 'מנהל מחלקה' and dept in parse_manage_depts(sr.get('manage_depts', '')):
+            out.append((str(sr.get('name', '')).strip(), str(sr.get('email', '')).strip()))
+    return out
+
+
 def absence_watchers(ctx, dept) -> list:
     """E-mail addresses told about an absence decision: the named general managers and every manager of `dept`."""
     named = absence_notify_names(ctx)
