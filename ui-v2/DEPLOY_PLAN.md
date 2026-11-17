@@ -141,10 +141,10 @@ Decided by Ben (2026-10-26): hospital IT sign-off is not needed; "open in Sheets
 Run from the repo root in PowerShell, with `$env:CLOUDSDK_CONFIG = "D:/Projects/gcloud-config"`.
 
 1. **Close Streamlit.** In `appy.py` set `APP_MOVED = True` (top of the file). Commit on `main` and push. Streamlit Cloud redeploys and every page shows "המערכת עברה לכתובת חדשה" with the link, before login and before any Sheet access. Cherry-pick the same commit onto `ui-v2-mockup`. If the old page is still up after a few minutes, reboot the app from the Streamlit Cloud menu.
-2. **Open every write in the new API**, on one instance (two instances can still race between their fresh read and save). Passwords stay SHA-256 (`STREAMLIT_PARALLEL=1`) so a rollback still lets everyone into Streamlit:
+2. **Open every write in the new API**, on one instance (two instances can still race between their fresh read and save). On cutover day passwords stayed SHA-256 (`STREAMLIT_PARALLEL=1`) so a rollback still let everyone into Streamlit; since 2026-11-17 the command uses `STREAMLIT_PARALLEL=0` (Streamlit retired), so every redeploy keeps that:
    ```
    cp daily_report.py backend/
-   & "C:/Users/User/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin/gcloud.cmd" run deploy geri-api --source backend --region me-west1 --service-account scheduler-bot@gerishifts.iam.gserviceaccount.com --cpu 4 --memory 2Gi --min-instances 0 --timeout 300 --allow-unauthenticated --set-secrets SESSION_SECRET=SESSION_SECRET:latest,SPREADSHEET_URL=SPREADSHEET_URL:latest,GSHEETS_CREDENTIALS=GSHEETS_CREDENTIALS:latest,SMTP_USER=SMTP_USER:latest,SMTP_PASSWORD=SMTP_PASSWORD:latest --quiet --max-instances 1 --set-env-vars API_READ_ONLY=0,STREAMLIT_PARALLEL=1
+   & "C:/Users/User/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin/gcloud.cmd" run deploy geri-api --source backend --region me-west1 --service-account scheduler-bot@gerishifts.iam.gserviceaccount.com --cpu 4 --memory 2Gi --min-instances 0 --timeout 300 --allow-unauthenticated --set-secrets SESSION_SECRET=SESSION_SECRET:latest,SPREADSHEET_URL=SPREADSHEET_URL:latest,GSHEETS_CREDENTIALS=GSHEETS_CREDENTIALS:latest,SMTP_USER=SMTP_USER:latest,SMTP_PASSWORD=SMTP_PASSWORD:latest --quiet --max-instances 1 --set-env-vars API_READ_ONLY=0,STREAMLIT_PARALLEL=0
    ```
    Check: `/api/health` answers `"read_only":false`, and the site's "צפייה בלבד" banner is gone.
 3. **Smoke test on the real Sheet** (about 10 minutes, each action undone straight away):
@@ -158,7 +158,7 @@ Run from the repo root in PowerShell, with `$env:CLOUDSDK_CONFIG = "D:/Projects/
 
 E-mail (B-9, set up 2026-11-02): the API sends from Ben's Gmail (`SMTP_USER` / `SMTP_PASSWORD` in Secret Manager, an App Password; revoking it at myaccount.google.com/apppasswords stops sending). Only staff with an address in the staff sheet get mail.
 
-**Rollback** (minutes, no data lost: both apps use the same Sheet):
+**Rollback** (minutes, no data lost: both apps use the same Sheet). Since 2026-11-17 (`STREAMLIT_PARALLEL=0`) every login upgrades that user's password to bcrypt, which Streamlit cannot read, so a rollback to Streamlit now also needs a password reset (`reset_passwords.py`) for everyone who has logged in since:
 ```
 & "C:/Users/User/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin/gcloud.cmd" run deploy geri-api --source backend --region me-west1 --service-account scheduler-bot@gerishifts.iam.gserviceaccount.com --cpu 4 --memory 2Gi --min-instances 0 --timeout 300 --allow-unauthenticated --set-secrets SESSION_SECRET=SESSION_SECRET:latest,SPREADSHEET_URL=SPREADSHEET_URL:latest,GSHEETS_CREDENTIALS=GSHEETS_CREDENTIALS:latest,SMTP_USER=SMTP_USER:latest,SMTP_PASSWORD=SMTP_PASSWORD:latest --quiet --max-instances 2 --set-env-vars API_READ_ONLY=1,STREAMLIT_PARALLEL=1,API_WRITE_SHEETS=requests
 ```
@@ -167,8 +167,9 @@ then `APP_MOVED = False` in `appy.py`, push `main`. This returns to today's stat
 Redeploys with step 2's command:
 - 2026-11-10: `geri-api-00018-nfc`, manager statuses חופש/202/אחר, PR #5.
 - 2026-11-10: `geri-api-00019-9w6`, auto schedule keeps or recomputes existing automatic assignments; neutral future-leave email.
+- 2026-11-17: `geri-api-00020-fss`, STREAMLIT_PARALLEL=0 (Streamlit retired: passwords upgrade to bcrypt on login); expired pending absences hidden; dept manager mailed when someone else adds an approved absence (PR #7).
 
-**After a stable week (no rollback any more):** redeploy step 2 with `STREAMLIT_PARALLEL=0`. Each login then upgrades that user's password to bcrypt, which Streamlit cannot read, so from here a rollback needs a password reset (`reset_passwords.py`) for everyone who has logged in since.
+**After a stable week (no rollback any more):** **Done 2026-11-17** (`geri-api-00020-fss`): step 2 redeployed with `STREAMLIT_PARALLEL=0`. Each login now upgrades that user's password to bcrypt, which Streamlit cannot read, so from here a rollback needs a password reset (`reset_passwords.py`) for everyone who has logged in since.
 
 ## What Ben needs to do
 

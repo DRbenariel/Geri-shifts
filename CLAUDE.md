@@ -246,6 +246,7 @@ if st.session_state.pop('show_xyz_success', False):
 ## Git / GitHub
 - Remote: `https://github.com/DRbenariel/Geri-shifts.git` (branch: `main`)
 - Since 2026-11-10 everything lives on `main`: `appy.py` (Streamlit, closed), `ui-v2/` and `backend/`. Pushing `main` deploys `ui-v2/` through Cloudflare Workers Builds; the API on Cloud Run is deployed by hand (`ui-v2/DEPLOY_PLAN.md`, "Cutover day", step 2). The old `ui-v2-mockup` branch is retired.
+- Streamlit was retired for good on 2026-11-17 (API redeployed with `STREAMLIT_PARALLEL=0`: logins upgrade passwords to bcrypt, which Streamlit cannot read). `appy.py` stays in the repo because the comparison tests in `backend/tests` run it: do not delete it.
 - GitHub Actions: `.github/workflows/daily_report.yml` — runs `daily_report.py` daily at 10:00 IL via `GSHEETS_CREDENTIALS` secret (service account JSON stored as repo secret).
 
 ## Do not touch
