@@ -28,7 +28,7 @@ from geri_core.store import to_sheet_values
 from geri_core import absences, admin, daily, exports, night, people, reports, scheduling, staff
 from geri_core.constants import DAILY_DEPTS_ALL, default_tab_for_role, tabs_for_role
 
-from . import session
+from . import audit, session
 from .config import Settings
 from .mailer import SmtpMailer
 from .store import READ_ONLY_MSG, CacheClearingStore, ReadOnlyError, ReadOnlyStore
@@ -229,7 +229,15 @@ def create_app(settings: Settings | None = None, store_factory=None) -> FastAPI:
         try:
             with cache_lock:
                 frames = {n: df.copy() for n, df in load_frames(store, fresh=writing).items()}
-            yield DataContext.from_frames(frames, store=store, mailer=mailer)
+            wsd = frames.get("work_schedule_daily")
+            wsd_before = wsd.copy() if writing and wsd is not None else None
+            ctx = DataContext.from_frames(frames, store=store, mailer=mailer)
+            yield ctx
+            # Reached only when the endpoint succeeded (an exception is raised at the yield instead).
+            if writing:
+                who = session.verify(settings.session_secret, request.cookies.get(session.COOKIE)) or ''
+                audit.record(store, who, wsd_before, ctx, request.method, request.url.path,
+                             getattr(request, '_body', b''))
         finally:
             if writing:
                 write_lock.release()
