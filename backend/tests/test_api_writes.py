@@ -520,3 +520,28 @@ def test_two_instances_do_not_drop_each_others_saves(store):
         assert r.status_code == 200, r.text
     assert {"from-a", "from-b"} <= set(store.read('absence_requests')['notes'])
     core_staff.use_legacy_hashes(False)
+
+
+def test_every_write_is_logged_with_the_editor(rw, store):
+    """edit_log names who made each change; cell edits record the status before and after."""
+    as_(rw, MGR_A)
+    grid = rw.get("/api/work/שיקום גריאטרי א'/2026-11").json()
+    emp = next(r['employee'] for r in grid['rows'] if r['employee'] != MGR_A)
+    body = {"dept": "שיקום גריאטרי א'", "date": "2026-11-03", "employee": emp}
+    assert rw.post("/api/work/cell/cycle", json=body).status_code == 200
+    row = store.read('edit_log').iloc[-1]
+    assert row['user_name'] == MGR_A and row['user_role'] == 'מנהל מחלקה'
+    assert row['path'] == "/api/work/cell/cycle"
+    assert row['employee'] == emp.strip() and row['date'] == "2026-11-03"
+    assert row['after'] and row['after'] != row['before']
+    n = len(store.read('edit_log'))
+    assert rw.post("/api/work/cell/cycle", json={**body, "dept": "פנימית גריאטרית"}).status_code == 403
+    assert len(store.read('edit_log')) == n                      # a refused write is not logged
+
+
+def test_password_is_never_logged(rw, store):
+    as_(rw, INTERNS[0])
+    assert rw.post("/api/me/password", json={"current": PW, "new": "zz-9", "confirm": "zz-9"}).status_code == 200
+    log = store.read('edit_log')
+    assert not log.empty and log.iloc[-1]['user_name'] == INTERNS[0]
+    assert "zz-9" not in log.to_string() and PW not in log.to_string()

@@ -77,4 +77,7 @@ def check_write_sheets(allowed) -> None:
 
 
 def sheet_allowed(sheet: str, allowed) -> bool:
+    # Whatever sheets are open for writing, the record of who wrote them is open too.
+    if sheet == "edit_log" and allowed:
+        return True
     return sheet in allowed or any(a.endswith("*") and sheet.startswith(a[:-1]) for a in allowed)
