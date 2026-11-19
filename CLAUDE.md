@@ -45,6 +45,7 @@ All reads/writes go through `get_db_data()` / `save_to_db()` — never access Sh
 | `daily_report` | generated_at, month, severity, problem_type, description |
 | `swap_requests` | requester, requester_date, requester_dept, candidate, candidate_date, candidate_dept, swap_type, chain_ext, chain_ext_dept, created_at, status |
 | `analytics_log` | event_id, session_id, timestamp, user_name, user_role, event_type, detail_1, detail_2, device_type, ua_string, viewport_width, active_month, day_of_month |
+| **`edit_log`** | timestamp (IL), user_name, user_role, method, path, employee, date, before, after, details — append-only, one row per successful API write (`backend/api/audit.py`, hooked in `get_ctx`). Passwords redacted. |
 | **`dept_rotation`** | employee, year_month (YYYY-MM), daily_dept, **side** (ורוד/כחול — פנימית only) |
 | **`absence_requests`** | id (uuid), employee, start_date, end_date, type (חופש/202/חופש עתידי/היעדרות אחרת), status (pending/approved/rejected), dept_at_request, manager_email, approved_by, notes, created_at, responded_at |
 | **`work_schedule_daily`** | date, employee, daily_dept, status, note, is_manual, **side** (ורוד/כחול — set only for פנימית day-specific transfers; sticky on routine edits) |
